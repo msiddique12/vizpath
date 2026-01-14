@@ -1,3 +1,5 @@
 """Framework adapters for automatic tracing."""
 
-__all__: list[str] = []
+from vizpath.adapters.langgraph import LangGraphAdapter
+
+__all__ = ["LangGraphAdapter"]
