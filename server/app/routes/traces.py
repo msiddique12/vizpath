@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Project, Span, Trace
+from app.routes.ws import notify_span_ingested
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +171,9 @@ async def ingest_spans(
             trace.total_cost = stats.cost
 
     db.commit()
+
+    for trace_id in traces_updated:
+        notify_span_ingested(str(trace_id), len(payload))
 
     return {"ingested": len(payload), "traces": len(traces_updated)}
 

@@ -1,10 +1,11 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { formatDistanceToNow } from 'date-fns'
-import { AlertCircle, CheckCircle, Clock, Loader2 } from 'lucide-react'
+import { AlertCircle, CheckCircle, Clock, Loader2, Wifi, WifiOff } from 'lucide-react'
 import clsx from 'clsx'
 import { getTraces } from '@/lib/api'
 import { Trace, SpanStatus } from '@/lib/types'
+import { useWebSocket } from '@/hooks/useWebSocket'
 
 function StatusBadge({ status }: { status: SpanStatus }) {
   const config = {
@@ -62,10 +63,20 @@ function TraceRow({ trace }: { trace: Trace }) {
 }
 
 export default function TracesPage() {
+  const queryClient = useQueryClient()
+
+  const { connected } = useWebSocket({
+    onMessage: (msg) => {
+      if (msg.type === 'span_ingested') {
+        queryClient.invalidateQueries({ queryKey: ['traces'] })
+      }
+    },
+  })
+
   const { data, isLoading, error } = useQuery({
     queryKey: ['traces'],
     queryFn: () => getTraces(50),
-    refetchInterval: 5000,
+    refetchInterval: connected ? false : 5000,
   })
 
   if (isLoading) {
@@ -86,11 +97,20 @@ export default function TracesPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-slate-900">Traces</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          {data?.total ?? 0} traces recorded
-        </p>
+      <div className="mb-6 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-slate-900">Traces</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            {data?.total ?? 0} traces recorded
+          </p>
+        </div>
+        <div className={clsx(
+          'flex items-center gap-1.5 px-2 py-1 rounded-full text-xs',
+          connected ? 'bg-green-50 text-green-700' : 'bg-slate-100 text-slate-500'
+        )}>
+          {connected ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
+          {connected ? 'Live' : 'Polling'}
+        </div>
       </div>
 
       <div className="bg-white rounded-lg border border-slate-200 divide-y divide-slate-200">
