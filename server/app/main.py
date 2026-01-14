@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from app import __version__
 from app.config import settings
 from app.database import check_db_connection, engine, init_db
-from app.routes import traces, ws
+from app.routes import projects, traces, ws
 
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
@@ -58,6 +58,7 @@ app.add_middleware(
 )
 
 app.include_router(traces.router, prefix="/api/v1")
+app.include_router(projects.router, prefix="/api/v1")
 app.include_router(ws.router)
 
 
