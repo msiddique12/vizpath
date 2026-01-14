@@ -1,11 +1,17 @@
+import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowLeft, Loader2 } from 'lucide-react'
+import { ArrowLeft, Loader2, GitBranch, List } from 'lucide-react'
+import clsx from 'clsx'
 import { getTrace } from '@/lib/api'
 import SpanTimeline from '@/components/SpanTimeline'
+import DAGView from '@/components/DAGView'
+
+type ViewMode = 'timeline' | 'dag'
 
 export default function TraceDetailPage() {
   const { traceId } = useParams<{ traceId: string }>()
+  const [viewMode, setViewMode] = useState<ViewMode>('timeline')
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['trace', traceId],
@@ -58,8 +64,41 @@ export default function TraceDetailPage() {
       </div>
 
       <div className="bg-white rounded-lg border border-slate-200 p-6">
-        <h2 className="text-lg font-medium text-slate-900 mb-4">Execution Timeline</h2>
-        <SpanTimeline spans={spans} />
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-medium text-slate-900">Execution View</h2>
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg">
+            <button
+              onClick={() => setViewMode('timeline')}
+              className={clsx(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
+                viewMode === 'timeline'
+                  ? 'bg-white text-slate-900 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              )}
+            >
+              <List className="h-4 w-4" />
+              Timeline
+            </button>
+            <button
+              onClick={() => setViewMode('dag')}
+              className={clsx(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
+                viewMode === 'dag'
+                  ? 'bg-white text-slate-900 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              )}
+            >
+              <GitBranch className="h-4 w-4" />
+              DAG
+            </button>
+          </div>
+        </div>
+
+        {viewMode === 'timeline' ? (
+          <SpanTimeline spans={spans} />
+        ) : (
+          <DAGView spans={spans} width={800} height={500} />
+        )}
       </div>
     </div>
   )
