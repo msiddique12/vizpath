@@ -4,6 +4,7 @@ import TracesPage from './pages/TracesPage'
 import TraceDetailPage from './pages/TraceDetailPage'
 import ComparisonPage from './pages/ComparisonPage'
 import CostPage from './pages/CostPage'
+import CurationPage from './pages/CurationPage'
 
 function App() {
   return (
@@ -15,6 +16,7 @@ function App() {
           <Route path="traces/:traceId" element={<TraceDetailPage />} />
           <Route path="compare" element={<ComparisonPage />} />
           <Route path="costs" element={<CostPage />} />
+          <Route path="curation" element={<CurationPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

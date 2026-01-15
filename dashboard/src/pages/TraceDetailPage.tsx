@@ -9,6 +9,7 @@ import SpanTimeline from '@/components/SpanTimeline'
 import DAGView from '@/components/DAGView'
 import HeatmapView from '@/components/HeatmapView'
 import ExportMenu from '@/components/ExportMenu'
+import CurationPanel from '@/components/CurationPanel'
 
 type ViewMode = 'timeline' | 'dag' | 'heatmap'
 
@@ -117,6 +118,10 @@ export default function TraceDetailPage() {
         {viewMode === 'timeline' && <SpanTimeline spans={spans} />}
         {viewMode === 'dag' && <DAGView spans={spans} width={800} height={500} />}
         {viewMode === 'heatmap' && <HeatmapView spans={spans} />}
+      </div>
+
+      <div className="mt-6">
+        <CurationPanel traceId={trace.id} traceName={trace.name} />
       </div>
     </div>
   )
