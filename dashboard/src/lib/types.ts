@@ -13,12 +13,14 @@ export interface Trace {
   total_cost: number | null
   span_count: number
   error_count: number
+  created_at: string
 }
 
 export interface Span {
   id: string
   trace_id: string
   parent_id: string | null
+  parent_span_id?: string | null
   name: string
   span_type: SpanType
   status: SpanStatus
@@ -30,6 +32,7 @@ export interface Span {
   output: unknown
   error: string | null
   tokens: number | null
+  token_count?: number | null
   cost: number | null
 }
 

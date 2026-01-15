@@ -1,4 +1,4 @@
-import { Trace, TraceListResponse, TraceDetailResponse, Span } from './types'
+import { TraceListResponse, TraceDetailResponse, Span } from './types'
 
 const API_BASE = '/api/v1'
 
