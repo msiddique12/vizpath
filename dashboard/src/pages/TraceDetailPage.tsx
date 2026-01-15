@@ -4,9 +4,11 @@ import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft, Loader2, GitBranch, List, Grid2x2 } from 'lucide-react'
 import clsx from 'clsx'
 import { getTrace } from '@/lib/api'
+import { exportTrace, ExportFormat } from '@/lib/export'
 import SpanTimeline from '@/components/SpanTimeline'
 import DAGView from '@/components/DAGView'
 import HeatmapView from '@/components/HeatmapView'
+import ExportMenu from '@/components/ExportMenu'
 
 type ViewMode = 'timeline' | 'dag' | 'heatmap'
 
@@ -42,6 +44,10 @@ export default function TraceDetailPage() {
 
   const { trace, spans } = data
 
+  const handleExport = (format: ExportFormat) => {
+    exportTrace({ trace, spans }, format)
+  }
+
   return (
     <div>
       <div className="mb-6">
@@ -61,6 +67,7 @@ export default function TraceDetailPage() {
               {trace.total_tokens && ` · ${trace.total_tokens.toLocaleString()} tokens`}
             </p>
           </div>
+          <ExportMenu onExport={handleExport} />
         </div>
       </div>
 
