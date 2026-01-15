@@ -83,21 +83,51 @@ vizpath/
 
 ### Prerequisites
 
-- Python 3.9+
-- Node.js 18+
+- Python 3.10+
+- Node.js 20+
+- [uv](https://docs.astral.sh/uv/) (Python package manager)
 - Docker (for local services)
 
-### Local Setup
+### Quick Setup
 
 ```bash
+# Clone repository
 git clone https://github.com/yourusername/vizpath.git
 cd vizpath
 
+# Install all dependencies
+make install-dev
+
+# Start services
 docker-compose up -d
 
-cd sdk && pip install -e ".[dev]"
+# Run development servers
+make dev-server    # API at http://localhost:8000
+make dev-dashboard # UI at http://localhost:5173
+```
 
-cd ../dashboard && npm install
+### Available Commands
+
+```bash
+make help          # Show all commands
+make lint          # Run linters
+make typecheck     # Run type checkers
+make test          # Run all tests
+make format        # Format code
+make build         # Build packages
+```
+
+### Manual Setup (without Make)
+
+```bash
+# SDK
+cd sdk && uv sync --all-extras
+
+# Server
+cd server && uv sync --all-extras
+
+# Dashboard
+cd dashboard && npm install
 ```
 
 ## Contributing
