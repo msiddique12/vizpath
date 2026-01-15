@@ -1,13 +1,14 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowLeft, Loader2, GitBranch, List } from 'lucide-react'
+import { ArrowLeft, Loader2, GitBranch, List, Grid2x2 } from 'lucide-react'
 import clsx from 'clsx'
 import { getTrace } from '@/lib/api'
 import SpanTimeline from '@/components/SpanTimeline'
 import DAGView from '@/components/DAGView'
+import HeatmapView from '@/components/HeatmapView'
 
-type ViewMode = 'timeline' | 'dag'
+type ViewMode = 'timeline' | 'dag' | 'heatmap'
 
 export default function TraceDetailPage() {
   const { traceId } = useParams<{ traceId: string }>()
@@ -91,14 +92,24 @@ export default function TraceDetailPage() {
               <GitBranch className="h-4 w-4" />
               DAG
             </button>
+            <button
+              onClick={() => setViewMode('heatmap')}
+              className={clsx(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
+                viewMode === 'heatmap'
+                  ? 'bg-white text-slate-900 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              )}
+            >
+              <Grid2x2 className="h-4 w-4" />
+              Heatmap
+            </button>
           </div>
         </div>
 
-        {viewMode === 'timeline' ? (
-          <SpanTimeline spans={spans} />
-        ) : (
-          <DAGView spans={spans} width={800} height={500} />
-        )}
+        {viewMode === 'timeline' && <SpanTimeline spans={spans} />}
+        {viewMode === 'dag' && <DAGView spans={spans} width={800} height={500} />}
+        {viewMode === 'heatmap' && <HeatmapView spans={spans} />}
       </div>
     </div>
   )
