@@ -1,9 +1,10 @@
 import { Outlet, Link, useLocation } from 'react-router-dom'
-import { Activity, LayoutGrid } from 'lucide-react'
+import { Activity, LayoutGrid, GitCompare } from 'lucide-react'
 import clsx from 'clsx'
 
 const navigation = [
   { name: 'Traces', href: '/traces', icon: Activity },
+  { name: 'Compare', href: '/compare', icon: GitCompare },
 ]
 
 export default function Layout() {

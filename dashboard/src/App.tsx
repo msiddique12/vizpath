@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import Layout from './components/Layout'
 import TracesPage from './pages/TracesPage'
 import TraceDetailPage from './pages/TraceDetailPage'
+import ComparisonPage from './pages/ComparisonPage'
 
 function App() {
   return (
@@ -11,6 +12,7 @@ function App() {
           <Route index element={<TracesPage />} />
           <Route path="traces" element={<TracesPage />} />
           <Route path="traces/:traceId" element={<TraceDetailPage />} />
+          <Route path="compare" element={<ComparisonPage />} />
         </Route>
       </Routes>
     </BrowserRouter>
