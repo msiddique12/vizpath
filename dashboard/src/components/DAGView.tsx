@@ -108,27 +108,29 @@ export default function DAGView({ spans, width = 800, height = 500 }: DAGViewPro
       .attr('stroke-width', 2)
       .attr('marker-end', 'url(#arrowhead)')
 
+    const drag = d3.drag<SVGGElement, DAGNode>()
+      .on('start', (event, d) => {
+        if (!event.active) simulation.alphaTarget(0.3).restart()
+        d.fx = d.x
+        d.fy = d.y
+      })
+      .on('drag', (event, d) => {
+        d.fx = event.x
+        d.fy = event.y
+      })
+      .on('end', (event, d) => {
+        if (!event.active) simulation.alphaTarget(0)
+        d.fx = null
+        d.fy = null
+      })
+
     const node = g.append('g')
       .attr('class', 'nodes')
       .selectAll('g')
       .data(nodes)
       .join('g')
-      .call(d3.drag<SVGGElement, DAGNode>()
-        .on('start', (event, d) => {
-          if (!event.active) simulation.alphaTarget(0.3).restart()
-          d.fx = d.x
-          d.fy = d.y
-        })
-        .on('drag', (event, d) => {
-          d.fx = event.x
-          d.fy = event.y
-        })
-        .on('end', (event, d) => {
-          if (!event.active) simulation.alphaTarget(0)
-          d.fx = null
-          d.fy = null
-        })
-      )
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .call(drag as any)
 
     node.append('circle')
       .attr('r', (d) => {
@@ -162,7 +164,7 @@ export default function DAGView({ spans, width = 800, height = 500 }: DAGViewPro
       .style('box-shadow', '0 4px 6px -1px rgb(0 0 0 / 0.1)')
       .style('z-index', '1000')
 
-    node.on('mouseover', (event, d) => {
+    node.on('mouseover', (_event, d) => {
       const duration = d.span.duration_ms
       const durationStr = duration
         ? duration < 1000 ? `${duration.toFixed(0)}ms` : `${(duration / 1000).toFixed(2)}s`

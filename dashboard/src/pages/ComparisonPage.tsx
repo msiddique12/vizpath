@@ -11,8 +11,8 @@ export default function ComparisonPage() {
   const [selectedTraceB, setSelectedTraceB] = useState<string | null>(null)
 
   const { data: tracesData, isLoading: tracesLoading } = useQuery({
-    queryKey: ['traces', { limit: 50 }],
-    queryFn: () => getTraces({ limit: 50 }),
+    queryKey: ['traces', 50],
+    queryFn: () => getTraces(50),
   })
 
   const { data: traceAData, isLoading: loadingA } = useQuery({

@@ -67,14 +67,14 @@ export function exportToCSV(spans: Span[], filename?: string) {
     [
       span.id,
       span.trace_id,
-      span.parent_span_id || '',
+      span.parent_id || span.parent_span_id || '',
       span.name,
       span.span_type,
       span.status,
       span.start_time,
       span.end_time || '',
       span.duration_ms || '',
-      span.token_count || '',
+      span.tokens || span.token_count || '',
       escapeCSV(span.input),
       escapeCSV(span.output),
       span.error || '',
@@ -88,7 +88,7 @@ export function exportToCSV(spans: Span[], filename?: string) {
 }
 
 export function exportTrace(data: TraceExport, format: ExportFormat) {
-  const timestamp = formatTimestamp(data.trace.created_at)
+  const timestamp = formatTimestamp(data.trace.created_at || data.trace.start_time)
   const baseName = `${data.trace.name.replace(/[^a-zA-Z0-9-_]/g, '_')}-${timestamp}`
 
   switch (format) {
@@ -115,9 +115,10 @@ export function exportTraces(data: TraceExport[], format: ExportFormat) {
     case 'jsonl':
       exportToJSONL(data, `${baseName}.jsonl`)
       break
-    case 'csv':
+    case 'csv': {
       const allSpans = data.flatMap((d) => d.spans)
       exportToCSV(allSpans, `${baseName}-spans.csv`)
       break
+    }
   }
 }

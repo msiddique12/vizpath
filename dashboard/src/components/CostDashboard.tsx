@@ -39,7 +39,7 @@ export default function CostDashboard({ spans, totalCost }: CostDashboardProps) 
     const topCostlySpans: Array<{ span: Span; cost: number }> = []
 
     spans.forEach((span) => {
-      const tokens = span.token_count || 0
+      const tokens = span.tokens || span.token_count || 0
       const model = span.attributes?.model as string | undefined
       const cost = estimateCost(tokens, model)
       const duration = span.duration_ms || 0
@@ -115,7 +115,7 @@ export default function CostDashboard({ spans, totalCost }: CostDashboardProps) 
       <div>
         <h4 className="text-sm font-medium text-slate-700 mb-3">Cost by Span Type</h4>
         <div className="space-y-3">
-          {costAnalysis.byType.map(({ type, count, tokens, cost, duration }) => (
+          {costAnalysis.byType.map(({ type, tokens, cost }) => (
             <div key={type} className="flex items-center gap-4">
               <span className="w-24 text-sm text-slate-700 capitalize">{type}</span>
               <div className="flex-1">
@@ -167,7 +167,7 @@ export default function CostDashboard({ spans, totalCost }: CostDashboardProps) 
                       </span>
                     </td>
                     <td className="px-4 py-2 text-sm text-slate-600 text-right">
-                      {(span.token_count || 0).toLocaleString()}
+                      {(span.tokens || span.token_count || 0).toLocaleString()}
                     </td>
                     <td className="px-4 py-2 text-sm font-medium text-slate-900 text-right">
                       {formatCost(cost)}
