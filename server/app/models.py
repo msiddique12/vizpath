@@ -65,7 +65,7 @@ class Trace(Base):
     start_time = Column(DateTime(timezone=True), nullable=False)
     end_time = Column(DateTime(timezone=True), nullable=True)
     duration_ms = Column(Float, nullable=True)
-    metadata = Column(JSON, default=dict)
+    trace_metadata = Column(JSON, default=dict)
     total_tokens = Column(Integer, nullable=True)
     total_cost = Column(Float, nullable=True)
     error_count = Column(Integer, default=0)
@@ -89,7 +89,7 @@ class Trace(Base):
             "start_time": self.start_time.isoformat() if self.start_time else None,
             "end_time": self.end_time.isoformat() if self.end_time else None,
             "duration_ms": self.duration_ms,
-            "metadata": self.metadata,
+            "metadata": self.trace_metadata,
             "total_tokens": self.total_tokens,
             "total_cost": self.total_cost,
             "error_count": self.error_count,

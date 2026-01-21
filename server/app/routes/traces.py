@@ -203,7 +203,7 @@ async def list_traces(
                 start_time=t.start_time,
                 end_time=t.end_time,
                 duration_ms=t.duration_ms,
-                metadata=t.metadata or {},
+                metadata=t.trace_metadata or {},
                 total_tokens=t.total_tokens,
                 total_cost=t.total_cost,
                 span_count=t.span_count,
