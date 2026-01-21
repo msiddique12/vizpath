@@ -1,8 +1,7 @@
 """Application configuration loaded from environment variables."""
 
-from typing import Optional
 
-from pydantic import Field, field_validator, ValidationInfo
+from pydantic import Field, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,7 +15,7 @@ class Settings(BaseSettings):
 
     redis_url: str = Field(default="redis://localhost:6379", alias="REDIS_URL")
 
-    openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
+    openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
 
     debug: bool = Field(default=False, alias="DEBUG")
     host: str = Field(default="0.0.0.0", alias="HOST")

@@ -1,9 +1,8 @@
 """Project management endpoints."""
 
 import logging
-from typing import Any, Dict, List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -67,10 +66,10 @@ async def create_project(
     )
 
 
-@router.get("/", response_model=List[ProjectResponse])
+@router.get("/", response_model=list[ProjectResponse])
 async def list_projects(
     db: Session = Depends(get_db),
-) -> List[ProjectResponse]:
+) -> list[ProjectResponse]:
     """List all projects."""
     projects = db.query(Project).order_by(Project.created_at.desc()).all()
 

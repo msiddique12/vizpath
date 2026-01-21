@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -24,26 +24,26 @@ class SpanCreate(BaseModel):
 
     span_id: str
     trace_id: str
-    parent_id: Optional[str] = None
+    parent_id: str | None = None
     name: str
     span_type: str = "custom"
     status: str = "success"
     start_time: datetime
-    end_time: Optional[datetime] = None
-    duration_ms: Optional[float] = None
-    attributes: Dict[str, Any] = Field(default_factory=dict)
-    events: List[Dict[str, Any]] = Field(default_factory=list)
-    input: Optional[Any] = None
-    output: Optional[Any] = None
-    error: Optional[str] = None
-    tokens: Optional[int] = None
-    cost: Optional[float] = None
+    end_time: datetime | None = None
+    duration_ms: float | None = None
+    attributes: dict[str, Any] = Field(default_factory=dict)
+    events: list[dict[str, Any]] = Field(default_factory=list)
+    input: Any | None = None
+    output: Any | None = None
+    error: str | None = None
+    tokens: int | None = None
+    cost: float | None = None
 
 
 class SpanBatchCreate(BaseModel):
     """Schema for batch span creation."""
 
-    spans: List[SpanCreate]
+    spans: list[SpanCreate]
 
 
 class TraceResponse(BaseModel):
@@ -53,11 +53,11 @@ class TraceResponse(BaseModel):
     name: str
     status: str
     start_time: datetime
-    end_time: Optional[datetime]
-    duration_ms: Optional[float]
-    metadata: Dict[str, Any]
-    total_tokens: Optional[int]
-    total_cost: Optional[float]
+    end_time: datetime | None
+    duration_ms: float | None
+    metadata: dict[str, Any]
+    total_tokens: int | None
+    total_cost: float | None
     span_count: int
     error_count: int
 
@@ -65,7 +65,7 @@ class TraceResponse(BaseModel):
 class TraceListResponse(BaseModel):
     """Response schema for trace list."""
 
-    traces: List[TraceResponse]
+    traces: list[TraceResponse]
     total: int
     limit: int
     offset: int
@@ -76,19 +76,19 @@ class SpanResponse(BaseModel):
 
     id: str
     trace_id: str
-    parent_id: Optional[str]
+    parent_id: str | None
     name: str
     span_type: str
     status: str
     start_time: datetime
-    end_time: Optional[datetime]
-    duration_ms: Optional[float]
-    attributes: Dict[str, Any]
-    input: Optional[Any]
-    output: Optional[Any]
-    error: Optional[str]
-    tokens: Optional[int]
-    cost: Optional[float]
+    end_time: datetime | None
+    duration_ms: float | None
+    attributes: dict[str, Any]
+    input: Any | None
+    output: Any | None
+    error: str | None
+    tokens: int | None
+    cost: float | None
 
 
 def get_or_create_trace(db: Session, trace_id: str, project_id: UUID, span: SpanCreate) -> Trace:
@@ -110,9 +110,9 @@ def get_or_create_trace(db: Session, trace_id: str, project_id: UUID, span: Span
 
 @router.post("/spans/batch", status_code=201)
 async def ingest_spans(
-    payload: List[SpanCreate],
+    payload: list[SpanCreate],
     db: Session = Depends(get_db),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Ingest a batch of spans.
 
@@ -183,7 +183,7 @@ async def list_traces(
     db: Session = Depends(get_db),
     limit: int = Query(default=20, le=100),
     offset: int = Query(default=0, ge=0),
-    status: Optional[str] = None,
+    status: str | None = None,
 ) -> TraceListResponse:
     """List traces with pagination."""
     query = db.query(Trace)
@@ -221,7 +221,7 @@ async def list_traces(
 async def get_trace(
     trace_id: UUID,
     db: Session = Depends(get_db),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Get trace details with all spans."""
     trace = db.query(Trace).filter(Trace.id == trace_id).first()
 
@@ -240,7 +240,7 @@ async def get_trace(
 async def get_trace_spans(
     trace_id: UUID,
     db: Session = Depends(get_db),
-) -> List[SpanResponse]:
+) -> list[SpanResponse]:
     """Get all spans for a trace."""
     spans = db.query(Span).filter(Span.trace_id == trace_id).all()
 

@@ -3,7 +3,7 @@
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -76,19 +76,19 @@ async def runtime_error_handler(request: Request, exc: RuntimeError) -> JSONResp
 
 
 @app.get("/", tags=["Health"])
-async def root() -> Dict[str, str]:
+async def root() -> dict[str, str]:
     """Root endpoint with API info."""
     return {"name": "vizpath", "version": __version__, "status": "ok"}
 
 
 @app.get("/health", tags=["Health"])
-async def health() -> Dict[str, Any]:
+async def health() -> dict[str, Any]:
     """Basic health check."""
     return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
 @app.get("/health/detailed", tags=["Health"])
-async def health_detailed() -> Dict[str, Any]:
+async def health_detailed() -> dict[str, Any]:
     """Detailed health check including dependencies."""
     db_healthy = check_db_connection()
 

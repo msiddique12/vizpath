@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, TypeVar
+from typing import Any, Callable, TypeVar
 
 from pydantic import BaseModel, Field
 
 from vizpath.client import Client
 from vizpath.config import Config
-from vizpath.span import Span, SpanData, SpanStatus, SpanType
+from vizpath.span import Span, SpanStatus, SpanType
 
 T = TypeVar("T")
 
@@ -22,14 +22,14 @@ class TraceData(BaseModel):
     name: str
     status: SpanStatus = SpanStatus.RUNNING
     start_time: datetime
-    end_time: Optional[datetime] = None
-    duration_ms: Optional[float] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    root_span_id: Optional[str] = None
+    end_time: datetime | None = None
+    duration_ms: float | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    root_span_id: str | None = None
     span_count: int = 0
     error_count: int = 0
-    total_tokens: Optional[int] = None
-    total_cost: Optional[float] = None
+    total_tokens: int | None = None
+    total_cost: float | None = None
 
 
 class TraceContext:
@@ -44,11 +44,11 @@ class TraceContext:
         self._trace_id = trace_id
         self._name = name
         self._client = client
-        self._spans: List[Span] = []
-        self._root_span: Optional[Span] = None
+        self._spans: list[Span] = []
+        self._root_span: Span | None = None
         self._start_time = datetime.now(timezone.utc)
-        self._end_time: Optional[datetime] = None
-        self._metadata: Dict[str, Any] = {}
+        self._end_time: datetime | None = None
+        self._metadata: dict[str, Any] = {}
         self._status = SpanStatus.RUNNING
 
     @property
@@ -104,7 +104,7 @@ class Trace:
         self._context._metadata.update(kwargs)
         return self
 
-    def end(self, status: Optional[SpanStatus] = None) -> None:
+    def end(self, status: SpanStatus | None = None) -> None:
         """End this trace."""
         self._context._end_time = datetime.now(timezone.utc)
         if status:
@@ -138,9 +138,9 @@ class Tracer:
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
-        config: Optional[Config] = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        config: Config | None = None,
     ) -> None:
         if config:
             self._config = config

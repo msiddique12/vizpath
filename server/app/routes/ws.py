@@ -3,7 +3,6 @@
 import asyncio
 import json
 import logging
-from typing import Set
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -11,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["WebSocket"])
 
-active_connections: Set[WebSocket] = set()
+active_connections: set[WebSocket] = set()
 
 
 async def broadcast_message(message: dict) -> None:

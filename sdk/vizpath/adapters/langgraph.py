@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
+from typing import TYPE_CHECKING, Any
 
-from vizpath.span import SpanType
 from vizpath.tracer import Tracer
 
 if TYPE_CHECKING:
@@ -28,9 +27,9 @@ class LangGraphAdapter:
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
-        tracer: Optional[Tracer] = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        tracer: Tracer | None = None,
     ) -> None:
         self._tracer = tracer or Tracer(api_key=api_key, base_url=base_url)
 
@@ -48,10 +47,10 @@ class TracedGraph:
 
     def invoke(
         self,
-        input: Dict[str, Any],
-        config: Optional[Dict[str, Any]] = None,
+        input: dict[str, Any],
+        config: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Invoke the graph with tracing.
 
@@ -64,7 +63,7 @@ class TracedGraph:
 
             original_invoke = self._graph.invoke
 
-            def traced_invoke(inp: Dict[str, Any], cfg: Optional[Dict[str, Any]] = None, **kw: Any) -> Dict[str, Any]:
+            def traced_invoke(inp: dict[str, Any], cfg: dict[str, Any] | None = None, **kw: Any) -> dict[str, Any]:
                 return original_invoke(inp, cfg, **kw)
 
             result = traced_invoke(input, config, **kwargs)
@@ -73,10 +72,10 @@ class TracedGraph:
 
     async def ainvoke(
         self,
-        input: Dict[str, Any],
-        config: Optional[Dict[str, Any]] = None,
+        input: dict[str, Any],
+        config: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Async version of invoke with tracing."""
         trace_name = config.get("run_name", "langgraph") if config else "langgraph"
 
@@ -89,8 +88,8 @@ class TracedGraph:
 
     def stream(
         self,
-        input: Dict[str, Any],
-        config: Optional[Dict[str, Any]] = None,
+        input: dict[str, Any],
+        config: dict[str, Any] | None = None,
         **kwargs: Any,
     ):
         """Stream graph execution with tracing."""
@@ -99,8 +98,7 @@ class TracedGraph:
         with self._tracer.trace(trace_name) as trace:
             trace.set_metadata(framework="langgraph", mode="stream")
 
-            for chunk in self._graph.stream(input, config, **kwargs):
-                yield chunk
+            yield from self._graph.stream(input, config, **kwargs)
 
     def __getattr__(self, name: str) -> Any:
         """Delegate unknown attributes to the wrapped graph."""

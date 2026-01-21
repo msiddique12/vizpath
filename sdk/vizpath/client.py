@@ -1,10 +1,11 @@
 """HTTP client for sending traces to the vizpath server."""
 
+from __future__ import annotations
+
 import atexit
 import logging
 from queue import Empty, Queue
 from threading import Event, Lock, Thread
-from typing import List, Optional
 
 import httpx
 
@@ -13,7 +14,6 @@ from vizpath.exceptions import (
     AuthenticationError,
     ConnectionError,
     RateLimitError,
-    TimeoutError,
     VizpathError,
 )
 from vizpath.span import SpanData
@@ -29,15 +29,15 @@ class Client:
     the buffer is full. Uses a background thread for non-blocking sends.
     """
 
-    _instances: List["Client"] = []
+    _instances: list[Client] = []
 
     def __init__(self, config: Config) -> None:
         self._config = config
         self._buffer: Queue[SpanData] = Queue()
         self._lock = Lock()
         self._shutdown = Event()
-        self._client: Optional[httpx.Client] = None
-        self._flush_thread: Optional[Thread] = None
+        self._client: httpx.Client | None = None
+        self._flush_thread: Thread | None = None
 
         if config.enabled and config.api_key:
             self._initialize()
@@ -77,7 +77,7 @@ class Client:
         if not self._client:
             return
 
-        spans: List[SpanData] = []
+        spans: list[SpanData] = []
         while True:
             try:
                 spans.append(self._buffer.get_nowait())
@@ -129,7 +129,7 @@ class Client:
             self._client.close()
             self._client = None
 
-    def __enter__(self) -> "Client":
+    def __enter__(self) -> Client:
         return self
 
     def __exit__(self, *args: object) -> None:

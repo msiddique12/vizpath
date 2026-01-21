@@ -1,15 +1,16 @@
 """Configuration for the vizpath SDK."""
 
+from __future__ import annotations
+
 import os
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 @dataclass
 class Config:
     """SDK configuration with sensible defaults."""
 
-    api_key: Optional[str] = field(default_factory=lambda: os.environ.get("VIZPATH_API_KEY"))
+    api_key: str | None = field(default_factory=lambda: os.environ.get("VIZPATH_API_KEY"))
     base_url: str = field(
         default_factory=lambda: os.environ.get("VIZPATH_API_URL", "http://localhost:8000/api/v1")
     )

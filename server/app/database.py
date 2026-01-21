@@ -1,8 +1,8 @@
 """Database connection and session management."""
 
 import logging
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Generator
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import OperationalError
@@ -52,7 +52,6 @@ def init_db() -> None:
                     "AUTO_CREATE_TABLES is enabled in production - use migrations instead"
                 )
             logger.info("Creating database tables...")
-            from app import models
 
             Base.metadata.create_all(bind=engine, checkfirst=True)
             logger.info("Database tables created")

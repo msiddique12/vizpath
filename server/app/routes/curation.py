@@ -1,6 +1,5 @@
 """Curation endpoints for trace labeling and export."""
 
-from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -9,35 +8,34 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import CuratedLabel, Trace, Span
-
+from app.models import CuratedLabel, Span, Trace
 
 router = APIRouter(prefix="/curation", tags=["curation"])
 
 
 class LabelCreate(BaseModel):
     trace_id: UUID
-    label: Optional[str] = None
-    quality_score: Optional[float] = None
-    notes: Optional[str] = None
+    label: str | None = None
+    quality_score: float | None = None
+    notes: str | None = None
 
 
 class LabelUpdate(BaseModel):
-    label: Optional[str] = None
-    quality_score: Optional[float] = None
-    notes: Optional[str] = None
-    exported: Optional[bool] = None
+    label: str | None = None
+    quality_score: float | None = None
+    notes: str | None = None
+    exported: bool | None = None
 
 
 class LabelResponse(BaseModel):
     id: UUID
     trace_id: UUID
-    label: Optional[str]
-    quality_score: Optional[float]
-    notes: Optional[str]
+    label: str | None
+    quality_score: float | None
+    notes: str | None
     exported: bool
     created_at: str
-    updated_at: Optional[str]
+    updated_at: str | None
 
     class Config:
         from_attributes = True
@@ -46,17 +44,17 @@ class LabelResponse(BaseModel):
 class CuratedTraceResponse(BaseModel):
     trace_id: UUID
     trace_name: str
-    label: Optional[str]
-    quality_score: Optional[float]
-    notes: Optional[str]
+    label: str | None
+    quality_score: float | None
+    notes: str | None
     exported: bool
     span_count: int
-    total_tokens: Optional[int]
-    duration_ms: Optional[float]
+    total_tokens: int | None
+    duration_ms: float | None
 
 
 class ExportRequest(BaseModel):
-    trace_ids: List[UUID]
+    trace_ids: list[UUID]
     format: str = "jsonl"
     include_input_output: bool = True
 
@@ -111,11 +109,11 @@ def create_or_update_label(
     )
 
 
-@router.get("/labels/{trace_id}", response_model=Optional[LabelResponse])
+@router.get("/labels/{trace_id}", response_model=LabelResponse | None)
 def get_label(
     trace_id: UUID,
     db: Session = Depends(get_db),
-) -> Optional[LabelResponse]:
+) -> LabelResponse | None:
     """Get the label for a specific trace."""
     label = db.execute(
         select(CuratedLabel).where(CuratedLabel.trace_id == trace_id)
@@ -154,15 +152,15 @@ def delete_label(
     return {"status": "deleted"}
 
 
-@router.get("/traces", response_model=List[CuratedTraceResponse])
+@router.get("/traces", response_model=list[CuratedTraceResponse])
 def list_curated_traces(
-    label: Optional[str] = Query(None, description="Filter by label"),
-    exported: Optional[bool] = Query(None, description="Filter by export status"),
-    min_score: Optional[float] = Query(None, description="Minimum quality score"),
+    label: str | None = Query(None, description="Filter by label"),
+    exported: bool | None = Query(None, description="Filter by export status"),
+    min_score: float | None = Query(None, description="Minimum quality score"),
     limit: int = Query(50, le=200),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
-) -> List[CuratedTraceResponse]:
+) -> list[CuratedTraceResponse]:
     """List traces with curation labels."""
     query = (
         select(Trace, CuratedLabel)
@@ -207,7 +205,7 @@ def get_curation_stats(db: Session = Depends(get_db)) -> dict:
     ).scalar() or 0
 
     exported_count = db.execute(
-        select(func.count(CuratedLabel.id)).where(CuratedLabel.exported == True)
+        select(func.count(CuratedLabel.id)).where(CuratedLabel.exported.is_(True))
     ).scalar() or 0
 
     label_counts = db.execute(

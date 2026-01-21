@@ -6,7 +6,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
@@ -38,7 +38,7 @@ class SpanEvent(BaseModel):
 
     name: str
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    attributes: Dict[str, Any] = Field(default_factory=dict)
+    attributes: dict[str, Any] = Field(default_factory=dict)
 
 
 class SpanData(BaseModel):
@@ -46,20 +46,20 @@ class SpanData(BaseModel):
 
     span_id: str
     trace_id: str
-    parent_id: Optional[str] = None
+    parent_id: str | None = None
     name: str
     span_type: SpanType = SpanType.CUSTOM
     status: SpanStatus = SpanStatus.RUNNING
     start_time: datetime
-    end_time: Optional[datetime] = None
-    duration_ms: Optional[float] = None
-    attributes: Dict[str, Any] = Field(default_factory=dict)
-    events: List[SpanEvent] = Field(default_factory=list)
-    input: Optional[Any] = None
-    output: Optional[Any] = None
-    error: Optional[str] = None
-    tokens: Optional[int] = None
-    cost: Optional[float] = None
+    end_time: datetime | None = None
+    duration_ms: float | None = None
+    attributes: dict[str, Any] = Field(default_factory=dict)
+    events: list[SpanEvent] = Field(default_factory=list)
+    input: Any | None = None
+    output: Any | None = None
+    error: str | None = None
+    tokens: int | None = None
+    cost: float | None = None
 
 
 class Span:
@@ -74,7 +74,7 @@ class Span:
         self,
         name: str,
         trace_context: TraceContext,
-        parent: Optional[Span] = None,
+        parent: Span | None = None,
         span_type: SpanType = SpanType.CUSTOM,
     ) -> None:
         self._id = str(uuid.uuid4())
@@ -85,16 +85,16 @@ class Span:
         self._status = SpanStatus.RUNNING
         self._start_time = datetime.now(timezone.utc)
         self._start_ts = time.perf_counter()
-        self._end_time: Optional[datetime] = None
-        self._duration_ms: Optional[float] = None
-        self._attributes: Dict[str, Any] = {}
-        self._events: List[SpanEvent] = []
-        self._input: Optional[Any] = None
-        self._output: Optional[Any] = None
-        self._error: Optional[str] = None
-        self._tokens: Optional[int] = None
-        self._cost: Optional[float] = None
-        self._children: List[Span] = []
+        self._end_time: datetime | None = None
+        self._duration_ms: float | None = None
+        self._attributes: dict[str, Any] = {}
+        self._events: list[SpanEvent] = []
+        self._input: Any | None = None
+        self._output: Any | None = None
+        self._error: str | None = None
+        self._tokens: int | None = None
+        self._cost: float | None = None
+        self._children: list[Span] = []
 
     @property
     def id(self) -> str:
@@ -105,7 +105,7 @@ class Span:
         return self._name
 
     @property
-    def parent_id(self) -> Optional[str]:
+    def parent_id(self) -> str | None:
         return self._parent._id if self._parent else None
 
     @property
@@ -143,7 +143,7 @@ class Span:
         self._attributes.update(kwargs)
         return self
 
-    def set_tokens(self, count: int, cost: Optional[float] = None) -> Span:
+    def set_tokens(self, count: int, cost: float | None = None) -> Span:
         """Set token count and optional cost for LLM spans."""
         self._tokens = count
         if cost is not None:
@@ -161,7 +161,7 @@ class Span:
         self._status = SpanStatus.ERROR
         return self
 
-    def end(self, status: Optional[SpanStatus] = None) -> None:
+    def end(self, status: SpanStatus | None = None) -> None:
         """End this span and record its duration."""
         self._end_time = datetime.now(timezone.utc)
         self._duration_ms = (time.perf_counter() - self._start_ts) * 1000

@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from vizpath.span import SpanType
 from vizpath.tracer import Tracer
 
 if TYPE_CHECKING:
-    from langchain.callbacks.base import BaseCallbackHandler
+    pass
 
 
 class VizpathCallbackHandler:
@@ -27,14 +27,14 @@ class VizpathCallbackHandler:
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
-        tracer: Optional[Tracer] = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        tracer: Tracer | None = None,
     ) -> None:
         self._tracer = tracer or Tracer(api_key=api_key, base_url=base_url)
         self._trace = None
-        self._span_stack: List[Any] = []
-        self._spans: Dict[str, Any] = {}
+        self._span_stack: list[Any] = []
+        self._spans: dict[str, Any] = {}
 
     def _get_or_create_trace(self, name: str = "langchain") -> Any:
         if self._trace is None:
@@ -51,11 +51,11 @@ class VizpathCallbackHandler:
 
     def on_chain_start(
         self,
-        serialized: Dict[str, Any],
-        inputs: Dict[str, Any],
+        serialized: dict[str, Any],
+        inputs: dict[str, Any],
         *,
         run_id: UUID,
-        parent_run_id: Optional[UUID] = None,
+        parent_run_id: UUID | None = None,
         **kwargs: Any,
     ) -> None:
         """Called when a chain starts running."""
@@ -75,7 +75,7 @@ class VizpathCallbackHandler:
 
     def on_chain_end(
         self,
-        outputs: Dict[str, Any],
+        outputs: dict[str, Any],
         *,
         run_id: UUID,
         **kwargs: Any,
@@ -111,11 +111,11 @@ class VizpathCallbackHandler:
 
     def on_llm_start(
         self,
-        serialized: Dict[str, Any],
-        prompts: List[str],
+        serialized: dict[str, Any],
+        prompts: list[str],
         *,
         run_id: UUID,
-        parent_run_id: Optional[UUID] = None,
+        parent_run_id: UUID | None = None,
         **kwargs: Any,
     ) -> None:
         """Called when an LLM starts generating."""
@@ -169,11 +169,11 @@ class VizpathCallbackHandler:
 
     def on_tool_start(
         self,
-        serialized: Dict[str, Any],
+        serialized: dict[str, Any],
         input_str: str,
         *,
         run_id: UUID,
-        parent_run_id: Optional[UUID] = None,
+        parent_run_id: UUID | None = None,
         **kwargs: Any,
     ) -> None:
         """Called when a tool starts running."""
@@ -218,11 +218,11 @@ class VizpathCallbackHandler:
 
     def on_retriever_start(
         self,
-        serialized: Dict[str, Any],
+        serialized: dict[str, Any],
         query: str,
         *,
         run_id: UUID,
-        parent_run_id: Optional[UUID] = None,
+        parent_run_id: UUID | None = None,
         **kwargs: Any,
     ) -> None:
         """Called when a retriever starts."""
@@ -241,7 +241,7 @@ class VizpathCallbackHandler:
 
     def on_retriever_end(
         self,
-        documents: List[Any],
+        documents: list[Any],
         *,
         run_id: UUID,
         **kwargs: Any,

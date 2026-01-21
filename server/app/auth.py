@@ -2,7 +2,6 @@
 
 import hashlib
 import secrets
-from typing import Optional
 
 from fastapi import Depends, HTTPException, Security, status
 from fastapi.security import APIKeyHeader
@@ -24,14 +23,14 @@ def generate_api_key() -> str:
     return f"vp_{secrets.token_urlsafe(32)}"
 
 
-def get_project_by_api_key(db: Session, api_key: str) -> Optional[Project]:
+def get_project_by_api_key(db: Session, api_key: str) -> Project | None:
     """Look up a project by API key hash."""
     key_hash = hash_api_key(api_key)
     return db.query(Project).filter(Project.api_key_hash == key_hash).first()
 
 
 async def verify_api_key(
-    api_key: Optional[str] = Security(api_key_header),
+    api_key: str | None = Security(api_key_header),
     db: Session = Depends(get_db),
 ) -> Project:
     """
@@ -68,9 +67,9 @@ async def verify_api_key(
 
 
 async def optional_api_key(
-    api_key: Optional[str] = Security(api_key_header),
+    api_key: str | None = Security(api_key_header),
     db: Session = Depends(get_db),
-) -> Optional[Project]:
+) -> Project | None:
     """
     Optionally verify API key. Returns None if not provided.
 
