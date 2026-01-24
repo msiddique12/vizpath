@@ -3,7 +3,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -14,7 +14,7 @@ router = APIRouter(prefix="/curation", tags=["curation"])
 
 
 class LabelCreate(BaseModel):
-    trace_id: UUID
+    trace_id: str
     label: str | None = None
     quality_score: float | None = None
     notes: str | None = None
@@ -28,8 +28,10 @@ class LabelUpdate(BaseModel):
 
 
 class LabelResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
-    trace_id: UUID
+    trace_id: str
     label: str | None
     quality_score: float | None
     notes: str | None
@@ -37,12 +39,9 @@ class LabelResponse(BaseModel):
     created_at: str
     updated_at: str | None
 
-    class Config:
-        from_attributes = True
-
 
 class CuratedTraceResponse(BaseModel):
-    trace_id: UUID
+    trace_id: str
     trace_name: str
     label: str | None
     quality_score: float | None
@@ -54,7 +53,7 @@ class CuratedTraceResponse(BaseModel):
 
 
 class ExportRequest(BaseModel):
-    trace_ids: list[UUID]
+    trace_ids: list[str]
     format: str = "jsonl"
     include_input_output: bool = True
 
@@ -111,7 +110,7 @@ def create_or_update_label(
 
 @router.get("/labels/{trace_id}", response_model=LabelResponse | None)
 def get_label(
-    trace_id: UUID,
+    trace_id: str,
     db: Session = Depends(get_db),
 ) -> LabelResponse | None:
     """Get the label for a specific trace."""
@@ -136,7 +135,7 @@ def get_label(
 
 @router.delete("/labels/{trace_id}")
 def delete_label(
-    trace_id: UUID,
+    trace_id: str,
     db: Session = Depends(get_db),
 ) -> dict:
     """Delete a label for a trace."""

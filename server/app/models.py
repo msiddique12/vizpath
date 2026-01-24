@@ -58,7 +58,7 @@ class Trace(Base):
 
     __tablename__ = "traces"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(String(64), primary_key=True)
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False, index=True)
     name = Column(String(255), nullable=False)
     status = Column(String(20), default=SpanStatus.RUNNING, index=True)
@@ -104,9 +104,9 @@ class Span(Base):
 
     __tablename__ = "spans"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    trace_id = Column(UUID(as_uuid=True), ForeignKey("traces.id"), nullable=False, index=True)
-    parent_id = Column(UUID(as_uuid=True), ForeignKey("spans.id"), nullable=True, index=True)
+    id = Column(String(64), primary_key=True)
+    trace_id = Column(String(64), ForeignKey("traces.id"), nullable=False, index=True)
+    parent_id = Column(String(64), ForeignKey("spans.id"), nullable=True, index=True)
     name = Column(String(255), nullable=False)
     span_type = Column(String(50), default=SpanType.CUSTOM, index=True)
     status = Column(String(20), default=SpanStatus.RUNNING)
@@ -160,7 +160,7 @@ class CuratedLabel(Base):
     __tablename__ = "curated_labels"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    trace_id = Column(UUID(as_uuid=True), ForeignKey("traces.id"), nullable=False, unique=True)
+    trace_id = Column(String(64), ForeignKey("traces.id"), nullable=False, unique=True)
     label = Column(String(50), nullable=True, index=True)
     quality_score = Column(Float, nullable=True)
     notes = Column(Text, nullable=True)

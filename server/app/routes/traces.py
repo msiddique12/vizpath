@@ -3,7 +3,6 @@
 import logging
 from datetime import datetime
 from typing import Any
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -91,7 +90,7 @@ class SpanResponse(BaseModel):
     cost: float | None
 
 
-def get_or_create_trace(db: Session, trace_id: str, project_id: UUID, span: SpanCreate) -> Trace:
+def get_or_create_trace(db: Session, trace_id: str, project_id: Any, span: SpanCreate) -> Trace:
     """Get existing trace or create a new one."""
     trace = db.query(Trace).filter(Trace.id == trace_id).first()
 
@@ -219,7 +218,7 @@ async def list_traces(
 
 @router.get("/{trace_id}")
 async def get_trace(
-    trace_id: UUID,
+    trace_id: str,
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """Get trace details with all spans."""
@@ -238,7 +237,7 @@ async def get_trace(
 
 @router.get("/{trace_id}/spans")
 async def get_trace_spans(
-    trace_id: UUID,
+    trace_id: str,
     db: Session = Depends(get_db),
 ) -> list[SpanResponse]:
     """Get all spans for a trace."""
