@@ -77,7 +77,6 @@ class Trace(Base):
 
     __table_args__ = (
         Index("ix_traces_project_created", "project_id", "created_at"),
-        Index("ix_traces_status", "status"),
     )
 
     def to_dict(self) -> dict[str, Any]:
