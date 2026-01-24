@@ -103,6 +103,7 @@ def get_or_create_trace(db: Session, trace_id: str, project_id: Any, span: SpanC
             start_time=span.start_time,
         )
         db.add(trace)
+        db.flush()  # Make visible for subsequent queries in same transaction
 
     return trace
 
