@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -161,7 +161,7 @@ async def ingest_spans(
                     func.count(Span.id).label("count"),
                     func.sum(Span.tokens).label("tokens"),
                     func.sum(Span.cost).label("cost"),
-                    func.sum(func.cast(Span.error.isnot(None), db.bind.dialect.name == 'postgresql' and 'INTEGER' or None)).label("errors"),
+                    func.sum(case((Span.error.isnot(None), 1), else_=0)).label("errors"),
                 )
                 .filter(Span.trace_id == trace_id)
                 .first()
