@@ -40,7 +40,13 @@ _current_span: contextvars.ContextVar[Span | None] = contextvars.ContextVar(
 
 
 class _TraceContext:
-    """Internal trace context for decorator-based tracing."""
+    """Internal trace context for decorator-based tracing.
+
+    This class implements the interface expected by Span:
+    - trace_id property
+    - _register_span(span) method
+    - _on_span_end(span) method
+    """
 
     def __init__(self, trace_id: str, name: str, client: Client) -> None:
         self.trace_id = trace_id
@@ -51,10 +57,15 @@ class _TraceContext:
         self.spans: list[Span] = []
         self.root_span: Span | None = None
 
-    def register_span(self, span: Span) -> None:
+    def _register_span(self, span: Span) -> None:
+        """Register a span with this trace context."""
         self.spans.append(span)
         if self.root_span is None:
             self.root_span = span
+
+    def _on_span_end(self, span: Span) -> None:
+        """Called when a span ends - sends it to the server."""
+        self.client.send(span.to_data())
 
 
 class GlobalTracer:
@@ -163,7 +174,7 @@ class GlobalTracer:
                     parent=parent,
                     span_type=st,
                 )
-                trace_ctx.register_span(span)
+                trace_ctx._register_span(span)
 
                 # Set as current span
                 span_token = _current_span.set(span)
