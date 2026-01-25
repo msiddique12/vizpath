@@ -14,6 +14,7 @@ class Config:
     base_url: str = field(
         default_factory=lambda: os.environ.get("VIZPATH_API_URL", "http://localhost:8000/api/v1")
     )
+    project_id: str | None = field(default_factory=lambda: os.environ.get("VIZPATH_PROJECT_ID"))
     buffer_size: int = 50
     flush_interval: float = 5.0
     timeout: float = 30.0
