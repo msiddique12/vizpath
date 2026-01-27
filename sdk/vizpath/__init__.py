@@ -29,9 +29,13 @@ Usage with context managers:
 """
 
 from vizpath.config import Config
-from vizpath.decorators import configure, tracer
 from vizpath.span import Span, SpanStatus, SpanType
 from vizpath.tracer import Tracer
+# Import tracer instance last to override the tracer module reference
+from vizpath.decorators import configure, tracer as _tracer_instance
+
+# Explicit assignment to ensure tracer refers to the GlobalTracer instance
+tracer = _tracer_instance
 
 __version__ = "0.1.0"
 __all__ = [
