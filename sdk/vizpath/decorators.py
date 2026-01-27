@@ -26,7 +26,7 @@ from typing import Any, Callable, TypeVar
 
 from vizpath.client import Client
 from vizpath.config import Config
-from vizpath.span import Span, SpanStatus, SpanType
+from vizpath.span import Span, SpanType
 
 T = TypeVar("T")
 
