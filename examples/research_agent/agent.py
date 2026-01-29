@@ -60,12 +60,6 @@ class ResearchAgent:
         self.notes = NoteTaker()
         self.max_iterations = max_iterations
 
-    def _log(self, message: str, indent: int = 0) -> None:
-        """Print verbose log message if verbose mode is enabled."""
-        if self.verbose:
-            prefix = "  " * indent
-            print(f"{prefix}[Agent] {message}")
-
         # System prompt for the research agent
         self.system_prompt = """You are a thorough research agent. Your goal is to research topics by:
 
@@ -81,6 +75,12 @@ Research process:
 - When you have enough information, call generate_report
 
 Be thorough but efficient. Aim to gather diverse perspectives and cite sources."""
+
+    def _log(self, message: str, indent: int = 0) -> None:
+        """Print verbose log message if verbose mode is enabled."""
+        if self.verbose:
+            prefix = "  " * indent
+            print(f"{prefix}[Agent] {message}")
 
     @tracer.span(name="llm_call", span_type="llm")
     def _call_llm(
