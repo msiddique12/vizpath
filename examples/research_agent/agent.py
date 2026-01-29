@@ -30,6 +30,8 @@ class ResearchAgent:
         api_key: str | None = None,
         base_url: str | None = None,
         model: str = "meta/llama-3.1-70b-instruct",
+        max_iterations: int = 10,
+        verbose: bool = False,
     ):
         """Initialize the research agent.
 
@@ -37,10 +39,13 @@ class ResearchAgent:
             api_key: API key for the LLM service. Defaults to NVIDIA_API_KEY env var.
             base_url: Base URL for the LLM API. Defaults to NVIDIA NIMs endpoint.
             model: Model to use for generation.
+            max_iterations: Maximum research loop iterations.
+            verbose: Print detailed progress during research.
         """
         self.api_key = api_key or os.getenv("NVIDIA_API_KEY")
         self.base_url = base_url or "https://integrate.api.nvidia.com/v1"
         self.model = model
+        self.verbose = verbose
 
         if not self.api_key:
             raise ValueError(
@@ -53,7 +58,13 @@ class ResearchAgent:
         )
 
         self.notes = NoteTaker()
-        self.max_iterations = 10
+        self.max_iterations = max_iterations
+
+    def _log(self, message: str, indent: int = 0) -> None:
+        """Print verbose log message if verbose mode is enabled."""
+        if self.verbose:
+            prefix = "  " * indent
+            print(f"{prefix}[Agent] {message}")
 
         # System prompt for the research agent
         self.system_prompt = """You are a thorough research agent. Your goal is to research topics by:
@@ -107,6 +118,7 @@ Be thorough but efficient. Aim to gather diverse perspectives and cite sources."
             # Estimate cost (adjust based on actual model pricing)
             estimated_cost = (usage.prompt_tokens * 0.001 + usage.completion_tokens * 0.002) / 1000
             tracer.set_span_cost(estimated_cost)
+            self._log(f"LLM call: {usage.prompt_tokens}+{usage.completion_tokens} tokens", indent=1)
 
         message = response.choices[0].message
 
@@ -138,20 +150,27 @@ Be thorough but efficient. Aim to gather diverse perspectives and cite sources."
             "tool.name": tool_name,
         })
 
+        self._log(f"Executing tool: {tool_name}", indent=2)
+
         if tool_name == "web_search":
             result = web_search(arguments["query"])
+            self._log(f"  Found {len(result)} results for '{arguments['query']}'", indent=2)
         elif tool_name == "fetch_url":
             result = fetch_url(arguments["url"])
+            self._log(f"  Fetched {result.get('word_count', 0)} words", indent=2)
         elif tool_name == "add_note":
             result = self.notes.add_note(
                 title=arguments["title"],
                 content=arguments["content"],
                 source=arguments.get("source"),
             )
+            self._log(f"  Added note: {arguments['title']}", indent=2)
         elif tool_name == "get_notes":
             result = self.notes.get_notes()
+            self._log(f"  Retrieved {len(result)} notes", indent=2)
         elif tool_name == "generate_report":
             result = {"status": "ready", "summary": arguments["summary"]}
+            self._log("  Report generation requested", indent=2)
         else:
             result = {"error": f"Unknown tool: {tool_name}"}
 
@@ -171,6 +190,7 @@ Be thorough but efficient. Aim to gather diverse perspectives and cite sources."
         })
 
         for iteration in range(self.max_iterations):
+            self._log(f"Iteration {iteration + 1}/{self.max_iterations}")
             tracer.set_span_attributes({
                 "research.current_iteration": iteration + 1,
             })

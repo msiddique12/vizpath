@@ -9,7 +9,6 @@ Usage:
     python -m examples.research_agent.test_mock
 """
 
-import json
 from unittest.mock import MagicMock, patch
 
 # Mock OpenAI before importing agent

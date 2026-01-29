@@ -60,6 +60,17 @@ def main():
         action="store_true",
         help="Run without sending traces to vizpath (for testing)",
     )
+    parser.add_argument(
+        "--verbose", "-v",
+        action="store_true",
+        help="Show detailed progress during research",
+    )
+    parser.add_argument(
+        "--max-iterations",
+        type=int,
+        default=10,
+        help="Maximum research iterations (default: 10)",
+    )
 
     args = parser.parse_args()
 
@@ -91,6 +102,8 @@ def main():
     agent = ResearchAgent(
         api_key=api_key,
         model=args.model,
+        max_iterations=args.max_iterations,
+        verbose=args.verbose,
     )
 
     print("Starting research...\n")
