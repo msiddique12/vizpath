@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import atexit
 import logging
+import time
 from queue import Empty, Queue
 from threading import Event, Lock, Thread
 
@@ -87,23 +88,42 @@ class Client:
         if not spans:
             return
 
-        try:
-            payload = [s.model_dump(mode="json") for s in spans]
-            response = self._client.post("/traces/spans/batch", json=payload)
-            self._handle_response(response)
-            logger.debug(f"Flushed {len(spans)} spans")
-        except httpx.ConnectError as e:
-            logger.warning(f"Connection failed, re-buffering {len(spans)} spans: {e}")
-            for span in spans:
-                self._buffer.put(span)
-        except httpx.TimeoutException as e:
-            logger.warning(f"Request timeout, re-buffering {len(spans)} spans: {e}")
-            for span in spans:
-                self._buffer.put(span)
-        except VizpathError as e:
-            logger.error(f"API error: {e}")
-        except Exception as e:
-            logger.error(f"Unexpected error during flush: {e}")
+        self._send_with_retry(spans)
+
+    def _send_with_retry(self, spans: list[SpanData]) -> None:
+        """Send spans with exponential backoff retry."""
+        payload = [s.model_dump(mode="json") for s in spans]
+        last_error: Exception | None = None
+
+        for attempt in range(self._config.max_retries):
+            try:
+                response = self._client.post("/traces/spans/batch", json=payload)
+                self._handle_response(response)
+                logger.debug(f"Flushed {len(spans)} spans")
+                return
+            except (httpx.ConnectError, httpx.TimeoutException) as e:
+                last_error = e
+                if attempt < self._config.max_retries - 1:
+                    wait_time = (2 ** attempt) * 0.1  # 0.1s, 0.2s, 0.4s...
+                    logger.debug(f"Retry {attempt + 1}/{self._config.max_retries} in {wait_time}s")
+                    time.sleep(wait_time)
+            except RateLimitError as e:
+                last_error = e
+                if attempt < self._config.max_retries - 1:
+                    wait_time = (2 ** attempt) * 1.0  # Longer wait for rate limits
+                    logger.warning(f"Rate limited, retry in {wait_time}s")
+                    time.sleep(wait_time)
+            except VizpathError as e:
+                logger.error(f"API error: {e}")
+                return  # Don't retry on API errors
+            except Exception as e:
+                logger.error(f"Unexpected error during flush: {e}")
+                return  # Don't retry on unknown errors
+
+        # All retries failed, re-buffer spans
+        logger.warning(f"All retries failed, re-buffering {len(spans)} spans: {last_error}")
+        for span in spans:
+            self._buffer.put(span)
 
     def _handle_response(self, response: httpx.Response) -> None:
         """Handle HTTP response and raise appropriate exceptions."""
