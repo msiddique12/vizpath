@@ -78,6 +78,8 @@ class GlobalTracer:
     def __init__(self) -> None:
         self._config: Config | None = None
         self._client: Client | None = None
+        self._span_count: int = 0
+        self._trace_count: int = 0
 
     def configure(
         self,
@@ -124,6 +126,7 @@ class GlobalTracer:
                 # Create trace context
                 trace_id = str(uuid.uuid4())
                 context = _TraceContext(trace_id, trace_name, client)
+                self._trace_count += 1
 
                 # Set as current trace
                 token = _current_trace.set(context)
@@ -175,6 +178,7 @@ class GlobalTracer:
                     span_type=st,
                 )
                 trace_ctx._register_span(span)
+                self._span_count += 1
 
                 # Set as current span
                 span_token = _current_span.set(span)
@@ -244,6 +248,23 @@ class GlobalTracer:
         trace_ctx = _current_trace.get()
         if trace_ctx is not None:
             trace_ctx.attributes.update(attributes)
+
+    def flush(self) -> None:
+        """Force flush all pending spans to the server."""
+        if self._client is not None:
+            self._client._flush()
+
+    def stats(self) -> dict[str, int]:
+        """Get tracing statistics."""
+        return {
+            "traces": self._trace_count,
+            "spans": self._span_count,
+        }
+
+    def reset_stats(self) -> None:
+        """Reset tracing statistics."""
+        self._trace_count = 0
+        self._span_count = 0
 
 
 # Global tracer instance

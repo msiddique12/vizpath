@@ -20,7 +20,7 @@ import argparse
 import os
 import sys
 
-from vizpath import configure
+from vizpath import configure, tracer
 
 from .agent import ResearchAgent
 
@@ -115,8 +115,15 @@ def main():
     print(report)
     print("=" * 60)
 
+    # Flush any pending spans and show stats
+    tracer.flush()
+    stats = tracer.stats()
+
     if not args.dry_run:
-        print(f"\nView traces at: {args.vizpath_url}/traces")
+        print(f"\nTracing: {stats['traces']} traces, {stats['spans']} spans sent")
+        print(f"View traces at: {args.vizpath_url}/traces")
+    elif args.verbose:
+        print(f"\nTracing stats (dry run): {stats['traces']} traces, {stats['spans']} spans")
 
 
 if __name__ == "__main__":
