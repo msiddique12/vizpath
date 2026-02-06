@@ -255,7 +255,7 @@ Be thorough but efficient. Aim to gather diverse perspectives and cite sources."
         })
         return self._generate_final_report(topic)
 
-    @tracer.span(name="generate_report", span_type="llm")
+    @tracer.span(name="generate_report", span_type="chain")
     def _generate_final_report(self, topic: str) -> str:
         """Generate the final research report."""
         notes = self.notes.get_notes()

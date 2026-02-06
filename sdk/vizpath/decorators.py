@@ -94,8 +94,12 @@ class GlobalTracer:
             api_key: API key for authentication (optional).
             project_id: Project ID to associate traces with.
         """
+        base = api_url or "http://localhost:8000"
+        # Ensure base_url ends with /api/v1 for the ingestion endpoints
+        if not base.rstrip("/").endswith("/api/v1"):
+            base = base.rstrip("/") + "/api/v1"
         self._config = Config(
-            base_url=api_url or "http://localhost:8000",
+            base_url=base,
             api_key=api_key,
             project_id=project_id,
         )
@@ -189,7 +193,7 @@ class GlobalTracer:
                     span.__exit__(None, None, None)
                     return result
                 except Exception as e:
-                    span.set_error(str(e))
+                    # __exit__ already calls set_error when exc_val is not None
                     span.__exit__(type(e), e, e.__traceback__)
                     raise
                 finally:
