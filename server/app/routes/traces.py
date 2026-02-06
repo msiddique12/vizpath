@@ -162,6 +162,7 @@ async def ingest_spans(
                     func.sum(Span.tokens).label("tokens"),
                     func.sum(Span.cost).label("cost"),
                     func.sum(case((Span.error.isnot(None), 1), else_=0)).label("errors"),
+                    func.max(Span.end_time).label("latest_end"),
                 )
                 .filter(Span.trace_id == trace_id)
                 .first()
@@ -169,6 +170,27 @@ async def ingest_spans(
             trace.span_count = stats.count or 0
             trace.total_tokens = stats.tokens
             trace.total_cost = stats.cost
+            trace.error_count = stats.errors or 0
+
+            # Update trace end_time and duration from latest span
+            if stats.latest_end:
+                trace.end_time = stats.latest_end
+                if trace.start_time:
+                    delta = (trace.end_time - trace.start_time).total_seconds() * 1000
+                    trace.duration_ms = delta
+
+            # Update trace status based on span statuses
+            has_running = (
+                db.query(Span.id)
+                .filter(Span.trace_id == trace_id, Span.status == "running")
+                .first()
+            ) is not None
+            if has_running:
+                trace.status = "running"
+            elif trace.error_count > 0:
+                trace.status = "error"
+            else:
+                trace.status = "success"
 
     db.commit()
 
