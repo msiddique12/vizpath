@@ -127,7 +127,6 @@ class Span(Base):
 
     __table_args__ = (
         Index("ix_spans_trace_parent", "trace_id", "parent_id"),
-        Index("ix_spans_type", "span_type"),
     )
 
     def to_dict(self) -> dict[str, Any]:
