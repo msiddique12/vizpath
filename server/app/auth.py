@@ -69,7 +69,7 @@ def _get_or_create_default_project(db: Session) -> Project:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create default project.",
-        )
+        ) from None
 
 
 async def verify_api_key(

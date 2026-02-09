@@ -12,6 +12,7 @@ from vizpath.client import Client
 from vizpath.config import Config
 from vizpath.span import Span, SpanStatus, SpanType
 
+
 class TraceData(BaseModel):
     """Serializable trace data for API transmission."""
 
