@@ -4,16 +4,13 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Callable, TypeVar
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 from vizpath.client import Client
 from vizpath.config import Config
 from vizpath.span import Span, SpanStatus, SpanType
-
-T = TypeVar("T")
-
 
 class TraceData(BaseModel):
     """Serializable trace data for API transmission."""
@@ -175,20 +172,3 @@ class Tracer:
 
     def __exit__(self, *args: object) -> None:
         self.close()
-
-
-def trace(name: str) -> Callable[[Callable[..., T]], Callable[..., T]]:
-    """
-    Decorator to trace a function execution.
-
-    Requires a global tracer to be configured:
-
-        @trace("my-function")
-        def my_function():
-            ...
-    """
-    def decorator(func: Callable[..., T]) -> Callable[..., T]:
-        def wrapper(*args: Any, **kwargs: Any) -> T:
-            return func(*args, **kwargs)
-        return wrapper
-    return decorator
