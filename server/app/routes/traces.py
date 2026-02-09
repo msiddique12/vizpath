@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
+from app.auth import verify_api_key
 from app.database import get_db
 from app.models import Project, Span, Trace
 from app.routes.ws import notify_span_ingested
@@ -111,6 +112,7 @@ def get_or_create_trace(db: Session, trace_id: str, project_id: Any, span: SpanC
 @router.post("/spans/batch", status_code=201)
 async def ingest_spans(
     payload: list[SpanCreate],
+    project: Project = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """
@@ -120,12 +122,6 @@ async def ingest_spans(
     """
     if not payload:
         return {"ingested": 0}
-
-    project = db.query(Project).first()
-    if not project:
-        project = Project(name="default", api_key_hash="default")
-        db.add(project)
-        db.flush()
 
     traces_updated = set()
 
@@ -195,7 +191,7 @@ async def ingest_spans(
     db.commit()
 
     for trace_id in traces_updated:
-        notify_span_ingested(str(trace_id), len(payload))
+        await notify_span_ingested(str(trace_id), len(payload))
 
     return {"ingested": len(payload), "traces": len(traces_updated)}
 
