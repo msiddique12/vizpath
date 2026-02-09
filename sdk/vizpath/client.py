@@ -40,18 +40,22 @@ class Client:
         self._client: httpx.Client | None = None
         self._flush_thread: Thread | None = None
 
-        if config.enabled and config.api_key:
+        if config.enabled:
             self._initialize()
             Client._instances.append(self)
 
     def _initialize(self) -> None:
         """Initialize HTTP client and background flush thread."""
+        headers = {"Content-Type": "application/json"}
+        if self._config.api_key:
+            headers["X-API-Key"] = self._config.api_key
+            logger.info("Vizpath client initialized with API key authentication")
+        else:
+            logger.info("Vizpath client initialized without API key (local dev mode)")
+
         self._client = httpx.Client(
             base_url=self._config.base_url,
-            headers={
-                "Authorization": f"Bearer {self._config.api_key}",
-                "Content-Type": "application/json",
-            },
+            headers=headers,
             timeout=self._config.timeout,
         )
 
