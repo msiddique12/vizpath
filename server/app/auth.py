@@ -2,7 +2,6 @@
 
 import hashlib
 import logging
-import os
 import secrets
 
 from fastapi import Depends, HTTPException, Security, status
@@ -10,6 +9,7 @@ from fastapi.security import APIKeyHeader
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
 from app.models import Project
 
@@ -40,7 +40,7 @@ def _get_or_create_default_project(db: Session) -> Project:
     In production mode, blocks unauthenticated requests once real projects exist.
     In dev mode, always creates/returns a default project.
     """
-    is_production = os.environ.get("ENVIRONMENT", "development").lower() == "production"
+    is_production = settings.is_production
 
     if is_production:
         real_project_count = (
