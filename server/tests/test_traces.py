@@ -2,6 +2,72 @@
 
 from datetime import datetime, timezone
 
+from app.auth import hash_api_key
+from app.models import Project
+
+
+class TestTraceIngestionAuth:
+    """Tests for auth behavior on the ingestion endpoint."""
+
+    def test_ingest_no_key_creates_default_project(self, client, test_db):
+        """Without API key in dev mode, a default project is created."""
+        payload = [
+            {
+                "span_id": "span-auth-1",
+                "trace_id": "trace-auth-1",
+                "name": "test",
+                "start_time": datetime.now(timezone.utc).isoformat(),
+            }
+        ]
+        response = client.post("/api/v1/traces/spans/batch", json=payload)
+
+        assert response.status_code == 201
+        project = test_db.query(Project).filter(Project.api_key_hash == "default").first()
+        assert project is not None
+
+    def test_ingest_valid_key(self, client, test_db):
+        """With a valid API key, spans are linked to that project."""
+        api_key = "vp_test_valid_key"
+        project = Project(name="test-project", api_key_hash=hash_api_key(api_key))
+        test_db.add(project)
+        test_db.commit()
+
+        payload = [
+            {
+                "span_id": "span-auth-2",
+                "trace_id": "trace-auth-2",
+                "name": "test",
+                "start_time": datetime.now(timezone.utc).isoformat(),
+            }
+        ]
+        response = client.post(
+            "/api/v1/traces/spans/batch",
+            json=payload,
+            headers={"X-API-Key": api_key},
+        )
+
+        assert response.status_code == 201
+        assert response.json()["ingested"] == 1
+
+    def test_ingest_invalid_key_rejected(self, client, test_db):
+        """With an invalid API key, request is rejected with 401."""
+        payload = [
+            {
+                "span_id": "span-auth-3",
+                "trace_id": "trace-auth-3",
+                "name": "test",
+                "start_time": datetime.now(timezone.utc).isoformat(),
+            }
+        ]
+        response = client.post(
+            "/api/v1/traces/spans/batch",
+            json=payload,
+            headers={"X-API-Key": "vp_totally_bogus_key"},
+        )
+
+        assert response.status_code == 401
+        assert "Invalid API key" in response.json()["detail"]
+
 
 class TestTraceIngestion:
     def test_ingest_single_span(self, client):
