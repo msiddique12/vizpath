@@ -59,10 +59,8 @@ async def traces_websocket(websocket: WebSocket) -> None:
         logger.info(f"WebSocket disconnected. Total connections: {len(active_connections)}")
 
 
-def notify_span_ingested(trace_id: str, span_count: int) -> None:
-    """Notify clients of new span ingestion (called from sync context)."""
-    import asyncio
-
+async def notify_span_ingested(trace_id: str, span_count: int) -> None:
+    """Notify connected clients that new spans were ingested."""
     message = {
         "type": "span_ingested",
         "trace_id": trace_id,
@@ -70,10 +68,6 @@ def notify_span_ingested(trace_id: str, span_count: int) -> None:
     }
 
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.create_task(broadcast_message(message))
-        else:
-            loop.run_until_complete(broadcast_message(message))
-    except RuntimeError:
-        pass
+        await broadcast_message(message)
+    except Exception:
+        logger.warning("Failed to broadcast span ingestion notification", exc_info=True)
