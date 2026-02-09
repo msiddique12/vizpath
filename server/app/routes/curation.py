@@ -108,18 +108,18 @@ def create_or_update_label(
     )
 
 
-@router.get("/labels/{trace_id}", response_model=LabelResponse | None)
+@router.get("/labels/{trace_id}", response_model=LabelResponse)
 def get_label(
     trace_id: str,
     db: Session = Depends(get_db),
-) -> LabelResponse | None:
+) -> LabelResponse:
     """Get the label for a specific trace."""
     label = db.execute(
         select(CuratedLabel).where(CuratedLabel.trace_id == trace_id)
     ).scalar_one_or_none()
 
     if not label:
-        return None
+        raise HTTPException(status_code=404, detail="Label not found")
 
     return LabelResponse(
         id=label.id,
