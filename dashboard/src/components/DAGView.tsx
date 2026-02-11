@@ -5,10 +5,10 @@ import { Span, SpanType } from '@/lib/types'
 const SPAN_COLORS: Record<SpanType, string> = {
   llm: '#8b5cf6',
   tool: '#3b82f6',
-  agent: '#22c55e',
+  agent: '#76B900',
   retrieval: '#eab308',
   chain: '#f97316',
-  custom: '#94a3b8',
+  custom: '#64748b',
 }
 
 interface DAGNode {
@@ -88,7 +88,7 @@ export default function DAGView({ spans, width = 800, height = 500 }: DAGViewPro
       .attr('markerHeight', 6)
       .append('path')
       .attr('d', 'M 0,-5 L 10,0 L 0,5')
-      .attr('fill', '#94a3b8')
+      .attr('fill', '#475569')
 
     const simulation = d3.forceSimulation<DAGNode>(nodes)
       .force('link', d3.forceLink<DAGNode, DAGLink>(links)
@@ -104,7 +104,7 @@ export default function DAGView({ spans, width = 800, height = 500 }: DAGViewPro
       .selectAll('line')
       .data(links)
       .join('line')
-      .attr('stroke', '#cbd5e1')
+      .attr('stroke', '#334155')
       .attr('stroke-width', 2)
       .attr('marker-end', 'url(#arrowhead)')
 
@@ -138,7 +138,7 @@ export default function DAGView({ spans, width = 800, height = 500 }: DAGViewPro
         return Math.min(Math.max(Math.sqrt(duration) / 2, 15), 40)
       })
       .attr('fill', (d) => SPAN_COLORS[d.span.span_type as SpanType] || SPAN_COLORS.custom)
-      .attr('stroke', (d) => d.span.status === 'error' ? '#ef4444' : '#fff')
+      .attr('stroke', (d) => d.span.status === 'error' ? '#ef4444' : '#1e293b')
       .attr('stroke-width', (d) => d.span.status === 'error' ? 3 : 2)
 
     node.append('text')
@@ -150,18 +150,19 @@ export default function DAGView({ spans, width = 800, height = 500 }: DAGViewPro
         return radius + 15
       })
       .attr('font-size', '11px')
-      .attr('fill', '#475569')
+      .attr('fill', '#94a3b8')
 
     const tooltip = d3.select('body').append('div')
       .attr('class', 'dag-tooltip')
       .style('position', 'absolute')
       .style('visibility', 'hidden')
-      .style('background', 'white')
-      .style('border', '1px solid #e2e8f0')
+      .style('background', '#1e293b')
+      .style('border', '1px solid #334155')
       .style('border-radius', '6px')
       .style('padding', '8px 12px')
       .style('font-size', '12px')
-      .style('box-shadow', '0 4px 6px -1px rgb(0 0 0 / 0.1)')
+      .style('color', '#e2e8f0')
+      .style('box-shadow', '0 4px 6px -1px rgb(0 0 0 / 0.3)')
       .style('z-index', '1000')
 
     node.on('mouseover', (_event, d) => {
@@ -174,9 +175,9 @@ export default function DAGView({ spans, width = 800, height = 500 }: DAGViewPro
         .style('visibility', 'visible')
         .html(`
           <div style="font-weight: 600; margin-bottom: 4px;">${d.name}</div>
-          <div style="color: #64748b;">Type: ${d.span.span_type}</div>
-          <div style="color: #64748b;">Duration: ${durationStr}</div>
-          ${d.span.tokens ? `<div style="color: #64748b;">Tokens: ${d.span.tokens}</div>` : ''}
+          <div style="color: #94a3b8;">Type: ${d.span.span_type}</div>
+          <div style="color: #94a3b8;">Duration: ${durationStr}</div>
+          ${d.span.tokens ? `<div style="color: #94a3b8;">Tokens: ${d.span.tokens}</div>` : ''}
           ${d.span.error ? `<div style="color: #ef4444;">Error: ${d.span.error}</div>` : ''}
         `)
     })
@@ -206,7 +207,7 @@ export default function DAGView({ spans, width = 800, height = 500 }: DAGViewPro
   }, [nodes, links, width, height])
 
   if (spans.length === 0) {
-    return <p className="text-slate-500 text-sm">No spans to visualize.</p>
+    return <p className="text-muted-300 text-sm">No spans to visualize.</p>
   }
 
   return (
@@ -215,18 +216,18 @@ export default function DAGView({ spans, width = 800, height = 500 }: DAGViewPro
         ref={svgRef}
         width={width}
         height={height}
-        className="border border-slate-200 rounded-lg bg-slate-50"
+        className="border border-dark-700 rounded-lg bg-dark-900"
       />
-      <div className="absolute bottom-4 left-4 flex items-center gap-3 bg-white/90 px-3 py-2 rounded-lg border border-slate-200 text-xs">
+      <div className="absolute bottom-4 left-4 flex items-center gap-3 bg-dark-800/90 px-3 py-2 rounded-lg border border-dark-700 text-xs">
         {Object.entries(SPAN_COLORS).map(([type, color]) => (
           <div key={type} className="flex items-center gap-1">
             <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
-            <span className="text-slate-600">{type}</span>
+            <span className="text-muted-300">{type}</span>
           </div>
         ))}
       </div>
-      <div className="absolute top-4 right-4 text-xs text-slate-500 bg-white/90 px-2 py-1 rounded border border-slate-200">
-        Drag to move • Scroll to zoom
+      <div className="absolute top-4 right-4 text-xs text-muted-400 bg-dark-800/90 px-2 py-1 rounded border border-dark-700">
+        Drag to move · Scroll to zoom
       </div>
     </div>
   )
