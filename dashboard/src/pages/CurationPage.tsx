@@ -5,6 +5,7 @@ import { Loader2, Tag, Download, Star, CheckCircle } from 'lucide-react'
 import clsx from 'clsx'
 import { getCuratedTraces, getCurationStats, exportCuratedTraces, CuratedTrace } from '@/lib/api'
 import { exportToJSONL } from '@/lib/export'
+import SyntheticDataPanel from '@/components/SyntheticDataPanel'
 
 const LABEL_COLORS: Record<string, string> = {
   excellent: 'bg-green-900/50 text-green-400',
@@ -234,6 +235,12 @@ export default function CurationPage() {
           </div>
         )}
       </div>
+
+      {selectedIds.size === 1 && (
+        <div className="mt-6">
+          <SyntheticDataPanel traceId={Array.from(selectedIds)[0]} />
+        </div>
+      )}
     </div>
   )
 }
