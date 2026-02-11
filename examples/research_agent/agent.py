@@ -29,7 +29,7 @@ class ResearchAgent:
         self,
         api_key: str | None = None,
         base_url: str | None = None,
-        model: str = "meta/llama-3.1-70b-instruct",
+        model: str = "nvidia/llama-3.1-nemotron-70b-instruct",
         max_iterations: int = 10,
         verbose: bool = False,
     ):
@@ -306,6 +306,7 @@ Write a comprehensive report with:
             "research.topic": topic,
             "agent.type": "research",
             "agent.model": self.model,
+            "agent.provider": "nvidia-nim",
         })
 
         # Clear any previous notes
