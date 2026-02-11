@@ -123,3 +123,63 @@ export async function exportCuratedTraces(data: {
     body: JSON.stringify(data),
   })
 }
+
+// Intelligence API
+
+export interface TraceAnalysis {
+  trace_id: string
+  analysis: {
+    quality_score: number
+    labels: string[]
+    suggestions: string[]
+    summary: string
+  }
+  cached: boolean
+}
+
+export interface SelfAnalysis {
+  trace_id: string
+  analysis: {
+    effectiveness: number
+    reasoning_quality: number
+    tool_usage: number
+    overall_score: number
+    strengths: string[]
+    weaknesses: string[]
+    improvements: string[]
+    summary: string
+  }
+  cached: boolean
+}
+
+export interface SyntheticResult {
+  trace_id: string
+  type: string
+  count: number
+  variations: Array<{ input: string; output: string; metadata?: Record<string, unknown> }>
+}
+
+export async function analyzeTrace(traceId: string): Promise<TraceAnalysis> {
+  return fetchApi('/intelligence/analyze', {
+    method: 'POST',
+    body: JSON.stringify({ trace_id: traceId }),
+  })
+}
+
+export async function selfAnalyzeTrace(traceId: string): Promise<SelfAnalysis> {
+  return fetchApi('/intelligence/self-analyze', {
+    method: 'POST',
+    body: JSON.stringify({ trace_id: traceId }),
+  })
+}
+
+export async function generateSynthetic(
+  traceId: string,
+  type: 'variations' | 'corrections' = 'variations',
+  count = 3
+): Promise<SyntheticResult> {
+  return fetchApi('/intelligence/generate-synthetic', {
+    method: 'POST',
+    body: JSON.stringify({ trace_id: traceId, type, count }),
+  })
+}
