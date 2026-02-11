@@ -6,10 +6,10 @@ import { Span, SpanType } from '@/lib/types'
 const SPAN_COLORS: Record<SpanType, string> = {
   llm: 'bg-purple-500',
   tool: 'bg-blue-500',
-  agent: 'bg-green-500',
+  agent: 'bg-nvidia-500',
   retrieval: 'bg-yellow-500',
   chain: 'bg-orange-500',
-  custom: 'bg-slate-400',
+  custom: 'bg-dark-400',
 }
 
 interface SpanNode {
@@ -64,23 +64,23 @@ function SpanRow({
 
   return (
     <div className="group">
-      <div className="flex items-center py-2 hover:bg-slate-50 rounded">
+      <div className="flex items-center py-2 hover:bg-dark-800 rounded">
         <div
           className="flex items-center gap-1 min-w-[200px] pr-4"
           style={{ paddingLeft: `${node.depth * 20}px` }}
         >
           {hasChildren ? (
-            <button onClick={onToggle} className="p-0.5 hover:bg-slate-200 rounded">
+            <button onClick={onToggle} className="p-0.5 hover:bg-dark-700 rounded">
               {expanded ? (
-                <ChevronDown className="h-4 w-4 text-slate-500" />
+                <ChevronDown className="h-4 w-4 text-muted-300" />
               ) : (
-                <ChevronRight className="h-4 w-4 text-slate-500" />
+                <ChevronRight className="h-4 w-4 text-muted-300" />
               )}
             </button>
           ) : (
             <span className="w-5" />
           )}
-          <span className="text-sm text-slate-700 truncate">{span.name}</span>
+          <span className="text-sm text-muted-100 truncate">{span.name}</span>
         </div>
 
         <div className="flex-1 relative h-6">
@@ -99,7 +99,7 @@ function SpanRow({
           />
         </div>
 
-        <div className="min-w-[80px] text-right text-sm text-slate-500 pl-4">
+        <div className="min-w-[80px] text-right text-sm text-muted-300 pl-4">
           {duration < 1000 ? `${duration.toFixed(0)}ms` : `${(duration / 1000).toFixed(2)}s`}
         </div>
       </div>
@@ -150,12 +150,12 @@ export default function SpanTimeline({ spans }: { spans: Span[] }) {
   }, [spans])
 
   if (spans.length === 0) {
-    return <p className="text-slate-500 text-sm">No spans recorded yet.</p>
+    return <p className="text-muted-300 text-sm">No spans recorded yet.</p>
   }
 
   return (
     <div className="space-y-1">
-      <div className="flex items-center text-xs text-slate-500 pb-2 border-b">
+      <div className="flex items-center text-xs text-muted-400 pb-2 border-b border-dark-700">
         <div className="min-w-[200px]">Span</div>
         <div className="flex-1">Timeline</div>
         <div className="min-w-[80px] text-right">Duration</div>
@@ -163,11 +163,11 @@ export default function SpanTimeline({ spans }: { spans: Span[] }) {
       {tree.map((node) => (
         <SpanRowWrapper key={node.span.id} node={node} timeRange={timeRange} />
       ))}
-      <div className="flex items-center gap-4 pt-4 border-t text-xs">
+      <div className="flex items-center gap-4 pt-4 border-t border-dark-700 text-xs">
         {Object.entries(SPAN_COLORS).map(([type, color]) => (
           <div key={type} className="flex items-center gap-1">
             <div className={clsx('w-3 h-3 rounded', color)} />
-            <span className="text-slate-600">{type}</span>
+            <span className="text-muted-300">{type}</span>
           </div>
         ))}
       </div>
