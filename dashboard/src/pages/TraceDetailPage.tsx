@@ -10,6 +10,7 @@ import DAGView from '@/components/DAGView'
 import HeatmapView from '@/components/HeatmapView'
 import ExportMenu from '@/components/ExportMenu'
 import CurationPanel from '@/components/CurationPanel'
+import IntelligencePanel from '@/components/IntelligencePanel'
 
 type ViewMode = 'timeline' | 'dag' | 'heatmap'
 
@@ -120,7 +121,8 @@ export default function TraceDetailPage() {
         {viewMode === 'heatmap' && <HeatmapView spans={spans} />}
       </div>
 
-      <div className="mt-6">
+      <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <IntelligencePanel traceId={trace.id} />
         <CurationPanel traceId={trace.id} traceName={trace.name} />
       </div>
     </div>
