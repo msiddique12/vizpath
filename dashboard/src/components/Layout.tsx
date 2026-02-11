@@ -13,42 +13,54 @@ export default function Layout() {
   const location = useLocation()
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <nav className="bg-white border-b border-slate-200">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="flex h-16 items-center justify-between">
-            <div className="flex items-center">
-              <Link to="/" className="flex items-center gap-2">
-                <LayoutGrid className="h-8 w-8 text-primary-600" />
-                <span className="text-xl font-semibold text-slate-900">vizpath</span>
+    <div className="min-h-screen bg-dark-900 flex">
+      {/* Dark sidebar */}
+      <nav className="w-56 bg-dark-950 border-r border-dark-700 flex flex-col">
+        <div className="p-4">
+          <Link to="/" className="flex items-center gap-2">
+            <LayoutGrid className="h-7 w-7 text-nvidia" />
+            <span className="text-lg font-bold text-muted-100 font-mono tracking-tight">
+              vizpath
+            </span>
+          </Link>
+        </div>
+
+        <div className="flex-1 px-2 py-4 space-y-1">
+          {navigation.map((item) => {
+            const isActive =
+              location.pathname === item.href ||
+              location.pathname.startsWith(item.href + '/')
+            return (
+              <Link
+                key={item.name}
+                to={item.href}
+                className={clsx(
+                  'flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors relative',
+                  isActive
+                    ? 'bg-dark-800 text-nvidia'
+                    : 'text-muted-300 hover:bg-dark-800 hover:text-muted-100'
+                )}
+              >
+                {isActive && (
+                  <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-nvidia rounded-r" />
+                )}
+                <item.icon className="h-4 w-4" />
+                {item.name}
               </Link>
-              <div className="ml-10 flex items-center space-x-4">
-                {navigation.map((item) => {
-                  const isActive = location.pathname.startsWith(item.href)
-                  return (
-                    <Link
-                      key={item.name}
-                      to={item.href}
-                      className={clsx(
-                        'flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-md',
-                        isActive
-                          ? 'bg-primary-50 text-primary-700'
-                          : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                      )}
-                    >
-                      <item.icon className="h-4 w-4" />
-                      {item.name}
-                    </Link>
-                  )
-                })}
-              </div>
-            </div>
-          </div>
+            )
+          })}
+        </div>
+
+        <div className="p-4 border-t border-dark-700">
+          <p className="text-xs text-muted-400 font-mono">Nemotron-powered</p>
         </div>
       </nav>
 
-      <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-        <Outlet />
+      {/* Main content */}
+      <main className="flex-1 overflow-auto">
+        <div className="mx-auto max-w-7xl px-6 py-8">
+          <Outlet />
+        </div>
       </main>
     </div>
   )
