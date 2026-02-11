@@ -15,7 +15,19 @@ class Settings(BaseSettings):
 
     redis_url: str = Field(default="redis://localhost:6379", alias="REDIS_URL")
 
-    openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
+    nvidia_api_key: str | None = Field(default=None, alias="NVIDIA_API_KEY")
+    nvidia_base_url: str = Field(
+        default="https://integrate.api.nvidia.com/v1",
+        alias="NVIDIA_BASE_URL",
+    )
+    nvidia_llm_model: str = Field(
+        default="nvidia/llama-3.1-nemotron-70b-instruct",
+        alias="NVIDIA_LLM_MODEL",
+    )
+    nvidia_embedding_model: str = Field(
+        default="nvidia/nv-embedqa-e5-v5",
+        alias="NVIDIA_EMBEDDING_MODEL",
+    )
 
     debug: bool = Field(default=False, alias="DEBUG")
     host: str = Field(default="0.0.0.0", alias="HOST")
