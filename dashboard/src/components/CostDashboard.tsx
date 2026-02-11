@@ -84,7 +84,7 @@ export default function CostDashboard({ spans, totalCost }: CostDashboardProps) 
   if (costAnalysis.totalTokens === 0) {
     return (
       <div className="text-center py-8">
-        <p className="text-slate-500 text-sm">No token usage data available for cost analysis.</p>
+        <p className="text-muted-400 text-sm">No token usage data available for cost analysis.</p>
       </div>
     )
   }
@@ -92,34 +92,34 @@ export default function CostDashboard({ spans, totalCost }: CostDashboardProps) 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-3 gap-4">
-        <div className="bg-slate-50 rounded-lg p-4">
-          <p className="text-xs text-slate-500 uppercase tracking-wide">Total Cost</p>
-          <p className="text-2xl font-semibold text-slate-900 mt-1">
+        <div className="bg-dark-800 rounded-lg p-4">
+          <p className="text-xs text-muted-400 uppercase tracking-wide">Total Cost</p>
+          <p className="text-2xl font-semibold text-muted-100 mt-1">
             {formatCost(costAnalysis.estimatedTotal)}
           </p>
         </div>
-        <div className="bg-slate-50 rounded-lg p-4">
-          <p className="text-xs text-slate-500 uppercase tracking-wide">Total Tokens</p>
-          <p className="text-2xl font-semibold text-slate-900 mt-1">
+        <div className="bg-dark-800 rounded-lg p-4">
+          <p className="text-xs text-muted-400 uppercase tracking-wide">Total Tokens</p>
+          <p className="text-2xl font-semibold text-muted-100 mt-1">
             {costAnalysis.totalTokens.toLocaleString()}
           </p>
         </div>
-        <div className="bg-slate-50 rounded-lg p-4">
-          <p className="text-xs text-slate-500 uppercase tracking-wide">LLM Calls</p>
-          <p className="text-2xl font-semibold text-slate-900 mt-1">
+        <div className="bg-dark-800 rounded-lg p-4">
+          <p className="text-xs text-muted-400 uppercase tracking-wide">LLM Calls</p>
+          <p className="text-2xl font-semibold text-muted-100 mt-1">
             {costAnalysis.byType.find((t) => t.type === 'llm')?.count || 0}
           </p>
         </div>
       </div>
 
       <div>
-        <h4 className="text-sm font-medium text-slate-700 mb-3">Cost by Span Type</h4>
+        <h4 className="text-sm font-medium text-muted-200 mb-3">Cost by Span Type</h4>
         <div className="space-y-3">
           {costAnalysis.byType.map(({ type, tokens, cost }) => (
             <div key={type} className="flex items-center gap-4">
-              <span className="w-24 text-sm text-slate-700 capitalize">{type}</span>
+              <span className="w-24 text-sm text-muted-200 capitalize">{type}</span>
               <div className="flex-1">
-                <div className="h-6 bg-slate-100 rounded-full overflow-hidden">
+                <div className="h-6 bg-dark-700 rounded-full overflow-hidden">
                   <div
                     className={clsx(
                       'h-full rounded-full',
@@ -127,15 +127,15 @@ export default function CostDashboard({ spans, totalCost }: CostDashboardProps) 
                       type === 'tool' ? 'bg-amber-500' :
                       type === 'agent' ? 'bg-emerald-500' :
                       type === 'retrieval' ? 'bg-cyan-500' :
-                      'bg-slate-400'
+                      'bg-muted-400'
                     )}
                     style={{ width: `${(cost / maxCost) * 100}%` }}
                   />
                 </div>
               </div>
               <div className="w-32 text-right">
-                <span className="text-sm font-medium text-slate-900">{formatCost(cost)}</span>
-                <span className="text-xs text-slate-500 ml-2">({tokens.toLocaleString()} tok)</span>
+                <span className="text-sm font-medium text-muted-100">{formatCost(cost)}</span>
+                <span className="text-xs text-muted-400 ml-2">({tokens.toLocaleString()} tok)</span>
               </div>
             </div>
           ))}
@@ -144,32 +144,32 @@ export default function CostDashboard({ spans, totalCost }: CostDashboardProps) 
 
       {costAnalysis.topCostlySpans.length > 0 && (
         <div>
-          <h4 className="text-sm font-medium text-slate-700 mb-3">Most Expensive Spans</h4>
+          <h4 className="text-sm font-medium text-muted-200 mb-3">Most Expensive Spans</h4>
           <div className="border rounded-lg overflow-hidden">
             <table className="w-full">
-              <thead className="bg-slate-50">
+              <thead className="bg-dark-800">
                 <tr>
-                  <th className="text-left text-xs font-medium text-slate-500 px-4 py-2">Name</th>
-                  <th className="text-left text-xs font-medium text-slate-500 px-4 py-2">Type</th>
-                  <th className="text-right text-xs font-medium text-slate-500 px-4 py-2">Tokens</th>
-                  <th className="text-right text-xs font-medium text-slate-500 px-4 py-2">Cost</th>
+                  <th className="text-left text-xs font-medium text-muted-400 px-4 py-2">Name</th>
+                  <th className="text-left text-xs font-medium text-muted-400 px-4 py-2">Type</th>
+                  <th className="text-right text-xs font-medium text-muted-400 px-4 py-2">Tokens</th>
+                  <th className="text-right text-xs font-medium text-muted-400 px-4 py-2">Cost</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-dark-700">
                 {costAnalysis.topCostlySpans.map(({ span, cost }) => (
                   <tr key={span.id}>
-                    <td className="px-4 py-2 text-sm text-slate-900 truncate max-w-xs">
+                    <td className="px-4 py-2 text-sm text-muted-100 truncate max-w-xs">
                       {span.name}
                     </td>
                     <td className="px-4 py-2">
-                      <span className="inline-flex px-2 py-0.5 text-xs rounded-full bg-slate-100 text-slate-600 capitalize">
+                      <span className="inline-flex px-2 py-0.5 text-xs rounded-full bg-dark-700 text-muted-300 capitalize">
                         {span.span_type}
                       </span>
                     </td>
-                    <td className="px-4 py-2 text-sm text-slate-600 text-right">
+                    <td className="px-4 py-2 text-sm text-muted-300 text-right">
                       {(span.tokens || span.token_count || 0).toLocaleString()}
                     </td>
-                    <td className="px-4 py-2 text-sm font-medium text-slate-900 text-right">
+                    <td className="px-4 py-2 text-sm font-medium text-muted-100 text-right">
                       {formatCost(cost)}
                     </td>
                   </tr>
@@ -181,14 +181,14 @@ export default function CostDashboard({ spans, totalCost }: CostDashboardProps) 
       )}
 
       <div>
-        <h4 className="text-sm font-medium text-slate-700 mb-3">Cost Efficiency</h4>
+        <h4 className="text-sm font-medium text-muted-200 mb-3">Cost Efficiency</h4>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
           {costAnalysis.byType
             .filter((t) => t.duration > 0 && t.cost > 0)
             .map(({ type, cost, duration, avgCost }) => (
-              <div key={type} className="bg-slate-50 rounded-lg p-3">
-                <p className="text-sm font-medium text-slate-900 capitalize">{type}</p>
-                <div className="mt-2 space-y-1 text-xs text-slate-500">
+              <div key={type} className="bg-dark-800 rounded-lg p-3">
+                <p className="text-sm font-medium text-muted-100 capitalize">{type}</p>
+                <div className="mt-2 space-y-1 text-xs text-muted-400">
                   <p>Avg: {formatCost(avgCost)}/call</p>
                   <p>
                     Rate: {formatCost((cost / duration) * 1000)}/sec
@@ -199,7 +199,7 @@ export default function CostDashboard({ spans, totalCost }: CostDashboardProps) 
         </div>
       </div>
 
-      <div className="text-xs text-slate-400 pt-2 border-t">
+      <div className="text-xs text-muted-400 pt-2 border-t">
         Cost estimates are based on typical API pricing and may vary from actual charges.
       </div>
     </div>

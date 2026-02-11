@@ -58,8 +58,8 @@ export default function ExportMenu({ onExport, disabled, label = 'Export' }: Exp
         className={clsx(
           'inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg transition-colors',
           disabled
-            ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-            : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+            ? 'bg-dark-700 text-muted-400 cursor-not-allowed'
+            : 'bg-dark-900 border border-dark-700 text-muted-200 hover:bg-dark-800'
         )}
       >
         <Download className="h-4 w-4" />
@@ -67,17 +67,17 @@ export default function ExportMenu({ onExport, disabled, label = 'Export' }: Exp
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-1 w-56 bg-white rounded-lg shadow-lg border border-slate-200 py-1 z-10">
+        <div className="absolute right-0 mt-1 w-56 bg-dark-900 rounded-lg shadow-lg border border-dark-700 py-1 z-10">
           {exportOptions.map((option) => (
             <button
               key={option.format}
               onClick={() => handleExport(option.format)}
-              className="w-full flex items-start gap-3 px-3 py-2 text-left hover:bg-slate-50 transition-colors"
+              className="w-full flex items-start gap-3 px-3 py-2 text-left hover:bg-dark-800 transition-colors"
             >
-              <option.icon className="h-5 w-5 text-slate-400 mt-0.5" />
+              <option.icon className="h-5 w-5 text-muted-400 mt-0.5" />
               <div>
-                <p className="text-sm font-medium text-slate-900">{option.label}</p>
-                <p className="text-xs text-slate-500">{option.description}</p>
+                <p className="text-sm font-medium text-muted-100">{option.label}</p>
+                <p className="text-xs text-muted-400">{option.description}</p>
               </div>
             </button>
           ))}

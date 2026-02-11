@@ -10,11 +10,11 @@ interface CurationPanelProps {
 }
 
 const LABELS = [
-  { value: 'excellent', color: 'bg-green-100 text-green-700 border-green-200' },
-  { value: 'good', color: 'bg-blue-100 text-blue-700 border-blue-200' },
-  { value: 'needs_improvement', color: 'bg-amber-100 text-amber-700 border-amber-200' },
-  { value: 'failure', color: 'bg-red-100 text-red-700 border-red-200' },
-  { value: 'interesting', color: 'bg-purple-100 text-purple-700 border-purple-200' },
+  { value: 'excellent', color: 'bg-green-900/50 text-green-400 border-green-800' },
+  { value: 'good', color: 'bg-blue-900/50 text-blue-400 border-blue-800' },
+  { value: 'needs_improvement', color: 'bg-amber-900/50 text-amber-400 border-amber-800' },
+  { value: 'failure', color: 'bg-red-900/50 text-red-400 border-red-800' },
+  { value: 'interesting', color: 'bg-purple-900/50 text-purple-400 border-purple-800' },
 ]
 
 export default function CurationPanel({ traceId, traceName: _traceName }: CurationPanelProps) {
@@ -80,27 +80,27 @@ export default function CurationPanel({ traceId, traceName: _traceName }: Curati
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-4">
-        <Loader2 className="h-5 w-5 text-slate-400 animate-spin" />
+        <Loader2 className="h-5 w-5 text-muted-400 animate-spin" />
       </div>
     )
   }
 
   return (
-    <div className="bg-slate-50 rounded-lg p-4 space-y-4">
+    <div className="bg-dark-800 rounded-lg p-4 space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium text-slate-700 flex items-center gap-2">
+        <h3 className="text-sm font-medium text-muted-200 flex items-center gap-2">
           <Tag className="h-4 w-4" />
           Curation
         </h3>
         {label && (
-          <span className="text-xs text-slate-500">
+          <span className="text-xs text-muted-400">
             {label.exported ? 'Exported' : 'Not exported'}
           </span>
         )}
       </div>
 
       <div>
-        <p className="text-xs text-slate-500 mb-2">Label</p>
+        <p className="text-xs text-muted-400 mb-2">Label</p>
         <div className="flex flex-wrap gap-2">
           {LABELS.map(({ value, color }) => (
             <button
@@ -110,7 +110,7 @@ export default function CurationPanel({ traceId, traceName: _traceName }: Curati
                 'px-2.5 py-1 text-xs font-medium rounded-full border transition-all',
                 selectedLabel === value
                   ? `${color} ring-2 ring-offset-1 ring-primary-400`
-                  : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
+                  : 'bg-dark-900 text-muted-300 border-dark-700 hover:border-muted-400'
               )}
             >
               {value.replace('_', ' ')}
@@ -120,7 +120,7 @@ export default function CurationPanel({ traceId, traceName: _traceName }: Curati
       </div>
 
       <div>
-        <p className="text-xs text-slate-500 mb-2 flex items-center gap-1">
+        <p className="text-xs text-muted-400 mb-2 flex items-center gap-1">
           <Star className="h-3 w-3" />
           Quality Score
         </p>
@@ -133,7 +133,7 @@ export default function CurationPanel({ traceId, traceName: _traceName }: Curati
                 'w-8 h-8 rounded-lg text-sm font-medium transition-colors',
                 score === s
                   ? 'bg-primary-500 text-white'
-                  : 'bg-white border border-slate-200 text-slate-600 hover:border-slate-300'
+                  : 'bg-dark-900 border border-dark-700 text-muted-300 hover:border-muted-400'
               )}
             >
               {s}
@@ -143,7 +143,7 @@ export default function CurationPanel({ traceId, traceName: _traceName }: Curati
       </div>
 
       <div>
-        <p className="text-xs text-slate-500 mb-2 flex items-center gap-1">
+        <p className="text-xs text-muted-400 mb-2 flex items-center gap-1">
           <MessageSquare className="h-3 w-3" />
           Notes
         </p>
@@ -151,12 +151,12 @@ export default function CurationPanel({ traceId, traceName: _traceName }: Curati
           value={notes}
           onChange={(e) => handleNotesChange(e.target.value)}
           placeholder="Add notes about this trace..."
-          className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-primary-500"
+          className="w-full px-3 py-2 text-sm bg-dark-900 text-muted-100 border border-dark-700 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 placeholder:text-muted-500"
           rows={2}
         />
       </div>
 
-      <div className="flex items-center gap-2 pt-2 border-t border-slate-200">
+      <div className="flex items-center gap-2 pt-2 border-t border-dark-700">
         <button
           onClick={() => saveMutation.mutate()}
           disabled={!hasChanges || saveMutation.isPending}
@@ -164,7 +164,7 @@ export default function CurationPanel({ traceId, traceName: _traceName }: Curati
             'flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg transition-colors',
             hasChanges
               ? 'bg-primary-600 text-white hover:bg-primary-700'
-              : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+              : 'bg-dark-700 text-muted-400 cursor-not-allowed'
           )}
         >
           {saveMutation.isPending ? (
@@ -178,7 +178,7 @@ export default function CurationPanel({ traceId, traceName: _traceName }: Curati
           <button
             onClick={() => deleteMutation.mutate()}
             disabled={deleteMutation.isPending}
-            className="flex items-center justify-center gap-1 px-3 py-2 text-sm font-medium text-red-600 bg-white border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+            className="flex items-center justify-center gap-1 px-3 py-2 text-sm font-medium text-red-400 bg-dark-900 border border-red-800 rounded-lg hover:bg-red-900/30 transition-colors"
           >
             {deleteMutation.isPending ? (
               <Loader2 className="h-4 w-4 animate-spin" />

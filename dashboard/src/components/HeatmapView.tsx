@@ -18,7 +18,7 @@ const DURATION_BUCKETS = [
 ]
 
 function getIntensityClass(count: number, maxCount: number): string {
-  if (count === 0) return 'bg-slate-50'
+  if (count === 0) return 'bg-dark-800'
   const ratio = count / maxCount
   if (ratio < 0.2) return 'bg-primary-100'
   if (ratio < 0.4) return 'bg-primary-200'
@@ -69,7 +69,7 @@ export default function HeatmapView({ spans }: HeatmapViewProps) {
   }, [spans])
 
   if (spans.length === 0) {
-    return <p className="text-slate-500 text-sm">No spans to analyze.</p>
+    return <p className="text-muted-400 text-sm">No spans to analyze.</p>
   }
 
   return (
@@ -78,13 +78,13 @@ export default function HeatmapView({ spans }: HeatmapViewProps) {
         <table className="w-full">
           <thead>
             <tr>
-              <th className="text-left text-xs font-medium text-slate-500 pb-2 pr-4">
+              <th className="text-left text-xs font-medium text-muted-400 pb-2 pr-4">
                 Type
               </th>
               {DURATION_BUCKETS.map((bucket) => (
                 <th
                   key={bucket.label}
-                  className="text-center text-xs font-medium text-slate-500 pb-2 px-1"
+                  className="text-center text-xs font-medium text-muted-400 pb-2 px-1"
                 >
                   {bucket.label}
                 </th>
@@ -98,7 +98,7 @@ export default function HeatmapView({ spans }: HeatmapViewProps) {
 
               return (
                 <tr key={type}>
-                  <td className="text-sm text-slate-700 py-1 pr-4 capitalize">
+                  <td className="text-sm text-muted-200 py-1 pr-4 capitalize">
                     {type}
                   </td>
                   {DURATION_BUCKETS.map((bucket) => {
@@ -111,7 +111,7 @@ export default function HeatmapView({ spans }: HeatmapViewProps) {
                             getIntensityClass(count, maxCount),
                             count > 0 && maxCount > 0 && count / maxCount > 0.4
                               ? 'text-white'
-                              : 'text-slate-600'
+                              : 'text-muted-300'
                           )}
                           title={`${type}: ${count} spans in ${bucket.label}`}
                         >
@@ -127,13 +127,13 @@ export default function HeatmapView({ spans }: HeatmapViewProps) {
         </table>
       </div>
 
-      <div className="border-t pt-4">
-        <h4 className="text-sm font-medium text-slate-700 mb-3">Statistics by Type</h4>
+      <div className="border-t border-dark-700 pt-4">
+        <h4 className="text-sm font-medium text-muted-200 mb-3">Statistics by Type</h4>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
           {stats.map(({ type, count, avg, max }) => (
-            <div key={type} className="bg-slate-50 rounded-lg p-3">
-              <p className="text-sm font-medium text-slate-900 capitalize">{type}</p>
-              <div className="mt-1 space-y-1 text-xs text-slate-500">
+            <div key={type} className="bg-dark-800 rounded-lg p-3">
+              <p className="text-sm font-medium text-muted-100 capitalize">{type}</p>
+              <div className="mt-1 space-y-1 text-xs text-muted-400">
                 <p>{count} spans</p>
                 <p>Avg: {avg < 1000 ? `${avg.toFixed(0)}ms` : `${(avg / 1000).toFixed(2)}s`}</p>
                 <p>Max: {max < 1000 ? `${max.toFixed(0)}ms` : `${(max / 1000).toFixed(2)}s`}</p>
@@ -143,10 +143,10 @@ export default function HeatmapView({ spans }: HeatmapViewProps) {
         </div>
       </div>
 
-      <div className="flex items-center gap-2 text-xs text-slate-500">
+      <div className="flex items-center gap-2 text-xs text-muted-400">
         <span>Intensity:</span>
         <div className="flex items-center gap-1">
-          <div className="w-4 h-4 rounded bg-slate-50 border" />
+          <div className="w-4 h-4 rounded bg-dark-800 border" />
           <span>0</span>
         </div>
         <div className="flex items-center gap-1">

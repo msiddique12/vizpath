@@ -126,40 +126,40 @@ export default function TraceComparison({ traceA, traceB }: TraceComparisonProps
       <div className="grid grid-cols-3 gap-4">
         <div className="col-span-1" />
         <div className="text-center">
-          <p className="text-sm font-medium text-slate-900 truncate">{traceA.trace.name}</p>
-          <p className="text-xs text-slate-500">Trace A</p>
+          <p className="text-sm font-medium text-muted-100 truncate">{traceA.trace.name}</p>
+          <p className="text-xs text-muted-400">Trace A</p>
         </div>
         <div className="text-center">
-          <p className="text-sm font-medium text-slate-900 truncate">{traceB.trace.name}</p>
-          <p className="text-xs text-slate-500">Trace B</p>
+          <p className="text-sm font-medium text-muted-100 truncate">{traceB.trace.name}</p>
+          <p className="text-xs text-muted-400">Trace B</p>
         </div>
       </div>
 
-      <div className="border rounded-lg overflow-hidden">
+      <div className="border border-dark-700 rounded-lg overflow-hidden">
         <table className="w-full">
-          <thead className="bg-slate-50">
+          <thead className="bg-dark-800">
             <tr>
-              <th className="text-left text-xs font-medium text-slate-500 px-4 py-2">Metric</th>
-              <th className="text-center text-xs font-medium text-slate-500 px-4 py-2">Trace A</th>
-              <th className="text-center text-xs font-medium text-slate-500 px-4 py-2">Trace B</th>
-              <th className="text-center text-xs font-medium text-slate-500 px-4 py-2">Change</th>
+              <th className="text-left text-xs font-medium text-muted-400 px-4 py-2">Metric</th>
+              <th className="text-center text-xs font-medium text-muted-400 px-4 py-2">Trace A</th>
+              <th className="text-center text-xs font-medium text-muted-400 px-4 py-2">Trace B</th>
+              <th className="text-center text-xs font-medium text-muted-400 px-4 py-2">Change</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody className="divide-y divide-dark-700">
             {metrics.map((metric) => (
               <tr key={metric.label}>
-                <td className="px-4 py-3 text-sm text-slate-700">{metric.label}</td>
-                <td className="px-4 py-3 text-sm text-slate-900 text-center">{metric.valueA}</td>
-                <td className="px-4 py-3 text-sm text-slate-900 text-center">{metric.valueB}</td>
+                <td className="px-4 py-3 text-sm text-muted-200">{metric.label}</td>
+                <td className="px-4 py-3 text-sm text-muted-100 text-center">{metric.valueA}</td>
+                <td className="px-4 py-3 text-sm text-muted-100 text-center">{metric.valueB}</td>
                 <td className="px-4 py-3 text-center">
                   <span
                     className={clsx(
                       'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium',
                       metric.diff === 0
-                        ? 'bg-slate-100 text-slate-600'
+                        ? 'bg-dark-700 text-muted-300'
                         : metric.diff < 0
-                          ? 'bg-green-100 text-green-700'
-                          : 'bg-red-100 text-red-700'
+                          ? 'bg-green-900/50 text-green-400'
+                          : 'bg-red-900/50 text-red-400'
                     )}
                   >
                     {metric.diff === 0
@@ -174,18 +174,18 @@ export default function TraceComparison({ traceA, traceB }: TraceComparisonProps
       </div>
 
       <div>
-        <h4 className="text-sm font-medium text-slate-700 mb-3">Span Type Distribution</h4>
+        <h4 className="text-sm font-medium text-muted-200 mb-3">Span Type Distribution</h4>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           {spanTypeComparison.map(({ type, countA, countB, diff }) => (
-            <div key={type} className="bg-slate-50 rounded-lg p-3">
-              <p className="text-sm font-medium text-slate-900 capitalize">{type}</p>
+            <div key={type} className="bg-dark-800 rounded-lg p-3">
+              <p className="text-sm font-medium text-muted-100 capitalize">{type}</p>
               <div className="mt-2 flex items-center justify-between text-xs">
-                <span className="text-slate-500">A: {countA}</span>
+                <span className="text-muted-400">A: {countA}</span>
                 <span
                   className={clsx(
                     'px-1.5 py-0.5 rounded',
                     diff === 0
-                      ? 'bg-slate-200 text-slate-600'
+                      ? 'bg-dark-700 text-muted-300'
                       : diff < 0
                         ? 'bg-green-100 text-green-700'
                         : 'bg-red-100 text-red-700'
@@ -193,7 +193,7 @@ export default function TraceComparison({ traceA, traceB }: TraceComparisonProps
                 >
                   {diff === 0 ? '=' : diff > 0 ? `+${diff.toFixed(0)}%` : `${diff.toFixed(0)}%`}
                 </span>
-                <span className="text-slate-500">B: {countB}</span>
+                <span className="text-muted-400">B: {countB}</span>
               </div>
             </div>
           ))}
@@ -202,14 +202,14 @@ export default function TraceComparison({ traceA, traceB }: TraceComparisonProps
 
       {timelineComparison.length > 0 && (
         <div>
-          <h4 className="text-sm font-medium text-slate-700 mb-3">
+          <h4 className="text-sm font-medium text-muted-200 mb-3">
             Top Performance Differences by Span
           </h4>
           <div className="space-y-2">
             {timelineComparison.map(({ name, avgDurationA, avgDurationB, diff }) => (
-              <div key={name} className="flex items-center gap-4 py-2 border-b border-slate-100">
-                <span className="text-sm text-slate-700 truncate flex-1">{name}</span>
-                <span className="text-xs text-slate-500 w-20 text-right">
+              <div key={name} className="flex items-center gap-4 py-2 border-b border-dark-700">
+                <span className="text-sm text-muted-200 truncate flex-1">{name}</span>
+                <span className="text-xs text-muted-400 w-20 text-right">
                   {formatDuration(avgDurationA)}
                 </span>
                 <div className="w-24 flex justify-center">
@@ -217,16 +217,16 @@ export default function TraceComparison({ traceA, traceB }: TraceComparisonProps
                     className={clsx(
                       'px-2 py-0.5 rounded text-xs font-medium',
                       diff === 0
-                        ? 'bg-slate-100 text-slate-600'
+                        ? 'bg-dark-700 text-muted-300'
                         : diff < 0
-                          ? 'bg-green-100 text-green-700'
-                          : 'bg-red-100 text-red-700'
+                          ? 'bg-green-900/50 text-green-400'
+                          : 'bg-red-900/50 text-red-400'
                     )}
                   >
                     {diff === 0 ? '=' : `${diff > 0 ? '+' : ''}${diff.toFixed(0)}%`}
                   </span>
                 </div>
-                <span className="text-xs text-slate-500 w-20 text-left">
+                <span className="text-xs text-muted-400 w-20 text-left">
                   {formatDuration(avgDurationB)}
                 </span>
               </div>
