@@ -59,23 +59,23 @@ export default function ComparisonPage() {
 
     return (
       <div className="flex-1">
-        <label className="block text-sm font-medium text-slate-700 mb-2">Trace {slot}</label>
+        <label className="block text-sm font-medium text-muted-200 mb-2">Trace {slot}</label>
         {selected && selectedTrace ? (
-          <div className="flex items-center gap-2 bg-primary-50 border border-primary-200 rounded-lg px-3 py-2">
+          <div className="flex items-center gap-2 bg-primary-900/20 border border-primary-800 rounded-lg px-3 py-2">
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-slate-900 truncate">{selectedTrace.name}</p>
-              <p className="text-xs text-slate-500">{formatTimestamp(selectedTrace.created_at)}</p>
+              <p className="text-sm font-medium text-muted-100 truncate">{selectedTrace.name}</p>
+              <p className="text-xs text-muted-400">{formatTimestamp(selectedTrace.created_at)}</p>
             </div>
             <button
               onClick={onClear}
-              className="p-1 text-slate-400 hover:text-slate-600 rounded"
+              className="p-1 text-muted-400 hover:text-muted-200 rounded"
             >
               <X className="h-4 w-4" />
             </button>
           </div>
         ) : (
           <select
-            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+            className="w-full bg-dark-800 border border-dark-700 text-muted-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
             value=""
             onChange={(e) => handleSelectTrace(e.target.value, slot)}
           >
@@ -96,21 +96,21 @@ export default function ComparisonPage() {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-slate-900">Compare Traces</h1>
-        <p className="mt-1 text-sm text-slate-500">
+        <h1 className="text-2xl font-semibold text-muted-100">Compare Traces</h1>
+        <p className="mt-1 text-sm text-muted-400">
           Select two traces to compare their performance and structure
         </p>
       </div>
 
-      <div className="bg-white rounded-lg border border-slate-200 p-6">
+      <div className="bg-dark-900 rounded-lg border border-dark-700 p-6">
         {tracesLoading ? (
           <div className="flex items-center justify-center h-32">
             <Loader2 className="h-6 w-6 text-primary-600 animate-spin" />
           </div>
         ) : traces.length === 0 ? (
           <div className="text-center py-8">
-            <GitCompare className="h-12 w-12 text-slate-300 mx-auto mb-3" />
-            <p className="text-slate-500">No traces available for comparison</p>
+            <GitCompare className="h-12 w-12 text-muted-500 mx-auto mb-3" />
+            <p className="text-muted-400">No traces available for comparison</p>
           </div>
         ) : (
           <>
@@ -121,7 +121,7 @@ export default function ComparisonPage() {
                 onClear={() => setSelectedTraceA(null)}
               />
               <div className="pb-2">
-                <GitCompare className="h-5 w-5 text-slate-400" />
+                <GitCompare className="h-5 w-5 text-muted-400" />
               </div>
               <TraceSelector
                 slot="B"
@@ -131,7 +131,7 @@ export default function ComparisonPage() {
             </div>
 
             {selectedTraceA && selectedTraceB && (
-              <div className="border-t pt-6">
+              <div className="border-t border-dark-700 pt-6">
                 {loadingA || loadingB ? (
                   <div className="flex items-center justify-center h-32">
                     <Loader2 className="h-6 w-6 text-primary-600 animate-spin" />
@@ -139,7 +139,7 @@ export default function ComparisonPage() {
                 ) : traceAData && traceBData ? (
                   <TraceComparison traceA={traceAData} traceB={traceBData} />
                 ) : (
-                  <p className="text-slate-500 text-center py-8">
+                  <p className="text-muted-400 text-center py-8">
                     Failed to load trace data
                   </p>
                 )}
@@ -150,7 +150,7 @@ export default function ComparisonPage() {
               <div
                 className={clsx(
                   'border-2 border-dashed rounded-lg p-8 text-center',
-                  'border-slate-200 text-slate-400'
+                  'border-dark-600 text-muted-400'
                 )}
               >
                 <GitCompare className="h-10 w-10 mx-auto mb-3 opacity-50" />

@@ -37,8 +37,8 @@ export default function TraceDetailPage() {
 
   if (error || !data) {
     return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-        <p className="text-red-700">Failed to load trace details.</p>
+      <div className="bg-red-900/30 border border-red-800 rounded-lg p-4">
+        <p className="text-red-400">Failed to load trace details.</p>
       </div>
     )
   }
@@ -54,15 +54,15 @@ export default function TraceDetailPage() {
       <div className="mb-6">
         <Link
           to="/traces"
-          className="inline-flex items-center text-sm text-slate-500 hover:text-slate-700 mb-4"
+          className="inline-flex items-center text-sm text-muted-400 hover:text-muted-200 mb-4"
         >
           <ArrowLeft className="h-4 w-4 mr-1" />
           Back to traces
         </Link>
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-semibold text-slate-900">{trace.name}</h1>
-            <p className="mt-1 text-sm text-slate-500">
+            <h1 className="text-2xl font-semibold text-muted-100">{trace.name}</h1>
+            <p className="mt-1 text-sm text-muted-400">
               {spans.length} spans
               {trace.duration_ms && ` · ${(trace.duration_ms / 1000).toFixed(2)}s`}
               {trace.total_tokens && ` · ${trace.total_tokens.toLocaleString()} tokens`}
@@ -72,17 +72,17 @@ export default function TraceDetailPage() {
         </div>
       </div>
 
-      <div className="bg-white rounded-lg border border-slate-200 p-6">
+      <div className="bg-dark-900 rounded-lg border border-dark-700 p-6">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-medium text-slate-900">Execution View</h2>
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg">
+          <h2 className="text-lg font-medium text-muted-100">Execution View</h2>
+          <div className="flex items-center gap-1 bg-dark-800 p-1 rounded-lg">
             <button
               onClick={() => setViewMode('timeline')}
               className={clsx(
                 'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
                 viewMode === 'timeline'
-                  ? 'bg-white text-slate-900 shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-dark-700 text-muted-100 shadow-sm'
+                  : 'text-muted-400 hover:text-muted-100'
               )}
             >
               <List className="h-4 w-4" />
@@ -93,8 +93,8 @@ export default function TraceDetailPage() {
               className={clsx(
                 'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
                 viewMode === 'dag'
-                  ? 'bg-white text-slate-900 shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-dark-700 text-muted-100 shadow-sm'
+                  : 'text-muted-400 hover:text-muted-100'
               )}
             >
               <GitBranch className="h-4 w-4" />
@@ -105,8 +105,8 @@ export default function TraceDetailPage() {
               className={clsx(
                 'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
                 viewMode === 'heatmap'
-                  ? 'bg-white text-slate-900 shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-dark-700 text-muted-100 shadow-sm'
+                  : 'text-muted-400 hover:text-muted-100'
               )}
             >
               <Grid2x2 className="h-4 w-4" />
