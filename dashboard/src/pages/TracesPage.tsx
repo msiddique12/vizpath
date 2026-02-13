@@ -1,11 +1,14 @@
+import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { formatDistanceToNow } from 'date-fns'
-import { AlertCircle, CheckCircle, Clock, Loader2, Wifi, WifiOff } from 'lucide-react'
+import { AlertCircle, CheckCircle, Clock, Loader2, Wifi, WifiOff, ChevronLeft, ChevronRight } from 'lucide-react'
 import clsx from 'clsx'
 import { getTraces } from '@/lib/api'
 import { Trace, SpanStatus } from '@/lib/types'
 import { useWebSocket } from '@/hooks/useWebSocket'
+
+const PAGE_SIZE = 50
 
 function StatusBadge({ status }: { status: SpanStatus }) {
   const config = {
@@ -64,6 +67,7 @@ function TraceRow({ trace }: { trace: Trace }) {
 
 export default function TracesPage() {
   const queryClient = useQueryClient()
+  const [page, setPage] = useState(1)
 
   const { connected } = useWebSocket({
     onMessage: (msg) => {
@@ -74,10 +78,14 @@ export default function TracesPage() {
   })
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['traces'],
-    queryFn: () => getTraces(50),
+    queryKey: ['traces', page],
+    queryFn: () => getTraces(PAGE_SIZE, (page - 1) * PAGE_SIZE),
     refetchInterval: connected ? false : 5000,
   })
+
+  const totalPages = data?.total ? Math.ceil(data.total / PAGE_SIZE) : 1
+  const hasNextPage = page < totalPages
+  const hasPrevPage = page > 1
 
   if (isLoading) {
     return (
@@ -122,6 +130,47 @@ export default function TracesPage() {
           data?.traces.map((trace) => <TraceRow key={trace.id} trace={trace} />)
         )}
       </div>
+
+      {totalPages > 1 && (
+        <div className="mt-4 flex items-center justify-between">
+          <p className="text-sm text-muted-400">
+            Showing {((page - 1) * PAGE_SIZE) + 1} - {Math.min(page * PAGE_SIZE, data?.total || 0)} of {data?.total || 0}
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={!hasPrevPage}
+              aria-label="Previous page"
+              className={clsx(
+                'flex items-center gap-1 px-3 py-2 text-sm rounded-lg transition-colors',
+                hasPrevPage
+                  ? 'bg-dark-800 text-muted-200 hover:bg-dark-700'
+                  : 'bg-dark-900 text-muted-500 cursor-not-allowed'
+              )}
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Previous
+            </button>
+            <span className="text-sm text-muted-400 px-2">
+              Page {page} of {totalPages}
+            </span>
+            <button
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              disabled={!hasNextPage}
+              aria-label="Next page"
+              className={clsx(
+                'flex items-center gap-1 px-3 py-2 text-sm rounded-lg transition-colors',
+                hasNextPage
+                  ? 'bg-dark-800 text-muted-200 hover:bg-dark-700'
+                  : 'bg-dark-900 text-muted-500 cursor-not-allowed'
+              )}
+            >
+              Next
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
