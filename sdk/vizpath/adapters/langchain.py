@@ -11,8 +11,20 @@ from vizpath.tracer import Tracer
 if TYPE_CHECKING:
     pass
 
+# Attempt to import LangChain's base callback handler
+try:
+    from langchain_core.callbacks.base import BaseCallbackHandler
+except ImportError:
+    try:
+        from langchain.callbacks.base import BaseCallbackHandler
+    except ImportError:
+        # Fallback: define a minimal base class if LangChain is not installed
+        class BaseCallbackHandler:  # type: ignore[no-redef]
+            """Fallback base class when LangChain is not installed."""
+            pass
 
-class VizpathCallbackHandler:
+
+class VizpathCallbackHandler(BaseCallbackHandler):  # type: ignore[misc]
     """
     LangChain callback handler for automatic tracing.
 
