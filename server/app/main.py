@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from app import __version__
 from app.config import settings
 from app.database import check_db_connection, engine, init_db
+from app.rate_limit import rate_limit_middleware
 from app.routes import curation, intelligence, projects, traces, ws
 from app.security import (
     build_error_response,
@@ -62,6 +63,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.middleware("http")(request_id_middleware)
+app.middleware("http")(rate_limit_middleware)
 app.middleware("http")(security_headers_middleware)
 
 app.include_router(traces.router, prefix="/api/v1")

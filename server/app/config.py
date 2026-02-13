@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     security_strict_mode: bool = Field(default=False, alias="SECURITY_STRICT_MODE")
 
     rate_limit_rpm: int = Field(default=120, alias="RATE_LIMIT_RPM")
+    rate_limit_enabled: bool = Field(default=True, alias="RATE_LIMIT_ENABLED")
+    rate_limit_ip_rpm: int = Field(default=240, alias="RATE_LIMIT_IP_RPM")
+    rate_limit_user_rpm: int = Field(default=120, alias="RATE_LIMIT_USER_RPM")
+    rate_limit_burst_multiplier: float = Field(
+        default=1.0, alias="RATE_LIMIT_BURST_MULTIPLIER"
+    )
 
     trace_retention_days: int = Field(default=7, alias="TRACE_RETENTION_DAYS")
 
