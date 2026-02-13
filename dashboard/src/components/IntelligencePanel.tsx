@@ -84,7 +84,7 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
             <div className="flex items-center gap-1">
               <Star className="h-3 w-3 text-amber-500" />
               <span className="text-sm font-medium text-muted-100">
-                {analysis.analysis.quality_score}/5
+                {analysis.analysis.quality_score}/100
               </span>
             </div>
           </div>
@@ -151,7 +151,7 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
             ].map(({ label, value }) => (
               <div key={label} className="bg-dark-900 rounded px-2 py-1.5">
                 <p className="text-xs text-muted-400">{label}</p>
-                <p className="text-sm font-medium text-muted-100">{value}/5</p>
+                <p className="text-sm font-medium text-muted-100">{value}/100</p>
               </div>
             ))}
           </div>
