@@ -179,11 +179,25 @@ Respond ONLY with JSON:
         return results
 
     async def analyze_trace(self, trace_data: dict) -> dict:
-        """Analyze a trace, returning quality and efficiency scores.
+        """Analyze a trace, returning quality scores, labels, and suggestions.
 
         Returns:
-            Dict with quality_score, efficiency_score, error_analysis, suggestions.
+            Dict with trace_id, analysis (quality_score, labels, suggestions, summary), cached.
         """
+        trace_id = trace_data.get("id", "unknown")
+
+        # Check cache
+        cache_key = f"analyze:{trace_id}"
+        if self.redis:
+            try:
+                cached = self.redis.get(cache_key)
+                if cached:
+                    result = json.loads(cached)
+                    result["cached"] = True
+                    return result
+            except Exception as e:
+                logger.warning(f"Redis GET failed for analyze {trace_id}: {e}")
+
         spans_summary = []
         for span in trace_data.get("spans", []):
             entry = f"- {span.get('name', 'unnamed')} (type={span.get('span_type', 'unknown')}"
@@ -211,10 +225,12 @@ Spans:
 Evaluate this trace and respond with JSON only:
 {{
   "quality_score": 0-100,
-  "efficiency_score": 0-100,
-  "error_analysis": "description of any errors or issues found",
-  "suggestions": ["suggestion 1", "suggestion 2"]
+  "labels": ["label1", "label2"],
+  "suggestions": ["suggestion 1", "suggestion 2"],
+  "summary": "Brief 1-2 sentence summary of trace quality"
 }}
+
+Labels should be relevant categories like: "efficient", "slow", "error_prone", "tool_heavy", "well_structured", "needs_optimization", etc.
 """
         try:
             response = await self.client.chat.completions.create(
@@ -224,23 +240,62 @@ Evaluate this trace and respond with JSON only:
                 max_tokens=500,
             )
             content = response.choices[0].message.content or ""
-            return _extract_json(content)
+            analysis = _extract_json(content)
+
+            # Ensure expected fields exist
+            analysis.setdefault("quality_score", 0)
+            analysis.setdefault("labels", [])
+            analysis.setdefault("suggestions", [])
+            analysis.setdefault("summary", "")
+
+            result = {
+                "trace_id": trace_id,
+                "analysis": analysis,
+                "cached": False,
+            }
+
+            # Cache result
+            if self.redis:
+                try:
+                    self.redis.set(cache_key, json.dumps(result), ex=CACHE_TTL_SECONDS)
+                except Exception as e:
+                    logger.warning(f"Redis SET failed for analyze {trace_id}: {e}")
+
+            return result
         except Exception as e:
             logger.error(f"Trace analysis failed: {e}")
             return {
-                "quality_score": 0,
-                "efficiency_score": 0,
-                "error_analysis": f"Analysis failed: {e}",
-                "suggestions": [],
+                "trace_id": trace_id,
+                "analysis": {
+                    "quality_score": 0,
+                    "labels": [],
+                    "suggestions": [],
+                    "summary": f"Analysis failed: {e}",
+                },
+                "cached": False,
             }
 
     async def self_analyze(self, trace_data: dict) -> dict:
         """Deep evaluation of agent decision-making quality.
 
         Returns:
-            Dict with quality, efficiency, completeness, overall_score,
-            redundant_steps, suggestions, summary.
+            Dict with trace_id, analysis (effectiveness, reasoning_quality, tool_usage,
+            overall_score, strengths, weaknesses, improvements, summary), cached.
         """
+        trace_id = trace_data.get("id", "unknown")
+
+        # Check cache
+        cache_key = f"self_analyze:{trace_id}"
+        if self.redis:
+            try:
+                cached = self.redis.get(cache_key)
+                if cached:
+                    result = json.loads(cached)
+                    result["cached"] = True
+                    return result
+            except Exception as e:
+                logger.warning(f"Redis GET failed for self_analyze {trace_id}: {e}")
+
         spans_detail = []
         for i, span in enumerate(trace_data.get("spans", []), 1):
             entry = f"Step {i}: {span.get('name', 'unnamed')}"
@@ -260,7 +315,7 @@ Evaluate this trace and respond with JSON only:
         steps_text = "\n".join(spans_detail) if spans_detail else "No execution steps recorded."
 
         prompt = f"""You are performing a thorough audit of an AI agent's execution trace. \
-Your job is to evaluate the agent's decision-making quality, identify inefficiencies, \
+Your job is to evaluate the agent's decision-making quality, identify strengths and weaknesses, \
 and provide actionable improvement suggestions.
 
 Agent Trace: {trace_data.get('name', 'unnamed')}
@@ -273,20 +328,21 @@ Execution steps:
 {steps_text}
 
 Analyze this agent's behavior thoroughly. Consider:
-1. Were the steps logical and well-ordered?
-2. Were any steps redundant or unnecessary?
-3. Did the agent use tools effectively?
-4. Were there missed opportunities or better approaches?
-5. Was token usage efficient?
+1. How effective was the agent at achieving its goal?
+2. Was the reasoning quality high? Were decisions logical?
+3. Were tools used appropriately and efficiently?
+4. What were the agent's strengths?
+5. What were the agent's weaknesses?
 
 Respond with JSON only:
 {{
-  "quality": 0-100,
-  "efficiency": 0-100,
-  "completeness": 0-100,
+  "effectiveness": 0-100,
+  "reasoning_quality": 0-100,
+  "tool_usage": 0-100,
   "overall_score": 0-100,
-  "redundant_steps": ["step description if any"],
-  "suggestions": ["actionable improvement 1", "actionable improvement 2"],
+  "strengths": ["strength 1", "strength 2"],
+  "weaknesses": ["weakness 1", "weakness 2"],
+  "improvements": ["actionable improvement 1", "actionable improvement 2"],
   "summary": "2-3 sentence overall assessment"
 }}
 """
@@ -298,17 +354,47 @@ Respond with JSON only:
                 max_tokens=800,
             )
             content = response.choices[0].message.content or ""
-            return _extract_json(content)
+            analysis = _extract_json(content)
+
+            # Ensure expected fields exist
+            analysis.setdefault("effectiveness", 0)
+            analysis.setdefault("reasoning_quality", 0)
+            analysis.setdefault("tool_usage", 0)
+            analysis.setdefault("overall_score", 0)
+            analysis.setdefault("strengths", [])
+            analysis.setdefault("weaknesses", [])
+            analysis.setdefault("improvements", [])
+            analysis.setdefault("summary", "")
+
+            result = {
+                "trace_id": trace_id,
+                "analysis": analysis,
+                "cached": False,
+            }
+
+            # Cache result
+            if self.redis:
+                try:
+                    self.redis.set(cache_key, json.dumps(result), ex=CACHE_TTL_SECONDS)
+                except Exception as e:
+                    logger.warning(f"Redis SET failed for self_analyze {trace_id}: {e}")
+
+            return result
         except Exception as e:
             logger.error(f"Self-analysis failed: {e}")
             return {
-                "quality": 0,
-                "efficiency": 0,
-                "completeness": 0,
-                "overall_score": 0,
-                "redundant_steps": [],
-                "suggestions": [],
-                "summary": f"Analysis failed: {e}",
+                "trace_id": trace_id,
+                "analysis": {
+                    "effectiveness": 0,
+                    "reasoning_quality": 0,
+                    "tool_usage": 0,
+                    "overall_score": 0,
+                    "strengths": [],
+                    "weaknesses": [],
+                    "improvements": [],
+                    "summary": f"Analysis failed: {e}",
+                },
+                "cached": False,
             }
 
     def estimate_cost(self, trace_count: int) -> float:
