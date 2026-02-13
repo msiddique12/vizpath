@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
+from vizpath.span import SpanType
 from vizpath.tracer import Tracer
 
 if TYPE_CHECKING:
@@ -45,6 +46,50 @@ class TracedGraph:
         self._graph = graph
         self._tracer = tracer
 
+    def _wrap_node_fn(self, node_name: str, node_fn: Callable, trace: Any) -> Callable:
+        """Wrap a node function to trace its execution."""
+        def wrapped(*args: Any, **kwargs: Any) -> Any:
+            with trace.span(node_name, span_type=SpanType.AGENT) as span:
+                # Capture input (state is usually first positional arg)
+                if args:
+                    span.set_input(args[0] if len(args) == 1 else args)
+                elif kwargs:
+                    span.set_input(kwargs)
+
+                try:
+                    result = node_fn(*args, **kwargs)
+                    span.set_output(result)
+                    return result
+                except Exception as e:
+                    span.set_error(str(e))
+                    raise
+
+        return wrapped
+
+    async def _wrap_node_fn_async(self, node_name: str, node_fn: Callable, trace: Any) -> Callable:
+        """Wrap an async node function to trace its execution."""
+        import asyncio
+
+        async def wrapped(*args: Any, **kwargs: Any) -> Any:
+            with trace.span(node_name, span_type=SpanType.AGENT) as span:
+                if args:
+                    span.set_input(args[0] if len(args) == 1 else args)
+                elif kwargs:
+                    span.set_input(kwargs)
+
+                try:
+                    if asyncio.iscoroutinefunction(node_fn):
+                        result = await node_fn(*args, **kwargs)
+                    else:
+                        result = node_fn(*args, **kwargs)
+                    span.set_output(result)
+                    return result
+                except Exception as e:
+                    span.set_error(str(e))
+                    raise
+
+        return wrapped
+
     def invoke(
         self,
         input: dict[str, Any],
@@ -61,14 +106,27 @@ class TracedGraph:
         with self._tracer.trace(trace_name) as trace:
             trace.set_metadata(framework="langgraph", input_keys=list(input.keys()))
 
-            original_invoke = self._graph.invoke
+            # Try to get node execution via stream for better node-level tracing
+            try:
+                # Use stream_mode="updates" to get node-by-node execution
+                final_state = None
+                for chunk in self._graph.stream(input, config, stream_mode="updates", **kwargs):
+                    # chunk is a dict: {node_name: node_output}
+                    for node_name, node_output in chunk.items():
+                        with trace.span(node_name, span_type=SpanType.AGENT) as span:
+                            span.set_output(node_output)
+                            # Update final state with each node's output
+                            if final_state is None:
+                                final_state = {}
+                            if isinstance(node_output, dict):
+                                final_state.update(node_output)
+                            else:
+                                final_state[node_name] = node_output
 
-            def traced_invoke(inp: dict[str, Any], cfg: dict[str, Any] | None = None, **kw: Any) -> dict[str, Any]:
-                return original_invoke(inp, cfg, **kw)
-
-            result = traced_invoke(input, config, **kwargs)
-
-            return result
+                return final_state or {}
+            except Exception:
+                # Fallback to direct invoke if streaming fails
+                return self._graph.invoke(input, config, **kwargs)
 
     async def ainvoke(
         self,
@@ -82,9 +140,24 @@ class TracedGraph:
         with self._tracer.trace(trace_name) as trace:
             trace.set_metadata(framework="langgraph", input_keys=list(input.keys()))
 
-            result = await self._graph.ainvoke(input, config, **kwargs)
+            # Try to get node execution via async stream for better tracing
+            try:
+                final_state = None
+                async for chunk in self._graph.astream(input, config, stream_mode="updates", **kwargs):
+                    for node_name, node_output in chunk.items():
+                        with trace.span(node_name, span_type=SpanType.AGENT) as span:
+                            span.set_output(node_output)
+                            if final_state is None:
+                                final_state = {}
+                            if isinstance(node_output, dict):
+                                final_state.update(node_output)
+                            else:
+                                final_state[node_name] = node_output
 
-            return result
+                return final_state or {}
+            except Exception:
+                # Fallback to direct ainvoke if streaming fails
+                return await self._graph.ainvoke(input, config, **kwargs)
 
     def stream(
         self,
@@ -98,7 +171,32 @@ class TracedGraph:
         with self._tracer.trace(trace_name) as trace:
             trace.set_metadata(framework="langgraph", mode="stream")
 
-            yield from self._graph.stream(input, config, **kwargs)
+            for chunk in self._graph.stream(input, config, **kwargs):
+                # Create span for each streamed chunk if it's node output
+                if isinstance(chunk, dict):
+                    for node_name, output in chunk.items():
+                        with trace.span(node_name, span_type=SpanType.AGENT) as span:
+                            span.set_output(output)
+                yield chunk
+
+    async def astream(
+        self,
+        input: dict[str, Any],
+        config: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ):
+        """Async stream graph execution with tracing."""
+        trace_name = config.get("run_name", "langgraph-stream") if config else "langgraph-stream"
+
+        with self._tracer.trace(trace_name) as trace:
+            trace.set_metadata(framework="langgraph", mode="stream")
+
+            async for chunk in self._graph.astream(input, config, **kwargs):
+                if isinstance(chunk, dict):
+                    for node_name, output in chunk.items():
+                        with trace.span(node_name, span_type=SpanType.AGENT) as span:
+                            span.set_output(output)
+                yield chunk
 
     def __getattr__(self, name: str) -> Any:
         """Delegate unknown attributes to the wrapped graph."""
