@@ -16,6 +16,7 @@ from app.rate_limit import rate_limit_middleware
 from app.routes import curation, intelligence, projects, traces, ws
 from app.security import (
     build_error_response,
+    redact_headers,
     request_id_middleware,
     security_headers_middleware,
 )
@@ -75,7 +76,11 @@ app.include_router(ws.router)
 
 @app.exception_handler(ValueError)
 async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse:
-    logger.warning(f"Validation error: {exc}")
+    logger.warning(
+        "Validation error: %s; headers=%s",
+        exc,
+        redact_headers(dict(request.headers)),
+    )
     return build_error_response(
         status_code=400,
         detail=str(exc),
@@ -86,7 +91,12 @@ async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse
 
 @app.exception_handler(RuntimeError)
 async def runtime_error_handler(request: Request, exc: RuntimeError) -> JSONResponse:
-    logger.error(f"Runtime error: {exc}", exc_info=True)
+    logger.error(
+        "Runtime error: %s; headers=%s",
+        exc,
+        redact_headers(dict(request.headers)),
+        exc_info=True,
+    )
     return build_error_response(
         status_code=500,
         detail="Internal server error",

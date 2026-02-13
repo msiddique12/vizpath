@@ -1,5 +1,6 @@
 """Security middleware and shared error response helpers."""
 
+from collections.abc import Mapping
 from uuid import uuid4
 
 from fastapi import Request
@@ -9,6 +10,7 @@ from app.config import settings
 
 REQUEST_ID_HEADER = "X-Request-ID"
 MINIMAL_CSP = "default-src 'self'; frame-ancestors 'none'; object-src 'none'"
+SENSITIVE_HEADERS = {"authorization", "proxy-authorization", "x-api-key"}
 
 
 def build_error_response(
@@ -30,6 +32,17 @@ def build_error_response(
             },
         },
     )
+
+
+def redact_headers(headers: Mapping[str, str]) -> dict[str, str]:
+    """Redact sensitive headers before logs/errors."""
+    redacted: dict[str, str] = {}
+    for key, value in headers.items():
+        if key.lower() in SENSITIVE_HEADERS:
+            redacted[key] = "[REDACTED]"
+        else:
+            redacted[key] = value
+    return redacted
 
 
 async def request_id_middleware(request: Request, call_next):

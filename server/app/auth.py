@@ -23,6 +23,11 @@ def hash_api_key(api_key: str) -> str:
     return hashlib.sha256(api_key.encode()).hexdigest()
 
 
+def api_key_fingerprint(api_key: str) -> str:
+    """Short non-reversible fingerprint for safe logs."""
+    return hash_api_key(api_key)[:12]
+
+
 def generate_api_key() -> str:
     """Generate a new API key."""
     return f"vp_{secrets.token_urlsafe(32)}"
@@ -86,6 +91,7 @@ async def verify_api_key(
     if api_key:
         project = get_project_by_api_key(db, api_key)
         if not project:
+            logger.warning("Invalid API key attempt: fingerprint=%s", api_key_fingerprint(api_key))
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid API key.",
