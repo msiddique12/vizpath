@@ -153,3 +153,7 @@ class TestSpan:
         assert data.input == "prompt"
         assert data.output == "response"
         assert data.tokens == 100
+        assert data.trace_name == "test-trace"
+        assert data.trace_status == SpanStatus.RUNNING
+        assert data.trace_start_time is not None
+        assert data.trace_metadata == {}

@@ -139,6 +139,73 @@ class TestTraceIngestion:
 
         assert response.status_code == 201
 
+    def test_trace_level_payload_preserves_metadata_and_name(self, client):
+        now = datetime.now(timezone.utc).isoformat()
+        payload = [
+            {
+                "span_id": "span-meta-1",
+                "trace_id": "trace-meta-1",
+                "name": "first-step",
+                "start_time": now,
+                "trace_name": "agent-workflow",
+                "trace_status": "running",
+                "trace_start_time": now,
+                "trace_metadata": {"session_id": "s-123", "env": "test"},
+            }
+        ]
+        response = client.post("/api/v1/traces/spans/batch", json=payload)
+        assert response.status_code == 201
+
+        detail = client.get("/api/v1/traces/trace-meta-1")
+        assert detail.status_code == 200
+        assert detail.json()["trace"]["name"] == "agent-workflow"
+        assert detail.json()["trace"]["metadata"]["session_id"] == "s-123"
+
+    def test_out_of_order_spans_use_explicit_trace_identity(self, client):
+        now = datetime.now(timezone.utc).isoformat()
+        payload = [
+            {
+                "span_id": "span-child-first",
+                "trace_id": "trace-oop-1",
+                "parent_id": "span-parent-late",
+                "name": "child-step",
+                "start_time": now,
+                "trace_name": "ordered-trace-name",
+                "trace_start_time": now,
+                "trace_metadata": {"source": "explicit"},
+            },
+            {
+                "span_id": "span-parent-late",
+                "trace_id": "trace-oop-1",
+                "name": "parent-step",
+                "start_time": now,
+                "trace_name": "ordered-trace-name",
+                "trace_start_time": now,
+                "trace_metadata": {"source": "explicit"},
+            },
+        ]
+        response = client.post("/api/v1/traces/spans/batch", json=payload)
+        assert response.status_code == 201
+
+        detail = client.get("/api/v1/traces/trace-oop-1")
+        assert detail.status_code == 200
+        assert detail.json()["trace"]["name"] == "ordered-trace-name"
+        assert detail.json()["trace"]["metadata"]["source"] == "explicit"
+
+    def test_legacy_span_only_ingestion_still_works(self, client):
+        payload = [
+            {
+                "span_id": "span-legacy-1",
+                "trace_id": "trace-legacy-1",
+                "name": "legacy-step",
+                "start_time": datetime.now(timezone.utc).isoformat(),
+            }
+        ]
+        response = client.post("/api/v1/traces/spans/batch", json=payload)
+
+        assert response.status_code == 201
+        assert response.json()["ingested"] == 1
+
 
 class TestTraceRetrieval:
     def test_list_traces_empty(self, client):
