@@ -7,8 +7,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.auth import verify_api_key
 from app.database import get_db
-from app.models import CuratedLabel, Span, Trace
+from app.models import CuratedLabel, Project, Span, Trace
 from app.validation import ID_PATTERN, TAG_PATTERN, normalize_text
 
 router = APIRouter(prefix="/curation", tags=["curation"])
@@ -105,11 +106,12 @@ class ExportRequest(BaseModel):
 @router.post("/labels", response_model=LabelResponse)
 def create_or_update_label(
     data: LabelCreate,
+    project: Project = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ) -> LabelResponse:
     """Create or update a label for a trace."""
     trace = db.execute(
-        select(Trace).where(Trace.id == data.trace_id)
+        select(Trace).where(Trace.id == data.trace_id, Trace.project_id == project.id)
     ).scalar_one_or_none()
 
     if not trace:
@@ -155,11 +157,14 @@ def create_or_update_label(
 @router.get("/labels/{trace_id}", response_model=LabelResponse)
 def get_label(
     trace_id: str,
+    project: Project = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ) -> LabelResponse:
     """Get the label for a specific trace."""
     label = db.execute(
-        select(CuratedLabel).where(CuratedLabel.trace_id == trace_id)
+        select(CuratedLabel)
+        .join(Trace, Trace.id == CuratedLabel.trace_id)
+        .where(CuratedLabel.trace_id == trace_id, Trace.project_id == project.id)
     ).scalar_one_or_none()
 
     if not label:
@@ -180,11 +185,14 @@ def get_label(
 @router.delete("/labels/{trace_id}")
 def delete_label(
     trace_id: str,
+    project: Project = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ) -> dict:
     """Delete a label for a trace."""
     label = db.execute(
-        select(CuratedLabel).where(CuratedLabel.trace_id == trace_id)
+        select(CuratedLabel)
+        .join(Trace, Trace.id == CuratedLabel.trace_id)
+        .where(CuratedLabel.trace_id == trace_id, Trace.project_id == project.id)
     ).scalar_one_or_none()
 
     if not label:
@@ -197,6 +205,7 @@ def delete_label(
 
 @router.get("/traces", response_model=list[CuratedTraceResponse])
 def list_curated_traces(
+    project: Project = Depends(verify_api_key),
     label: str | None = Query(None, description="Filter by label"),
     exported: bool | None = Query(None, description="Filter by export status"),
     min_score: float | None = Query(None, description="Minimum quality score"),
@@ -208,7 +217,7 @@ def list_curated_traces(
     query = (
         select(Trace, CuratedLabel)
         .outerjoin(CuratedLabel, Trace.id == CuratedLabel.trace_id)
-        .where(CuratedLabel.id.isnot(None))
+        .where(CuratedLabel.id.isnot(None), Trace.project_id == project.id)
     )
 
     if label:
@@ -239,27 +248,36 @@ def list_curated_traces(
 
 
 @router.get("/stats")
-def get_curation_stats(db: Session = Depends(get_db)) -> dict:
+def get_curation_stats(
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> dict:
     """Get curation statistics."""
     from sqlalchemy import func
 
     total_labeled = db.execute(
         select(func.count(CuratedLabel.id))
+        .join(Trace, Trace.id == CuratedLabel.trace_id)
+        .where(Trace.project_id == project.id)
     ).scalar() or 0
 
     exported_count = db.execute(
-        select(func.count(CuratedLabel.id)).where(CuratedLabel.exported.is_(True))
+        select(func.count(CuratedLabel.id))
+        .join(Trace, Trace.id == CuratedLabel.trace_id)
+        .where(CuratedLabel.exported.is_(True), Trace.project_id == project.id)
     ).scalar() or 0
 
     label_counts = db.execute(
         select(CuratedLabel.label, func.count(CuratedLabel.id))
-        .where(CuratedLabel.label.isnot(None))
+        .join(Trace, Trace.id == CuratedLabel.trace_id)
+        .where(CuratedLabel.label.isnot(None), Trace.project_id == project.id)
         .group_by(CuratedLabel.label)
     ).all()
 
     avg_score = db.execute(
         select(func.avg(CuratedLabel.quality_score))
-        .where(CuratedLabel.quality_score.isnot(None))
+        .join(Trace, Trace.id == CuratedLabel.trace_id)
+        .where(CuratedLabel.quality_score.isnot(None), Trace.project_id == project.id)
     ).scalar()
 
     return {
@@ -273,6 +291,7 @@ def get_curation_stats(db: Session = Depends(get_db)) -> dict:
 @router.post("/export")
 def export_traces(
     data: ExportRequest,
+    project: Project = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ) -> dict:
     """Export curated traces in specified format."""
@@ -280,7 +299,7 @@ def export_traces(
 
     for trace_id in data.trace_ids:
         trace = db.execute(
-            select(Trace).where(Trace.id == trace_id)
+            select(Trace).where(Trace.id == trace_id, Trace.project_id == project.id)
         ).scalar_one_or_none()
 
         if not trace:

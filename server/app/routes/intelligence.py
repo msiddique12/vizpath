@@ -7,9 +7,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
+from app.auth import verify_api_key
 from app.config import settings
 from app.database import get_db
-from app.models import Span, Trace
+from app.models import Project, Span, Trace
 from app.validation import ID_PATTERN
 
 logger = logging.getLogger(__name__)
@@ -26,9 +27,9 @@ def _require_nvidia_key() -> None:
         )
 
 
-def _get_trace_data(trace_id: str, db: Session) -> dict[str, Any]:
+def _get_trace_data(trace_id: str, project_id: Any, db: Session) -> dict[str, Any]:
     """Load trace + spans as a dict, or raise 404."""
-    trace = db.query(Trace).filter(Trace.id == trace_id).first()
+    trace = db.query(Trace).filter(Trace.id == trace_id, Trace.project_id == project_id).first()
     if not trace:
         raise HTTPException(status_code=404, detail="Trace not found")
 
@@ -73,6 +74,7 @@ class SyntheticRequest(BaseModel):
 @router.post("/analyze")
 async def analyze_trace(
     req: AnalyzeRequest,
+    project: Project = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """Analyze a trace for quality and efficiency."""
@@ -80,7 +82,7 @@ async def analyze_trace(
 
     from app.intelligence.llm import LLMLabeler
 
-    trace_data = _get_trace_data(req.trace_id, db)
+    trace_data = _get_trace_data(req.trace_id, project.id, db)
     labeler = LLMLabeler()
     return await labeler.analyze_trace(trace_data)
 
@@ -88,6 +90,7 @@ async def analyze_trace(
 @router.post("/self-analyze")
 async def self_analyze_trace(
     req: SelfAnalyzeRequest,
+    project: Project = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """Deep evaluation of agent decision-making quality."""
@@ -95,7 +98,7 @@ async def self_analyze_trace(
 
     from app.intelligence.llm import LLMLabeler
 
-    trace_data = _get_trace_data(req.trace_id, db)
+    trace_data = _get_trace_data(req.trace_id, project.id, db)
     labeler = LLMLabeler()
     return await labeler.self_analyze(trace_data)
 
@@ -103,6 +106,7 @@ async def self_analyze_trace(
 @router.post("/embed")
 async def embed_trace_endpoint(
     req: EmbedRequest,
+    project: Project = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """Generate an embedding for a trace."""
@@ -110,7 +114,7 @@ async def embed_trace_endpoint(
 
     from app.intelligence.embeddings import embed_trace, trace_to_text
 
-    trace_data = _get_trace_data(req.trace_id, db)
+    trace_data = _get_trace_data(req.trace_id, project.id, db)
     text = trace_to_text(trace_data)
     embedding = await embed_trace(req.trace_id, text)
     return {
@@ -123,6 +127,7 @@ async def embed_trace_endpoint(
 @router.post("/generate-synthetic")
 async def generate_synthetic(
     req: SyntheticRequest,
+    project: Project = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """Generate synthetic training data from a trace."""
@@ -130,7 +135,7 @@ async def generate_synthetic(
 
     from app.intelligence.synthetic import SyntheticDataGenerator
 
-    trace_data = _get_trace_data(req.trace_id, db)
+    trace_data = _get_trace_data(req.trace_id, project.id, db)
     generator = SyntheticDataGenerator()
 
     if req.mode == "variations":
@@ -148,10 +153,12 @@ async def generate_synthetic(
 
 @router.get("/clusters")
 async def get_clusters(
+    project: Project = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """Get trace clusters for the current project."""
     _require_nvidia_key()
+    _ = project
 
     from app.intelligence.clustering import cluster_traces, get_cluster_summary
     from app.intelligence.embeddings import get_trace_embeddings, trace_to_text

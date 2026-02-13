@@ -212,13 +212,14 @@ async def ingest_spans(
 
 @router.get("/", response_model=TraceListResponse)
 async def list_traces(
+    project: Project = Depends(verify_api_key),
     db: Session = Depends(get_db),
     limit: int = Query(default=20, le=100),
     offset: int = Query(default=0, ge=0),
     status: str | None = None,
 ) -> TraceListResponse:
     """List traces with pagination."""
-    query = db.query(Trace)
+    query = db.query(Trace).filter(Trace.project_id == project.id)
 
     if status:
         query = query.filter(Trace.status == status)
@@ -252,10 +253,15 @@ async def list_traces(
 @router.get("/{trace_id}")
 async def get_trace(
     trace_id: str,
+    project: Project = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """Get trace details with all spans."""
-    trace = db.query(Trace).filter(Trace.id == trace_id).first()
+    trace = (
+        db.query(Trace)
+        .filter(Trace.id == trace_id, Trace.project_id == project.id)
+        .first()
+    )
 
     if not trace:
         raise HTTPException(status_code=404, detail="Trace not found")
@@ -271,9 +277,18 @@ async def get_trace(
 @router.get("/{trace_id}/spans")
 async def get_trace_spans(
     trace_id: str,
+    project: Project = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ) -> list[SpanResponse]:
     """Get all spans for a trace."""
+    trace = (
+        db.query(Trace)
+        .filter(Trace.id == trace_id, Trace.project_id == project.id)
+        .first()
+    )
+    if not trace:
+        raise HTTPException(status_code=404, detail="Trace not found")
+
     spans = db.query(Span).filter(Span.trace_id == trace_id).all()
 
     return [
