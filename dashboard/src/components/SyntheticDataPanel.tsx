@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { Wand2, Loader2, Download, Copy, Check } from 'lucide-react'
 import clsx from 'clsx'
@@ -13,6 +13,12 @@ export default function SyntheticDataPanel({ traceId }: SyntheticDataPanelProps)
   const [n, setN] = useState(3)
   const [result, setResult] = useState<SyntheticResult | null>(null)
   const [copied, setCopied] = useState(false)
+
+  // Reset state when traceId changes to prevent showing stale data
+  useEffect(() => {
+    setResult(null)
+    setCopied(false)
+  }, [traceId])
 
   const generateMutation = useMutation({
     mutationFn: () => generateSynthetic(traceId, mode, n),
@@ -103,6 +109,7 @@ export default function SyntheticDataPanel({ traceId }: SyntheticDataPanelProps)
             <div className="flex items-center gap-1">
               <button
                 onClick={handleCopy}
+                aria-label="Copy synthetic data to clipboard"
                 className="flex items-center gap-1 px-2 py-1 text-xs text-muted-300 hover:text-muted-100 bg-dark-900 rounded border border-dark-700 transition-colors"
               >
                 {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
@@ -110,6 +117,7 @@ export default function SyntheticDataPanel({ traceId }: SyntheticDataPanelProps)
               </button>
               <button
                 onClick={handleExportJSONL}
+                aria-label="Export synthetic data as JSONL"
                 className="flex items-center gap-1 px-2 py-1 text-xs text-muted-300 hover:text-muted-100 bg-dark-900 rounded border border-dark-700 transition-colors"
               >
                 <Download className="h-3 w-3" />

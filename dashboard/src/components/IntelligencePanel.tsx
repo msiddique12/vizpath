@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { Brain, Sparkles, Loader2, Star, Tag, Lightbulb } from 'lucide-react'
 import clsx from 'clsx'
@@ -11,6 +11,12 @@ interface IntelligencePanelProps {
 export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
   const [analysis, setAnalysis] = useState<TraceAnalysis | null>(null)
   const [selfAnalysis, setSelfAnalysis] = useState<SelfAnalysis | null>(null)
+
+  // Reset state when traceId changes to prevent showing stale data
+  useEffect(() => {
+    setAnalysis(null)
+    setSelfAnalysis(null)
+  }, [traceId])
 
   const analyzeMutation = useMutation({
     mutationFn: () => analyzeTrace(traceId),
@@ -36,6 +42,7 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
         <button
           onClick={() => analyzeMutation.mutate()}
           disabled={analyzeMutation.isPending}
+          aria-label="Analyze trace with Nemotron"
           className={clsx(
             'flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg transition-colors',
             analyzeMutation.isPending
@@ -53,6 +60,7 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
         <button
           onClick={() => selfAnalyzeMutation.mutate()}
           disabled={selfAnalyzeMutation.isPending}
+          aria-label="Perform deep self-analysis on trace"
           className={clsx(
             'flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg transition-colors',
             selfAnalyzeMutation.isPending
