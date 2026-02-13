@@ -108,7 +108,7 @@ result = app.invoke({"input": "research quantum computing"})
 vizpath includes a built-in intelligence layer powered by NVIDIA NIM:
 
 ```bash
-export NVIDIA_API_KEY="nvapi-..."
+export NVIDIA_API_KEY="your_nvidia_api_key_here"
 ```
 
 **Trace Analysis** — Quality scoring, auto-labeling, and improvement suggestions:
@@ -127,7 +127,7 @@ python examples/self_analyze.py --trace-id <uuid>
 ```bash
 curl -X POST http://localhost:8000/api/v1/intelligence/generate-synthetic \
   -H "Content-Type: application/json" \
-  -d '{"trace_id": "your-trace-id", "type": "variations", "count": 5}'
+  -d '{"trace_id": "your-trace-id", "mode": "variations", "n": 5}'
 ```
 
 ## Project Structure
@@ -177,8 +177,59 @@ pip install -e "./server[dev]"
 cd dashboard && npm install
 
 # Set environment variables
-export NVIDIA_API_KEY="nvapi-..."
+export NVIDIA_API_KEY="your_nvidia_api_key_here"
 export DATABASE_URL="sqlite:///vizpath.db"
+```
+
+### Local Docker + Security Defaults
+
+Use `.env.example` as your base config for local development:
+
+```bash
+cp .env.example .env
+```
+
+Key local defaults:
+
+- `SECURITY_STRICT_MODE=false`: enables minimal secure headers by default, stricter CSP when set to `true`
+- `CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173`
+- `RATE_LIMIT_ENABLED=true`
+- `RATE_LIMIT_IP_RPM=240`
+- `RATE_LIMIT_USER_RPM=120`
+- `RATE_LIMIT_BURST_MULTIPLIER=1.0`
+
+NVIDIA key handling:
+
+- Set `NVIDIA_API_KEY` on the server only
+- Do not expose NVIDIA keys in browser code or dashboard env files
+- Intelligence endpoints return `503` if server-side key is not configured
+
+### API Keys (Generate / Rotate / Revoke)
+
+Create a project and receive an API key once:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/projects/ \
+  -H "Content-Type: application/json" \
+  -d '{"name":"my-project"}'
+```
+
+Rotate key with grace period (both old and new keys valid during grace):
+
+```bash
+curl -X POST http://localhost:8000/api/v1/projects/me/api-key/rotate \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: <current-key>" \
+  -d '{"grace_period_minutes":60}'
+```
+
+Revoke the previous key immediately:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/projects/me/api-key/revoke \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: <new-key>" \
+  -d '{"key_type":"previous"}'
 ```
 
 ### Run
