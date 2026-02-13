@@ -9,31 +9,31 @@ interface SyntheticDataPanelProps {
 }
 
 export default function SyntheticDataPanel({ traceId }: SyntheticDataPanelProps) {
-  const [type, setType] = useState<'variations' | 'corrections'>('variations')
-  const [count, setCount] = useState(3)
+  const [mode, setMode] = useState<'variations' | 'corrections'>('variations')
+  const [n, setN] = useState(3)
   const [result, setResult] = useState<SyntheticResult | null>(null)
   const [copied, setCopied] = useState(false)
 
   const generateMutation = useMutation({
-    mutationFn: () => generateSynthetic(traceId, type, count),
+    mutationFn: () => generateSynthetic(traceId, mode, n),
     onSuccess: (data) => setResult(data),
   })
 
   const handleExportJSONL = () => {
     if (!result) return
-    const lines = result.variations.map((v) => JSON.stringify(v)).join('\n')
+    const lines = result.results.map((v) => JSON.stringify(v)).join('\n')
     const blob = new Blob([lines], { type: 'application/jsonl' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `synthetic-${type}-${traceId.slice(0, 8)}.jsonl`
+    a.download = `synthetic-${mode}-${traceId.slice(0, 8)}.jsonl`
     a.click()
     URL.revokeObjectURL(url)
   }
 
   const handleCopy = async () => {
     if (!result) return
-    const lines = result.variations.map((v) => JSON.stringify(v)).join('\n')
+    const lines = result.results.map((v) => JSON.stringify(v)).join('\n')
     await navigator.clipboard.writeText(lines)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
@@ -49,8 +49,8 @@ export default function SyntheticDataPanel({ traceId }: SyntheticDataPanelProps)
       <div className="flex items-center gap-3">
         <div className="flex-1">
           <select
-            value={type}
-            onChange={(e) => setType(e.target.value as 'variations' | 'corrections')}
+            value={mode}
+            onChange={(e) => setMode(e.target.value as 'variations' | 'corrections')}
             className="w-full bg-dark-900 border border-dark-700 text-muted-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
           >
             <option value="variations">Variations</option>
@@ -62,8 +62,8 @@ export default function SyntheticDataPanel({ traceId }: SyntheticDataPanelProps)
             type="number"
             min={1}
             max={10}
-            value={count}
-            onChange={(e) => setCount(Math.max(1, Math.min(10, parseInt(e.target.value) || 1)))}
+            value={n}
+            onChange={(e) => setN(Math.max(1, Math.min(10, parseInt(e.target.value) || 1)))}
             className="w-full bg-dark-900 border border-dark-700 text-muted-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
           />
         </div>
@@ -94,11 +94,11 @@ export default function SyntheticDataPanel({ traceId }: SyntheticDataPanelProps)
         </div>
       )}
 
-      {result && result.variations.length > 0 && (
+      {result && result.results.length > 0 && (
         <div className="space-y-3 pt-2 border-t border-dark-700">
           <div className="flex items-center justify-between">
             <p className="text-xs text-muted-400">
-              {result.variations.length} {result.type} generated
+              {result.results.length} {result.mode} generated
             </p>
             <div className="flex items-center gap-1">
               <button
@@ -119,7 +119,7 @@ export default function SyntheticDataPanel({ traceId }: SyntheticDataPanelProps)
           </div>
 
           <div className="space-y-2 max-h-64 overflow-y-auto">
-            {result.variations.map((variation, i) => (
+            {result.results.map((variation, i) => (
               <div key={i} className="bg-dark-900 rounded-lg p-3 border border-dark-700">
                 <div className="flex items-center gap-2 mb-2">
                   <span className="text-xs font-medium text-muted-400">#{i + 1}</span>

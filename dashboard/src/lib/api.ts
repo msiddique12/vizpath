@@ -154,9 +154,9 @@ export interface SelfAnalysis {
 
 export interface SyntheticResult {
   trace_id: string
-  type: string
+  mode: 'variations' | 'corrections'
   count: number
-  variations: Array<{ input: string; output: string; metadata?: Record<string, unknown> }>
+  results: Array<{ input: string; output: string; metadata?: Record<string, unknown> }>
 }
 
 export async function analyzeTrace(traceId: string): Promise<TraceAnalysis> {
@@ -175,11 +175,27 @@ export async function selfAnalyzeTrace(traceId: string): Promise<SelfAnalysis> {
 
 export async function generateSynthetic(
   traceId: string,
-  type: 'variations' | 'corrections' = 'variations',
-  count = 3
+  mode: 'variations' | 'corrections' = 'variations',
+  n = 3
 ): Promise<SyntheticResult> {
-  return fetchApi('/intelligence/generate-synthetic', {
+  const data = await fetchApi<{
+    trace_id?: string
+    mode?: 'variations' | 'corrections'
+    type?: 'variations' | 'corrections'
+    count?: number
+    results?: Array<{ input: string; output: string; metadata?: Record<string, unknown> }>
+    variations?: Array<{ input: string; output: string; metadata?: Record<string, unknown> }>
+  }>('/intelligence/generate-synthetic', {
     method: 'POST',
-    body: JSON.stringify({ trace_id: traceId, type, count }),
+    body: JSON.stringify({ trace_id: traceId, mode, n }),
   })
+
+  const normalizedResults = data.results ?? data.variations ?? []
+
+  return {
+    trace_id: data.trace_id ?? traceId,
+    mode: data.mode ?? data.type ?? mode,
+    count: data.count ?? normalizedResults.length,
+    results: normalizedResults,
+  }
 }

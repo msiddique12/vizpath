@@ -4,7 +4,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
 from app.auth import verify_api_key
@@ -66,6 +66,16 @@ class SyntheticRequest(BaseModel):
     trace_id: str = Field(min_length=1, max_length=128, pattern=ID_PATTERN)
     mode: str = Field(default="variations", pattern="^(variations|corrections)$")
     n: int = Field(default=5, ge=1, le=20)
+    type: str | None = Field(default=None, pattern="^(variations|corrections)$")
+    count: int | None = Field(default=None, ge=1, le=20)
+
+    @model_validator(mode="after")
+    def normalize_legacy_fields(self) -> "SyntheticRequest":
+        if self.type is not None:
+            self.mode = self.type
+        if self.count is not None:
+            self.n = self.count
+        return self
 
 
 # --- Endpoints ---
@@ -148,6 +158,8 @@ async def generate_synthetic(
         "mode": req.mode,
         "count": len(results),
         "results": results,
+        "type": req.mode,
+        "variations": results,
     }
 
 
