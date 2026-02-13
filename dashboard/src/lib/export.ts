@@ -65,20 +65,20 @@ export function exportToCSV(spans: Span[], filename?: string) {
 
   const rows = spans.map((span) =>
     [
-      span.id,
-      span.trace_id,
-      span.parent_id || span.parent_span_id || '',
-      span.name,
-      span.span_type,
-      span.status,
-      span.start_time,
-      span.end_time || '',
-      span.duration_ms || '',
-      span.tokens || span.token_count || '',
+      escapeCSV(span.id),
+      escapeCSV(span.trace_id),
+      escapeCSV(span.parent_id || span.parent_span_id || ''),
+      escapeCSV(span.name),
+      escapeCSV(span.span_type),
+      escapeCSV(span.status),
+      escapeCSV(span.start_time),
+      escapeCSV(span.end_time || ''),
+      escapeCSV(span.duration_ms || ''),
+      escapeCSV(span.tokens || span.token_count || ''),
       escapeCSV(span.input),
       escapeCSV(span.output),
-      span.error || '',
-    ].map(escapeCSV).join(',')
+      escapeCSV(span.error || ''),
+    ].join(',')
   )
 
   const content = [headers.join(','), ...rows].join('\n')
