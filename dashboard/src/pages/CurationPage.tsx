@@ -73,7 +73,7 @@ export default function CurationPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div className="bg-dark-800 rounded-lg p-4">
           <p className="text-xs text-muted-400 uppercase tracking-wide">Total Labeled</p>
           <p className="text-2xl font-semibold text-muted-100 mt-1">
@@ -155,6 +155,7 @@ export default function CurationPage() {
                       type="checkbox"
                       checked={traces.length > 0 && selectedIds.size === traces.length}
                       onChange={toggleSelectAll}
+                      aria-label="Select all traces"
                       className="rounded border-dark-600"
                     />
                   </th>
@@ -186,6 +187,7 @@ export default function CurationPage() {
                         type="checkbox"
                         checked={selectedIds.has(trace.trace_id)}
                         onChange={() => toggleSelect(trace.trace_id)}
+                        aria-label={`Select trace ${trace.trace_name}`}
                         className="rounded border-dark-600"
                       />
                     </td>
