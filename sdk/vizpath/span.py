@@ -101,6 +101,7 @@ class Span:
         self._tokens: int | None = None
         self._cost: float | None = None
         self._children: list[Span] = []
+        self._ended: bool = False
 
     @property
     def id(self) -> str:
@@ -168,7 +169,15 @@ class Span:
         return self
 
     def end(self, status: SpanStatus | None = None) -> None:
-        """End this span and record its duration."""
+        """End this span and record its duration.
+
+        This method is idempotent - calling it multiple times has no effect
+        after the first call.
+        """
+        if self._ended:
+            return
+
+        self._ended = True
         self._end_time = datetime.now(timezone.utc)
         self._duration_ms = (time.perf_counter() - self._start_ts) * 1000
 
