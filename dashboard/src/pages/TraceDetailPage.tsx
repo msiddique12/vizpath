@@ -117,7 +117,7 @@ export default function TraceDetailPage() {
         </div>
 
         {viewMode === 'timeline' && <SpanTimeline spans={spans} />}
-        {viewMode === 'dag' && <DAGView spans={spans} width={800} height={500} />}
+        {viewMode === 'dag' && <DAGView spans={spans} />}
         {viewMode === 'heatmap' && <HeatmapView spans={spans} />}
       </div>
 

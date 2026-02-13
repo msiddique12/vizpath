@@ -1,4 +1,4 @@
-import { useEffect, useRef, useMemo } from 'react'
+import { useEffect, useRef, useMemo, useState } from 'react'
 import * as d3 from 'd3'
 import { Span, SpanType } from '@/lib/types'
 
@@ -28,12 +28,36 @@ interface DAGLink {
 
 interface DAGViewProps {
   spans: Span[]
-  width?: number
-  height?: number
 }
 
-export default function DAGView({ spans, width = 800, height = 500 }: DAGViewProps) {
+export default function DAGView({ spans }: DAGViewProps) {
+  const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
+  const [dimensions, setDimensions] = useState({ width: 800, height: 500 })
+
+  // Observe container size changes for responsiveness
+  useEffect(() => {
+    if (!containerRef.current) return
+
+    const updateDimensions = () => {
+      if (containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect()
+        setDimensions({
+          width: rect.width || 800,
+          height: Math.max(400, Math.min(rect.width * 0.625, 600)), // Maintain aspect ratio
+        })
+      }
+    }
+
+    updateDimensions()
+
+    const resizeObserver = new ResizeObserver(updateDimensions)
+    resizeObserver.observe(containerRef.current)
+
+    return () => resizeObserver.disconnect()
+  }, [])
+
+  const { width, height } = dimensions
 
   const { nodes, links } = useMemo(() => {
     const nodeMap = new Map<string, DAGNode>()
@@ -211,17 +235,19 @@ export default function DAGView({ spans, width = 800, height = 500 }: DAGViewPro
   }
 
   return (
-    <div className="relative">
+    <div ref={containerRef} className="relative w-full">
       <svg
         ref={svgRef}
         width={width}
         height={height}
-        className="border border-dark-700 rounded-lg bg-dark-900"
+        className="border border-dark-700 rounded-lg bg-dark-900 w-full"
+        role="img"
+        aria-label="Span dependency graph visualization"
       />
-      <div className="absolute bottom-4 left-4 flex items-center gap-3 bg-dark-800/90 px-3 py-2 rounded-lg border border-dark-700 text-xs">
+      <div className="absolute bottom-4 left-4 flex flex-wrap items-center gap-2 sm:gap-3 bg-dark-800/90 px-3 py-2 rounded-lg border border-dark-700 text-xs max-w-[calc(100%-2rem)]">
         {Object.entries(SPAN_COLORS).map(([type, color]) => (
           <div key={type} className="flex items-center gap-1">
-            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
+            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} aria-hidden="true" />
             <span className="text-muted-300">{type}</span>
           </div>
         ))}
