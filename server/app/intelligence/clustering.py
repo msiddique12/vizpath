@@ -93,7 +93,7 @@ def cluster_traces(
     if len(embeddings) < 2:
         return None
 
-    ids, embedding_list = zip(*embeddings.items())
+    ids, embedding_list = zip(*embeddings.items(), strict=True)
     embedding_matrix = np.vstack(embedding_list)
 
     try:
@@ -103,7 +103,10 @@ def cluster_traces(
 
         kmeans = KMeans(n_clusters=k, random_state=42, n_init="auto").fit(embedding_matrix)
 
-        id_to_cluster = {str(tid): int(label) for tid, label in zip(ids, kmeans.labels_)}
+        id_to_cluster = {
+            str(tid): int(label)
+            for tid, label in zip(ids, kmeans.labels_, strict=True)
+        }
         centroids = kmeans.cluster_centers_
 
         result = {"clusters": id_to_cluster, "centroids": centroids}

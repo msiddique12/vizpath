@@ -145,7 +145,7 @@ async def get_clusters(
     _require_nvidia_key()
 
     from app.intelligence.clustering import cluster_traces, get_cluster_summary
-    from app.intelligence.embeddings import embed_trace, get_trace_embeddings, trace_to_text
+    from app.intelligence.embeddings import get_trace_embeddings, trace_to_text
 
     # Get all traces
     traces = db.query(Trace).order_by(Trace.created_at.desc()).limit(500).all()
