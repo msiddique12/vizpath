@@ -3,44 +3,78 @@
 import asyncio
 import json
 import logging
+from typing import Optional
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+
+from app.auth import get_project_by_api_key
+from app.config import settings
+from app.database import SessionLocal
+from app.models import Project
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["WebSocket"])
 
-active_connections: set[WebSocket] = set()
+# Maps WebSocket to (connection, project_id) for project-scoped broadcasts
+active_connections: dict[WebSocket, str | None] = {}
 
 
-async def broadcast_message(message: dict) -> None:
-    """Broadcast a message to all connected clients."""
+async def broadcast_message(message: dict, project_id: str | None = None) -> None:
+    """Broadcast a message to connected clients, optionally filtered by project."""
     if not active_connections:
         return
 
     data = json.dumps(message)
     disconnected = set()
 
-    for connection in active_connections:
+    for connection, conn_project_id in active_connections.items():
+        # If project_id specified, only send to matching connections
+        if project_id is not None and conn_project_id != project_id:
+            continue
         try:
             await connection.send_text(data)
         except Exception:
             disconnected.add(connection)
 
     for conn in disconnected:
-        active_connections.discard(conn)
+        active_connections.pop(conn, None)
+
+
+def _verify_ws_api_key(api_key: str | None) -> Project | None:
+    """Verify API key for WebSocket connections (synchronous helper)."""
+    if not api_key:
+        return None
+    db = SessionLocal()
+    try:
+        return get_project_by_api_key(db, api_key)
+    finally:
+        db.close()
 
 
 @router.websocket("/ws/traces")
-async def traces_websocket(websocket: WebSocket) -> None:
+async def traces_websocket(
+    websocket: WebSocket,
+    api_key: Optional[str] = Query(None, alias="api_key"),
+) -> None:
     """
     WebSocket endpoint for real-time trace updates.
 
     Clients receive updates when new spans are ingested.
+    Requires valid API key passed as query parameter.
     """
+    # Verify API key before accepting connection
+    project = _verify_ws_api_key(api_key)
+
+    # In production mode, require valid API key
+    if settings.is_production and project is None:
+        await websocket.close(code=4001, reason="Unauthorized: Invalid or missing API key")
+        return
+
     await websocket.accept()
-    active_connections.add(websocket)
-    logger.info(f"WebSocket connected. Total connections: {len(active_connections)}")
+    project_id = str(project.id) if project else None
+    active_connections[websocket] = project_id
+    logger.info(f"WebSocket connected (project={project_id}). Total connections: {len(active_connections)}")
 
     try:
         while True:
@@ -55,11 +89,11 @@ async def traces_websocket(websocket: WebSocket) -> None:
     except Exception as e:
         logger.warning(f"WebSocket error: {e}")
     finally:
-        active_connections.discard(websocket)
+        active_connections.pop(websocket, None)
         logger.info(f"WebSocket disconnected. Total connections: {len(active_connections)}")
 
 
-async def notify_span_ingested(trace_id: str, span_count: int) -> None:
+async def notify_span_ingested(trace_id: str, span_count: int, project_id: str | None = None) -> None:
     """Notify connected clients that new spans were ingested."""
     message = {
         "type": "span_ingested",
@@ -68,6 +102,6 @@ async def notify_span_ingested(trace_id: str, span_count: int) -> None:
     }
 
     try:
-        await broadcast_message(message)
+        await broadcast_message(message, project_id=project_id)
     except Exception:
         logger.warning("Failed to broadcast span ingestion notification", exc_info=True)
