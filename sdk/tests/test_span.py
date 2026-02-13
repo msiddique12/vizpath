@@ -1,6 +1,7 @@
 """Tests for Span class."""
 
 import time
+from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
@@ -12,6 +13,12 @@ class TestSpan:
     def setup_method(self):
         self.mock_context = MagicMock()
         self.mock_context.trace_id = "test-trace-id"
+        self.mock_context.name = "test-trace"
+        self.mock_context.status = SpanStatus.RUNNING
+        self.mock_context.start_time = datetime.now(timezone.utc)
+        self.mock_context.end_time = None
+        self.mock_context.duration_ms = None
+        self.mock_context.metadata = {}
 
     def test_span_creation(self):
         span = Span(

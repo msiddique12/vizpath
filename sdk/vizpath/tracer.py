@@ -53,6 +53,32 @@ class TraceContext:
     def trace_id(self) -> str:
         return self._trace_id
 
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def start_time(self) -> datetime:
+        return self._start_time
+
+    @property
+    def end_time(self) -> datetime | None:
+        return self._end_time
+
+    @property
+    def duration_ms(self) -> float | None:
+        if not self._end_time:
+            return None
+        return (self._end_time - self._start_time).total_seconds() * 1000
+
+    @property
+    def metadata(self) -> dict[str, Any]:
+        return self._metadata
+
+    @property
+    def status(self) -> SpanStatus:
+        return self._status
+
     def _register_span(self, span: Span) -> None:
         """Register a span with this trace context."""
         self._spans.append(span)

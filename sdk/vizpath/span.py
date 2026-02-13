@@ -60,6 +60,12 @@ class SpanData(BaseModel):
     error: str | None = None
     tokens: int | None = None
     cost: float | None = None
+    trace_name: str | None = None
+    trace_status: SpanStatus | None = None
+    trace_start_time: datetime | None = None
+    trace_end_time: datetime | None = None
+    trace_duration_ms: float | None = None
+    trace_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class Span:
@@ -192,6 +198,12 @@ class Span:
             error=self._error,
             tokens=self._tokens,
             cost=self._cost,
+            trace_name=self._trace_context.name,
+            trace_status=self._trace_context.status,
+            trace_start_time=self._trace_context.start_time,
+            trace_end_time=self._trace_context.end_time,
+            trace_duration_ms=self._trace_context.duration_ms,
+            trace_metadata=self._trace_context.metadata,
         )
 
     def __enter__(self) -> Span:

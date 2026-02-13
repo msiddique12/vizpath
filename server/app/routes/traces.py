@@ -41,11 +41,17 @@ class SpanCreate(BaseModel):
     error: str | None = Field(default=None, max_length=4096)
     tokens: int | None = Field(default=None, ge=0, le=10000000)
     cost: float | None = Field(default=None, ge=0, le=1000000)
+    trace_name: str | None = Field(default=None, min_length=1, max_length=256)
+    trace_status: str | None = Field(default=None, pattern=STATUS_PATTERN)
+    trace_start_time: datetime | None = None
+    trace_end_time: datetime | None = None
+    trace_duration_ms: float | None = Field(default=None, ge=0, le=86400000)
+    trace_metadata: dict[str, Any] = Field(default_factory=dict, max_length=100)
 
-    @field_validator("name", "error", mode="before")
+    @field_validator("name", "error", "trace_name", mode="before")
     @classmethod
     def normalize_text_fields(cls, value: str | None, info) -> str | None:
-        limits = {"name": 256, "error": 4096}
+        limits = {"name": 256, "error": 4096, "trace_name": 256}
         return normalize_text(
             value,
             field_name=info.field_name,
@@ -110,17 +116,40 @@ class SpanResponse(BaseModel):
 def get_or_create_trace(db: Session, trace_id: str, project_id: Any, span: SpanCreate) -> Trace:
     """Get existing trace or create a new one."""
     trace = db.query(Trace).filter(Trace.id == trace_id).first()
+    trace_name = (
+        span.trace_name
+        if span.trace_name
+        else span.name.split(".")[0] if span.parent_id is None else "trace"
+    )
+    trace_start_time = span.trace_start_time or span.start_time
 
     if not trace:
         trace = Trace(
             id=trace_id,
             project_id=project_id,
-            name=span.name.split(".")[0] if span.parent_id is None else "trace",
-            status="running",
-            start_time=span.start_time,
+            name=trace_name,
+            status=span.trace_status or "running",
+            start_time=trace_start_time,
+            end_time=span.trace_end_time,
+            duration_ms=span.trace_duration_ms,
+            trace_metadata=span.trace_metadata or {},
         )
         db.add(trace)
         db.flush()  # Make visible for subsequent queries in same transaction
+        return trace
+
+    if span.trace_name:
+        trace.name = span.trace_name
+    if span.trace_metadata:
+        trace.trace_metadata = {**(trace.trace_metadata or {}), **span.trace_metadata}
+    if span.trace_start_time and span.trace_start_time < trace.start_time:
+        trace.start_time = span.trace_start_time
+    if span.trace_end_time and (trace.end_time is None or span.trace_end_time > trace.end_time):
+        trace.end_time = span.trace_end_time
+    if span.trace_duration_ms is not None:
+        trace.duration_ms = span.trace_duration_ms
+    if span.trace_status in {"success", "error"}:
+        trace.status = span.trace_status
 
     return trace
 
