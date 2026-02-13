@@ -165,6 +165,7 @@ class TestTraceRetrieval:
         assert response.status_code == 200
         assert response.json()["total"] == 1
         assert len(response.json()["traces"]) == 1
+        assert "created_at" in response.json()["traces"][0]
 
     def test_list_traces_pagination(self, client):
         now = datetime.now(timezone.utc).isoformat()
@@ -224,6 +225,7 @@ class TestTraceRetrieval:
                 "name": "span-1",
                 "span_type": "llm",
                 "start_time": datetime.now(timezone.utc).isoformat(),
+                "events": [{"name": "token_usage", "value": 12}],
             },
         ]
         client.post("/api/v1/traces/spans/batch", json=payload)
@@ -233,3 +235,22 @@ class TestTraceRetrieval:
         assert response.status_code == 200
         assert len(response.json()) == 1
         assert response.json()[0]["name"] == "span-1"
+        assert response.json()[0]["events"] == [{"name": "token_usage", "value": 12}]
+
+    def test_error_count_uses_error_status_only(self, client):
+        payload = [
+            {
+                "span_id": "span-1",
+                "trace_id": "trace-error-count",
+                "name": "span-with-error-text",
+                "status": "success",
+                "error": "transient warning",
+                "start_time": datetime.now(timezone.utc).isoformat(),
+            }
+        ]
+        client.post("/api/v1/traces/spans/batch", json=payload)
+
+        response = client.get("/api/v1/traces/")
+
+        assert response.status_code == 200
+        assert response.json()["traces"][0]["error_count"] == 0

@@ -74,6 +74,7 @@ class TraceResponse(BaseModel):
     total_cost: float | None
     span_count: int
     error_count: int
+    created_at: datetime
 
 
 class TraceListResponse(BaseModel):
@@ -98,6 +99,7 @@ class SpanResponse(BaseModel):
     end_time: datetime | None
     duration_ms: float | None
     attributes: dict[str, Any]
+    events: list[dict[str, Any]]
     input: Any | None
     output: Any | None
     error: str | None
@@ -171,7 +173,7 @@ async def ingest_spans(
                     func.count(Span.id).label("count"),
                     func.sum(Span.tokens).label("tokens"),
                     func.sum(Span.cost).label("cost"),
-                    func.sum(case((Span.error.isnot(None), 1), else_=0)).label("errors"),
+                    func.sum(case((Span.status == "error", 1), else_=0)).label("errors"),
                     func.max(Span.end_time).label("latest_end"),
                 )
                 .filter(Span.trace_id == trace_id)
@@ -241,6 +243,7 @@ async def list_traces(
                 total_cost=t.total_cost,
                 span_count=t.span_count,
                 error_count=t.error_count,
+                created_at=t.created_at,
             )
             for t in traces
         ],
@@ -303,6 +306,7 @@ async def get_trace_spans(
             end_time=s.end_time,
             duration_ms=s.duration_ms,
             attributes=s.attributes or {},
+            events=s.events or [],
             input=s.input,
             output=s.output,
             error=s.error,

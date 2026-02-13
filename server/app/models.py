@@ -96,6 +96,7 @@ class Trace(Base):
             "total_cost": self.total_cost,
             "error_count": self.error_count,
             "span_count": self.span_count,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
     def __repr__(self) -> str:
