@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import { Loader2, DollarSign } from 'lucide-react'
 import clsx from 'clsx'
 import { getTraces } from '@/lib/api'
@@ -52,7 +53,7 @@ export default function CostPage() {
           </div>
         ) : (
           <div className="space-y-6">
-            <div className="grid grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-dark-800 rounded-lg p-4">
                 <p className="text-xs text-muted-400 uppercase tracking-wide">Total Cost</p>
                 <p className="text-2xl font-semibold text-muted-100 mt-1">
@@ -102,12 +103,12 @@ export default function CostPage() {
                       {topCostlyTraces.map((trace: Trace) => (
                         <tr key={trace.id} className="hover:bg-dark-800">
                           <td className="px-4 py-3">
-                            <a
-                              href={`/traces/${trace.id}`}
+                            <Link
+                              to={`/traces/${trace.id}`}
                               className="text-sm text-primary-500 hover:text-primary-400 font-medium"
                             >
                               {trace.name}
-                            </a>
+                            </Link>
                             <p className="text-xs text-muted-400 mt-0.5">
                               {new Date(trace.created_at).toLocaleString()}
                             </p>
