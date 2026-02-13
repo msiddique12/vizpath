@@ -64,6 +64,7 @@ All LLM and embedding calls go through NVIDIA NIM API (OpenAI-compatible):
 - Zero external cost for unit tests (all NIM calls mocked)
 - Integration tests use NIM free tier (`NVIDIA_API_KEY` required)
 - Dashboard changes: visual QA after each change
+- Add regression tests after fixing bugs
 
 ## Local Dev Setup
 
