@@ -158,13 +158,18 @@ async def get_clusters(
 ) -> dict[str, Any]:
     """Get trace clusters for the current project."""
     _require_nvidia_key()
-    _ = project
 
     from app.intelligence.clustering import cluster_traces, get_cluster_summary
     from app.intelligence.embeddings import get_trace_embeddings, trace_to_text
 
-    # Get all traces
-    traces = db.query(Trace).order_by(Trace.created_at.desc()).limit(500).all()
+    # Get traces for the current project only
+    traces = (
+        db.query(Trace)
+        .filter(Trace.project_id == project.id)
+        .order_by(Trace.created_at.desc())
+        .limit(500)
+        .all()
+    )
     if len(traces) < 2:
         return {"clusters": [], "message": "Not enough traces to cluster"}
 
@@ -180,7 +185,7 @@ async def get_clusters(
     embeddings = await get_trace_embeddings(trace_texts)
 
     # Cluster
-    result = cluster_traces(embeddings, project_id="default")
+    result = cluster_traces(embeddings, project_id=str(project.id))
     if not result:
         return {"clusters": [], "message": "Clustering did not produce results"}
 

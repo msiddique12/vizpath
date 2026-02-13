@@ -79,7 +79,7 @@ def cluster_traces(
     Returns:
         Dict with "clusters" (id->cluster map) and "centroids", or None.
     """
-    cache_key = f"clusters:{project_id}"
+    cache_key = f"clusters:{str(project_id)}"
     redis_client = _get_redis()
 
     if redis_client:
