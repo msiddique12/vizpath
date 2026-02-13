@@ -3,9 +3,11 @@
 import hashlib
 import logging
 import secrets
+from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException, Security, status
 from fastapi.security import APIKeyHeader
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -34,9 +36,35 @@ def generate_api_key() -> str:
 
 
 def get_project_by_api_key(db: Session, api_key: str) -> Project | None:
-    """Look up a project by API key hash."""
+    """Look up a project by current key hash or grace-period previous key hash."""
     key_hash = hash_api_key(api_key)
-    return db.query(Project).filter(Project.api_key_hash == key_hash).first()
+    project = (
+        db.query(Project)
+        .filter(
+            or_(
+                Project.api_key_hash == key_hash,
+                Project.previous_api_key_hash == key_hash,
+            )
+        )
+        .first()
+    )
+    if not project:
+        return None
+
+    if project.api_key_revoked_at is not None:
+        return None
+
+    if project.api_key_hash == key_hash:
+        return project
+
+    if (
+        project.previous_api_key_hash == key_hash
+        and project.api_key_grace_expires_at is not None
+        and datetime.now(timezone.utc) <= project.api_key_grace_expires_at
+    ):
+        return project
+
+    return None
 
 
 def _get_or_create_default_project(db: Session) -> Project:

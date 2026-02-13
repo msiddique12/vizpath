@@ -44,6 +44,9 @@ class Project(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(255), nullable=False)
     api_key_hash = Column(String(64), unique=True, index=True, nullable=False)
+    previous_api_key_hash = Column(String(64), unique=True, index=True, nullable=True)
+    api_key_grace_expires_at = Column(DateTime(timezone=True), nullable=True)
+    api_key_revoked_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
 

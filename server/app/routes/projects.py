@@ -1,9 +1,10 @@
 """Project management endpoints."""
 
 import logging
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.auth import generate_api_key, hash_api_key, verify_api_key
@@ -36,6 +37,26 @@ class ProjectWithKeyResponse(BaseModel):
     name: str
     api_key: str
     created_at: str
+
+
+class RotateKeyRequest(BaseModel):
+    """Request model for key rotation options."""
+
+    grace_period_minutes: int = Field(default=60, ge=1, le=1440)
+
+
+class RotateKeyResponse(BaseModel):
+    """Response returned after key rotation."""
+
+    project_id: str
+    api_key: str
+    grace_expires_at: str
+
+
+class RevokeKeyRequest(BaseModel):
+    """Request model for key revocation."""
+
+    key_type: str = Field(default="previous", pattern="^(previous|current)$")
 
 
 @router.post("/", response_model=ProjectWithKeyResponse, status_code=201)
@@ -93,3 +114,53 @@ async def get_current_project(
         name=project.name,
         created_at=project.created_at.isoformat(),
     )
+
+
+@router.post("/me/api-key/rotate", response_model=RotateKeyResponse)
+async def rotate_api_key(
+    payload: RotateKeyRequest,
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> RotateKeyResponse:
+    """Rotate API key and keep previous key valid during grace window."""
+    new_api_key = generate_api_key()
+    new_key_hash = hash_api_key(new_api_key)
+    now = datetime.now(timezone.utc)
+
+    project.previous_api_key_hash = project.api_key_hash
+    project.api_key_hash = new_key_hash
+    project.api_key_grace_expires_at = now + timedelta(minutes=payload.grace_period_minutes)
+    project.api_key_revoked_at = None
+    project.updated_at = now
+
+    db.commit()
+    db.refresh(project)
+
+    return RotateKeyResponse(
+        project_id=str(project.id),
+        api_key=new_api_key,
+        grace_expires_at=project.api_key_grace_expires_at.isoformat(),
+    )
+
+
+@router.post("/me/api-key/revoke")
+async def revoke_api_key(
+    payload: RevokeKeyRequest,
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    """Revoke previous key immediately, or current key if explicitly requested."""
+    now = datetime.now(timezone.utc)
+
+    if payload.key_type == "previous":
+        if project.previous_api_key_hash is None:
+            raise HTTPException(status_code=404, detail="No previous key to revoke.")
+        project.previous_api_key_hash = None
+        project.api_key_grace_expires_at = None
+    else:
+        project.api_key_revoked_at = now
+
+    project.updated_at = now
+    db.commit()
+
+    return {"status": "revoked", "key_type": payload.key_type}
