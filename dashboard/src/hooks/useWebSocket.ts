@@ -21,10 +21,11 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const host = window.location.hostname
-    const port = '8000'
-    const url = `${protocol}//${host}:${port}/ws/traces`
+    const configuredBase = import.meta.env.VITE_WS_BASE_URL as string | undefined
+    const baseUrl = configuredBase?.trim()
+      ? configuredBase.trim()
+      : window.location.origin.replace(/^http/, 'ws')
+    const url = new URL('/ws/traces', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`).toString()
 
     try {
       const ws = new WebSocket(url)
