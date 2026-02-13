@@ -1,6 +1,8 @@
 """Application configuration loaded from environment variables."""
 
 
+from collections.abc import Sequence
+
 from pydantic import Field, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -33,6 +35,11 @@ class Settings(BaseSettings):
     host: str = Field(default="0.0.0.0", alias="HOST")
     port: int = Field(default=8000, alias="PORT")
     environment: str = Field(default="development", alias="ENVIRONMENT")
+    cors_allowed_origins: list[str] = Field(
+        default=["http://localhost:3000", "http://localhost:5173"],
+        alias="CORS_ALLOWED_ORIGINS",
+    )
+    security_strict_mode: bool = Field(default=False, alias="SECURITY_STRICT_MODE")
 
     rate_limit_rpm: int = Field(default=120, alias="RATE_LIMIT_RPM")
 
@@ -50,6 +57,15 @@ class Settings(BaseSettings):
         if not v:
             raise ValueError("DATABASE_URL is required")
         return v
+
+    @field_validator("cors_allowed_origins", mode="before")
+    @classmethod
+    def validate_cors_allowed_origins(cls, v: str | Sequence[str]) -> list[str]:
+        if isinstance(v, str):
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
+        if isinstance(v, Sequence):
+            return [str(origin).strip() for origin in v if str(origin).strip()]
+        raise ValueError("CORS_ALLOWED_ORIGINS must be a comma-separated string or list")
 
     @property
     def is_production(self) -> bool:

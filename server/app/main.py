@@ -13,6 +13,11 @@ from app import __version__
 from app.config import settings
 from app.database import check_db_connection, engine, init_db
 from app.routes import curation, intelligence, projects, traces, ws
+from app.security import (
+    build_error_response,
+    request_id_middleware,
+    security_headers_middleware,
+)
 
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
@@ -51,11 +56,13 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_origins=settings.cors_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.middleware("http")(request_id_middleware)
+app.middleware("http")(security_headers_middleware)
 
 app.include_router(traces.router, prefix="/api/v1")
 app.include_router(projects.router, prefix="/api/v1")
@@ -67,13 +74,23 @@ app.include_router(ws.router)
 @app.exception_handler(ValueError)
 async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse:
     logger.warning(f"Validation error: {exc}")
-    return JSONResponse(status_code=400, content={"detail": str(exc)})
+    return build_error_response(
+        status_code=400,
+        detail=str(exc),
+        request_id=getattr(request.state, "request_id", None),
+        code="bad_request",
+    )
 
 
 @app.exception_handler(RuntimeError)
 async def runtime_error_handler(request: Request, exc: RuntimeError) -> JSONResponse:
     logger.error(f"Runtime error: {exc}", exc_info=True)
-    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+    return build_error_response(
+        status_code=500,
+        detail="Internal server error",
+        request_id=getattr(request.state, "request_id", None),
+        code="runtime_error",
+    )
 
 
 @app.get("/", tags=["Health"])
