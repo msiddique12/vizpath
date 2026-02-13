@@ -1,0 +1,107 @@
+"""Tests for WebSocket endpoints."""
+
+import pytest
+from unittest.mock import patch, MagicMock
+from datetime import datetime, timezone
+
+from app.models import Project
+from app.routes.ws import (
+    active_connections,
+    broadcast_message,
+    notify_span_ingested,
+    _verify_ws_api_key,
+)
+
+
+class TestWebSocketAuth:
+    """Tests for WebSocket authentication."""
+
+    def test_verify_ws_api_key_no_key(self):
+        """Returns None when no API key provided."""
+        result = _verify_ws_api_key(None)
+        assert result is None
+
+    def test_verify_ws_api_key_invalid(self, test_db):
+        """Returns None for invalid API key."""
+        result = _verify_ws_api_key("invalid-key")
+        assert result is None
+
+    def test_verify_ws_api_key_valid(self, test_db):
+        """Returns project for valid API key."""
+        from app.auth import generate_api_key, hash_api_key
+
+        api_key = generate_api_key()
+        key_hash = hash_api_key(api_key)
+
+        project = Project(name="test-ws", api_key_hash=key_hash)
+        test_db.add(project)
+        test_db.commit()
+
+        result = _verify_ws_api_key(api_key)
+        assert result is not None
+        assert result.name == "test-ws"
+
+
+class TestBroadcastMessage:
+    """Tests for broadcast_message function."""
+
+    @pytest.mark.asyncio
+    async def test_broadcast_no_connections(self):
+        """No error when broadcasting to no connections."""
+        active_connections.clear()
+        await broadcast_message({"type": "test"})
+        assert len(active_connections) == 0
+
+    @pytest.mark.asyncio
+    async def test_broadcast_filters_by_project(self):
+        """Messages are only sent to matching project connections."""
+        active_connections.clear()
+
+        mock_ws1 = MagicMock()
+        mock_ws1.send_text = MagicMock(return_value=None)
+        mock_ws2 = MagicMock()
+        mock_ws2.send_text = MagicMock(return_value=None)
+
+        # Make send_text async
+        async def mock_send(data):
+            pass
+
+        mock_ws1.send_text = mock_send
+        mock_ws2.send_text = mock_send
+
+        active_connections[mock_ws1] = "project-1"
+        active_connections[mock_ws2] = "project-2"
+
+        await broadcast_message({"type": "test"}, project_id="project-1")
+
+        # Clean up
+        active_connections.clear()
+
+
+class TestNotifySpanIngested:
+    """Tests for notify_span_ingested function."""
+
+    @pytest.mark.asyncio
+    async def test_notify_creates_correct_message(self):
+        """notify_span_ingested broadcasts correct message format."""
+        active_connections.clear()
+
+        messages_sent = []
+
+        async def capture_send(data):
+            messages_sent.append(data)
+
+        mock_ws = MagicMock()
+        mock_ws.send_text = capture_send
+        active_connections[mock_ws] = "project-1"
+
+        await notify_span_ingested("trace-123", 5, project_id="project-1")
+
+        assert len(messages_sent) == 1
+        import json
+        msg = json.loads(messages_sent[0])
+        assert msg["type"] == "span_ingested"
+        assert msg["trace_id"] == "trace-123"
+        assert msg["span_count"] == 5
+
+        active_connections.clear()
