@@ -3,28 +3,55 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import CuratedLabel, Span, Trace
+from app.validation import ID_PATTERN, TAG_PATTERN, normalize_text
 
 router = APIRouter(prefix="/curation", tags=["curation"])
 
 
 class LabelCreate(BaseModel):
-    trace_id: str
-    label: str | None = None
-    quality_score: float | None = None
-    notes: str | None = None
+    model_config = ConfigDict(extra="forbid")
+
+    trace_id: str = Field(min_length=1, max_length=128, pattern=ID_PATTERN)
+    label: str | None = Field(default=None, min_length=1, max_length=100, pattern=TAG_PATTERN)
+    quality_score: float | None = Field(default=None, ge=0, le=100)
+    notes: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("label", "notes", mode="before")
+    @classmethod
+    def normalize_text_fields(cls, value: str | None, info) -> str | None:
+        limits = {"label": 100, "notes": 2000}
+        return normalize_text(
+            value,
+            field_name=info.field_name,
+            max_length=limits[info.field_name],
+            allow_empty=info.field_name == "notes",
+        )
 
 
 class LabelUpdate(BaseModel):
-    label: str | None = None
-    quality_score: float | None = None
-    notes: str | None = None
+    model_config = ConfigDict(extra="forbid")
+
+    label: str | None = Field(default=None, min_length=1, max_length=100, pattern=TAG_PATTERN)
+    quality_score: float | None = Field(default=None, ge=0, le=100)
+    notes: str | None = Field(default=None, max_length=2000)
     exported: bool | None = None
+
+    @field_validator("label", "notes", mode="before")
+    @classmethod
+    def normalize_text_fields(cls, value: str | None, info) -> str | None:
+        limits = {"label": 100, "notes": 2000}
+        return normalize_text(
+            value,
+            field_name=info.field_name,
+            max_length=limits[info.field_name],
+            allow_empty=info.field_name == "notes",
+        )
 
 
 class LabelResponse(BaseModel):
@@ -53,9 +80,26 @@ class CuratedTraceResponse(BaseModel):
 
 
 class ExportRequest(BaseModel):
-    trace_ids: list[str]
-    format: str = "jsonl"
+    model_config = ConfigDict(extra="forbid")
+
+    trace_ids: list[str] = Field(min_length=1, max_length=1000)
+    format: str = Field(default="jsonl", pattern="^(jsonl|json)$")
     include_input_output: bool = True
+
+    @field_validator("trace_ids")
+    @classmethod
+    def validate_trace_ids(cls, value: list[str]) -> list[str]:
+        normalized = []
+        for trace_id in value:
+            normalized_trace_id = normalize_text(
+                trace_id,
+                field_name="trace_id",
+                max_length=128,
+            )
+            if normalized_trace_id is None:
+                raise ValueError("trace_id cannot be null")
+            normalized.append(normalized_trace_id)
+        return normalized
 
 
 @router.post("/labels", response_model=LabelResponse)

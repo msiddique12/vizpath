@@ -4,12 +4,13 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
 from app.models import Span, Trace
+from app.validation import ID_PATTERN
 
 logger = logging.getLogger(__name__)
 
@@ -41,19 +42,27 @@ def _get_trace_data(trace_id: str, db: Session) -> dict[str, Any]:
 
 
 class AnalyzeRequest(BaseModel):
-    trace_id: str
+    model_config = ConfigDict(extra="forbid")
+
+    trace_id: str = Field(min_length=1, max_length=128, pattern=ID_PATTERN)
 
 
 class SelfAnalyzeRequest(BaseModel):
-    trace_id: str
+    model_config = ConfigDict(extra="forbid")
+
+    trace_id: str = Field(min_length=1, max_length=128, pattern=ID_PATTERN)
 
 
 class EmbedRequest(BaseModel):
-    trace_id: str
+    model_config = ConfigDict(extra="forbid")
+
+    trace_id: str = Field(min_length=1, max_length=128, pattern=ID_PATTERN)
 
 
 class SyntheticRequest(BaseModel):
-    trace_id: str
+    model_config = ConfigDict(extra="forbid")
+
+    trace_id: str = Field(min_length=1, max_length=128, pattern=ID_PATTERN)
     mode: str = Field(default="variations", pattern="^(variations|corrections)$")
     n: int = Field(default=5, ge=1, le=20)
 

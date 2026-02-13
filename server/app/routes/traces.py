@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
@@ -13,6 +13,7 @@ from app.auth import verify_api_key
 from app.database import get_db
 from app.models import Project, Span, Trace
 from app.routes.ws import notify_span_ingested
+from app.validation import ID_PATTERN, SPAN_TYPE_PATTERN, STATUS_PATTERN, normalize_text
 
 logger = logging.getLogger(__name__)
 
@@ -22,22 +23,35 @@ router = APIRouter(prefix="/traces", tags=["Traces"])
 class SpanCreate(BaseModel):
     """Schema for creating a span."""
 
-    span_id: str
-    trace_id: str
-    parent_id: str | None = None
-    name: str
-    span_type: str = "custom"
-    status: str = "success"
+    model_config = ConfigDict(extra="forbid")
+
+    span_id: str = Field(min_length=1, max_length=128, pattern=ID_PATTERN)
+    trace_id: str = Field(min_length=1, max_length=128, pattern=ID_PATTERN)
+    parent_id: str | None = Field(default=None, min_length=1, max_length=128, pattern=ID_PATTERN)
+    name: str = Field(min_length=1, max_length=256)
+    span_type: str = Field(default="custom", pattern=SPAN_TYPE_PATTERN)
+    status: str = Field(default="success", pattern=STATUS_PATTERN)
     start_time: datetime
     end_time: datetime | None = None
-    duration_ms: float | None = None
-    attributes: dict[str, Any] = Field(default_factory=dict)
-    events: list[dict[str, Any]] = Field(default_factory=list)
+    duration_ms: float | None = Field(default=None, ge=0, le=86400000)
+    attributes: dict[str, Any] = Field(default_factory=dict, max_length=200)
+    events: list[dict[str, Any]] = Field(default_factory=list, max_length=1000)
     input: Any | None = None
     output: Any | None = None
-    error: str | None = None
-    tokens: int | None = None
-    cost: float | None = None
+    error: str | None = Field(default=None, max_length=4096)
+    tokens: int | None = Field(default=None, ge=0, le=10000000)
+    cost: float | None = Field(default=None, ge=0, le=1000000)
+
+    @field_validator("name", "error", mode="before")
+    @classmethod
+    def normalize_text_fields(cls, value: str | None, info) -> str | None:
+        limits = {"name": 256, "error": 4096}
+        return normalize_text(
+            value,
+            field_name=info.field_name,
+            max_length=limits[info.field_name],
+            allow_empty=info.field_name == "error",
+        )
 
 
 class SpanBatchCreate(BaseModel):
