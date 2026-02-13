@@ -5,8 +5,6 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.models import Trace
-
 
 @pytest.fixture
 def trace_with_spans(client, test_db):
@@ -174,3 +172,28 @@ class TestGenerateSyntheticEndpoint:
             data = resp.json()
             assert data["mode"] == "variations"
             assert data["count"] == 1
+            assert data["results"] == mock_variations
+            assert data["type"] == "variations"
+            assert data["variations"] == mock_variations
+
+    def test_synthetic_legacy_request_fields_still_supported(self, client, trace_with_spans):
+        mock_variations = [
+            {"name": "v1", "steps": [], "approach": "legacy payload compatibility"},
+        ]
+
+        with (
+            patch("app.routes.intelligence.settings") as mock_settings,
+            patch("app.intelligence.synthetic.SyntheticDataGenerator") as MockGen,
+        ):
+            mock_settings.nvidia_api_key = "nvapi-test"
+            mock_instance = MockGen.return_value
+            mock_instance.generate_variations = AsyncMock(return_value=mock_variations)
+
+            resp = client.post(
+                "/api/v1/intelligence/generate-synthetic",
+                json={"trace_id": "test-trace-001", "type": "variations", "count": 1},
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["mode"] == "variations"
+            assert data["results"] == mock_variations
