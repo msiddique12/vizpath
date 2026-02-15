@@ -242,7 +242,7 @@ cd server && uvicorn app.main:app --reload
 cd dashboard && npm run dev
 ```
 
-The API is at http://localhost:8000, the dashboard at http://localhost:5173.
+The API is at http://localhost:8000, the dashboard at http://localhost:3000.
 
 ### Test
 
