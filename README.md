@@ -26,7 +26,18 @@ vizpath is an open-source observability and intelligence platform for AI agents.
 
 ## Quick Start
 
-### Installation
+### One-Command Demo
+
+```bash
+git clone https://github.com/yourrepo/vizpath
+cd vizpath
+make install              # Install all dependencies
+export NVIDIA_API_KEY="nvapi-..."  # For intelligence features
+./demo.sh                 # Start everything
+# Open http://localhost:3000
+```
+
+### Manual Installation
 
 ```bash
 # SDK
