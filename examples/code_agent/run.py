@@ -47,8 +47,8 @@ def main():
     )
     parser.add_argument(
         "--model",
-        default="nvidia/llama-3.1-nemotron-70b-instruct",
-        help="Model to use (default: nvidia/llama-3.1-nemotron-70b-instruct)",
+        default="nvidia/llama-3.3-nemotron-super-49b-v1",
+        help="Model to use (default: nvidia/llama-3.3-nemotron-super-49b-v1)",
     )
     parser.add_argument(
         "--vizpath-url",

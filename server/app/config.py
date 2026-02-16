@@ -23,7 +23,7 @@ class Settings(BaseSettings):
         alias="NVIDIA_BASE_URL",
     )
     nvidia_llm_model: str = Field(
-        default="nvidia/llama-3.1-nemotron-70b-instruct",
+        default="nvidia/llama-3.3-nemotron-super-49b-v1",
         alias="NVIDIA_LLM_MODEL",
     )
     nvidia_embedding_model: str = Field(

@@ -102,6 +102,7 @@ echo -e "${BLUE}[3/3]${NC} Starting services..."
 cd "$SCRIPT_DIR/server"
 DATABASE_URL=postgresql://vizpath:vizpath@localhost:5432/vizpath \
 REDIS_URL=redis://localhost:6379 \
+NVIDIA_LLM_MODEL=nvidia/llama-3.3-nemotron-super-49b-v1 \
 uvicorn app.main:app --reload --port 8000 &
 SERVER_PID=$!
 cd "$SCRIPT_DIR"
