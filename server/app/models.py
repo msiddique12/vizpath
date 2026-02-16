@@ -110,7 +110,8 @@ class Span(Base):
 
     id = Column(String(64), primary_key=True)
     trace_id = Column(String(64), ForeignKey("traces.id"), nullable=False, index=True)
-    parent_id = Column(String(64), ForeignKey("spans.id"), nullable=True, index=True)
+    # Note: No ForeignKey constraint - spans may arrive out of order across batches
+    parent_id = Column(String(64), nullable=True, index=True)
     name = Column(String(255), nullable=False)
     span_type = Column(String(50), default=SpanType.CUSTOM, index=True)
     status = Column(String(20), default=SpanStatus.RUNNING)
@@ -127,7 +128,7 @@ class Span(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     trace = relationship("Trace", back_populates="spans")
-    parent = relationship("Span", remote_side=[id], backref="children")
+    # Note: parent/children relationships handled via parent_id column (no FK constraint)
 
     __table_args__ = (
         Index("ix_spans_trace_parent", "trace_id", "parent_id"),
