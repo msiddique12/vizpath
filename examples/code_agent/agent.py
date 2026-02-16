@@ -36,7 +36,7 @@ class CodeAnalysisAgent:
         self,
         api_key: str | None = None,
         base_url: str | None = None,
-        model: str = "nvidia/llama-3.3-nemotron-super-49b-v1",
+        model: str = "nvidia/nemotron-4-340b-instruct",
         max_iterations: int = 8,
         verbose: bool = False,
     ):
