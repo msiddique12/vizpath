@@ -5,6 +5,7 @@ Analyzes codebases using local file tools + Nemotron.
 
 import json
 import os
+from pathlib import Path
 from typing import Any
 
 from openai import OpenAI
@@ -88,6 +89,28 @@ Cite specific files and line numbers when possible."""
             prefix = "  " * indent
             print(f"{prefix}[Agent] {message}")
 
+    def _resolve_tool_path(self, requested_path: str, codebase: str, expect_dir: bool = False) -> tuple[str | None, str | None]:
+        """Resolve tool paths relative to codebase and prevent escape."""
+        codebase_root = Path(codebase).resolve()
+        requested = requested_path or "."
+
+        try:
+            candidate = Path(requested)
+            resolved = (codebase_root / candidate).resolve() if not candidate.is_absolute() else candidate.resolve()
+            resolved.relative_to(codebase_root)
+        except Exception:
+            return None, (
+                f"Path '{requested}' is outside codebase '{codebase_root}'. "
+                "Use paths within the selected codebase."
+            )
+
+        if expect_dir and not resolved.is_dir():
+            return None, f"Directory not found: {resolved}"
+        if not expect_dir and not resolved.is_file():
+            return None, f"File not found: {resolved}"
+
+        return str(resolved), None
+
     @tracer.span(name="llm_call", span_type="llm")
     def _call_llm(
         self,
@@ -150,7 +173,7 @@ Cite specific files and line numbers when possible."""
         return result
 
     @tracer.span(name="execute_tool", span_type="tool")
-    def _execute_tool(self, tool_name: str, arguments: dict[str, Any]) -> str:
+    def _execute_tool(self, tool_name: str, arguments: dict[str, Any], codebase: str) -> str:
         """Execute a tool and return the result."""
         tracer.set_span_attributes({
             "tool.name": tool_name,
@@ -159,15 +182,24 @@ Cite specific files and line numbers when possible."""
         self._log(f"Executing tool: {tool_name}", indent=2)
 
         if tool_name == "search_files":
+            requested_dir = arguments.get("directory", ".")
+            search_dir, err = self._resolve_tool_path(requested_dir, codebase, expect_dir=True)
+            if err:
+                result = {"error": err}
+                return json.dumps(result, indent=2)
             result = search_files(
                 pattern=arguments["pattern"],
-                directory=arguments.get("directory", "."),
+                directory=search_dir,
             )
             self._log(f"  Found {len(result)} files for '{arguments['pattern']}'", indent=2)
 
         elif tool_name == "read_file":
+            resolved_path, err = self._resolve_tool_path(arguments["path"], codebase, expect_dir=False)
+            if err:
+                result = {"error": err}
+                return json.dumps(result, indent=2)
             result = read_file(
-                path=arguments["path"],
+                path=resolved_path,
                 max_lines=arguments.get("max_lines", 200),
             )
             if "error" not in result:
@@ -176,11 +208,20 @@ Cite specific files and line numbers when possible."""
                 self._log(f"  Error: {result['error']}", indent=2)
 
         elif tool_name == "list_directory":
-            result = list_directory(path=arguments.get("path", "."))
+            requested_dir = arguments.get("path", ".")
+            list_dir, err = self._resolve_tool_path(requested_dir, codebase, expect_dir=True)
+            if err:
+                result = {"error": err}
+                return json.dumps(result, indent=2)
+            result = list_directory(path=list_dir)
             self._log(f"  Listed {len(result)} items in {arguments.get('path', '.')}", indent=2)
 
         elif tool_name == "analyze_code":
-            result = analyze_code(file_path=arguments["file_path"])
+            resolved_path, err = self._resolve_tool_path(arguments["file_path"], codebase, expect_dir=False)
+            if err:
+                result = {"error": err}
+                return json.dumps(result, indent=2)
+            result = analyze_code(file_path=resolved_path)
             if "error" not in result:
                 self._log(
                     f"  Analyzed {arguments['file_path']}: "
@@ -274,7 +315,7 @@ Cite specific files and line numbers when possible."""
                     return final_response["content"] or arguments.get("summary", "Analysis complete.")
 
                 # Execute the tool
-                result = self._execute_tool(tool_name, arguments)
+                result = self._execute_tool(tool_name, arguments, codebase)
 
                 # Add tool result to messages
                 messages.append({
