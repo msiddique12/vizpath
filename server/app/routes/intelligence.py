@@ -39,6 +39,57 @@ def _get_trace_data(trace_id: str, project_id: Any, db: Session) -> dict[str, An
     return data
 
 
+def _normalize_analyze_result(result: dict[str, Any], trace_id: str) -> dict[str, Any]:
+    """Return response with both flat and nested analysis fields."""
+    analysis = result.get("analysis")
+    if not isinstance(analysis, dict):
+        analysis = {
+            "quality_score": result.get("quality_score", 0),
+            "labels": result.get("labels", []),
+            "suggestions": result.get("suggestions", []),
+            "summary": result.get("summary", result.get("error_analysis", "")),
+        }
+
+    return {
+        "trace_id": result.get("trace_id", trace_id),
+        "quality_score": result.get("quality_score", analysis.get("quality_score", 0)),
+        "efficiency_score": result.get("efficiency_score", 0),
+        "error_analysis": result.get("error_analysis", analysis.get("summary", "")),
+        "suggestions": result.get("suggestions", analysis.get("suggestions", [])),
+        "analysis": analysis,
+        "cached": result.get("cached", False),
+    }
+
+
+def _normalize_self_analyze_result(result: dict[str, Any], trace_id: str) -> dict[str, Any]:
+    """Return response with both flat and nested self-analysis fields."""
+    analysis = result.get("analysis")
+    if not isinstance(analysis, dict):
+        analysis = {
+            "effectiveness": result.get("effectiveness", result.get("quality", 0)),
+            "reasoning_quality": result.get("reasoning_quality", result.get("completeness", 0)),
+            "tool_usage": result.get("tool_usage", result.get("efficiency", 0)),
+            "overall_score": result.get("overall_score", 0),
+            "strengths": result.get("strengths", []),
+            "weaknesses": result.get("weaknesses", []),
+            "improvements": result.get("improvements", result.get("suggestions", [])),
+            "summary": result.get("summary", ""),
+        }
+
+    return {
+        "trace_id": result.get("trace_id", trace_id),
+        "quality": result.get("quality", analysis.get("effectiveness", 0)),
+        "efficiency": result.get("efficiency", analysis.get("tool_usage", 0)),
+        "completeness": result.get("completeness", analysis.get("reasoning_quality", 0)),
+        "overall_score": result.get("overall_score", analysis.get("overall_score", 0)),
+        "redundant_steps": result.get("redundant_steps", []),
+        "suggestions": result.get("suggestions", analysis.get("improvements", [])),
+        "summary": result.get("summary", analysis.get("summary", "")),
+        "analysis": analysis,
+        "cached": result.get("cached", False),
+    }
+
+
 # --- Request/Response schemas ---
 
 
@@ -94,7 +145,8 @@ async def analyze_trace(
 
     trace_data = _get_trace_data(req.trace_id, project.id, db)
     labeler = LLMLabeler()
-    return await labeler.analyze_trace(trace_data)
+    result = await labeler.analyze_trace(trace_data)
+    return _normalize_analyze_result(result, req.trace_id)
 
 
 @router.post("/self-analyze")
@@ -110,7 +162,8 @@ async def self_analyze_trace(
 
     trace_data = _get_trace_data(req.trace_id, project.id, db)
     labeler = LLMLabeler()
-    return await labeler.self_analyze(trace_data)
+    result = await labeler.self_analyze(trace_data)
+    return _normalize_self_analyze_result(result, req.trace_id)
 
 
 @router.post("/embed")

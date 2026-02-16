@@ -241,16 +241,14 @@ Labels should be relevant categories like: "efficient", "slow", "error_prone", "
             )
             content = response.choices[0].message.content or ""
             analysis = _extract_json(content)
-
-            # Ensure expected fields exist
-            analysis.setdefault("quality_score", 0)
-            analysis.setdefault("labels", [])
-            analysis.setdefault("suggestions", [])
-            analysis.setdefault("summary", "")
-
             result = {
                 "trace_id": trace_id,
-                "analysis": analysis,
+                "quality_score": analysis.get("quality_score", 0),
+                "efficiency_score": analysis.get("efficiency_score", 0),
+                "error_analysis": analysis.get("error_analysis", analysis.get("summary", "")),
+                "suggestions": analysis.get("suggestions", []),
+                "labels": analysis.get("labels", []),
+                "summary": analysis.get("summary", ""),
                 "cached": False,
             }
 
@@ -266,12 +264,12 @@ Labels should be relevant categories like: "efficient", "slow", "error_prone", "
             logger.error(f"Trace analysis failed: {e}")
             return {
                 "trace_id": trace_id,
-                "analysis": {
-                    "quality_score": 0,
-                    "labels": [],
-                    "suggestions": [],
-                    "summary": f"Analysis failed: {e}",
-                },
+                "quality_score": 0,
+                "efficiency_score": 0,
+                "error_analysis": f"Analysis failed: {e}",
+                "suggestions": [],
+                "labels": [],
+                "summary": f"Analysis failed: {e}",
                 "cached": False,
             }
 
@@ -355,20 +353,21 @@ Respond with JSON only:
             )
             content = response.choices[0].message.content or ""
             analysis = _extract_json(content)
-
-            # Ensure expected fields exist
-            analysis.setdefault("effectiveness", 0)
-            analysis.setdefault("reasoning_quality", 0)
-            analysis.setdefault("tool_usage", 0)
-            analysis.setdefault("overall_score", 0)
-            analysis.setdefault("strengths", [])
-            analysis.setdefault("weaknesses", [])
-            analysis.setdefault("improvements", [])
-            analysis.setdefault("summary", "")
-
             result = {
                 "trace_id": trace_id,
-                "analysis": analysis,
+                "quality": analysis.get("quality", analysis.get("effectiveness", 0)),
+                "efficiency": analysis.get("efficiency", analysis.get("tool_usage", 0)),
+                "completeness": analysis.get("completeness", analysis.get("reasoning_quality", 0)),
+                "overall_score": analysis.get("overall_score", 0),
+                "redundant_steps": analysis.get("redundant_steps", []),
+                "suggestions": analysis.get("suggestions", analysis.get("improvements", [])),
+                "summary": analysis.get("summary", ""),
+                "effectiveness": analysis.get("effectiveness", analysis.get("quality", 0)),
+                "reasoning_quality": analysis.get("reasoning_quality", analysis.get("completeness", 0)),
+                "tool_usage": analysis.get("tool_usage", analysis.get("efficiency", 0)),
+                "strengths": analysis.get("strengths", []),
+                "weaknesses": analysis.get("weaknesses", []),
+                "improvements": analysis.get("improvements", analysis.get("suggestions", [])),
                 "cached": False,
             }
 
@@ -384,16 +383,19 @@ Respond with JSON only:
             logger.error(f"Self-analysis failed: {e}")
             return {
                 "trace_id": trace_id,
-                "analysis": {
-                    "effectiveness": 0,
-                    "reasoning_quality": 0,
-                    "tool_usage": 0,
-                    "overall_score": 0,
-                    "strengths": [],
-                    "weaknesses": [],
-                    "improvements": [],
-                    "summary": f"Analysis failed: {e}",
-                },
+                "quality": 0,
+                "efficiency": 0,
+                "completeness": 0,
+                "overall_score": 0,
+                "redundant_steps": [],
+                "suggestions": [],
+                "summary": f"Analysis failed: {e}",
+                "effectiveness": 0,
+                "reasoning_quality": 0,
+                "tool_usage": 0,
+                "strengths": [],
+                "weaknesses": [],
+                "improvements": [],
                 "cached": False,
             }
 
