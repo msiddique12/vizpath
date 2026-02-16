@@ -154,6 +154,35 @@ def get_or_create_trace(db: Session, trace_id: str, project_id: Any, span: SpanC
     return trace
 
 
+def _topological_sort_spans(spans: list[SpanCreate]) -> list[SpanCreate]:
+    """Sort spans so parents come before children (topological order).
+
+    This prevents foreign key violations when inserting spans with parent_id.
+    """
+    # Build lookup and find root spans (no parent or parent not in batch)
+    span_ids = {s.span_id for s in spans}
+    span_by_id = {s.span_id: s for s in spans}
+
+    # Find children for each span
+    children: dict[str | None, list[str]] = {None: []}
+    for s in spans:
+        parent = s.parent_id if s.parent_id in span_ids else None
+        if parent not in children:
+            children[parent] = []
+        children[parent].append(s.span_id)
+
+    # BFS from roots to build sorted order
+    sorted_spans: list[SpanCreate] = []
+    queue = list(children.get(None, []))
+
+    while queue:
+        span_id = queue.pop(0)
+        sorted_spans.append(span_by_id[span_id])
+        queue.extend(children.get(span_id, []))
+
+    return sorted_spans
+
+
 @router.post("/spans/batch", status_code=201)
 async def ingest_spans(
     payload: list[SpanCreate],
@@ -164,13 +193,17 @@ async def ingest_spans(
     Ingest a batch of spans.
 
     Creates traces automatically if they don't exist.
+    Spans are topologically sorted to ensure parents are inserted before children.
     """
     if not payload:
         return {"ingested": 0}
 
+    # Sort spans so parents come before children (prevents FK violations)
+    sorted_payload = _topological_sort_spans(payload)
+
     traces_updated = set()
 
-    for span_data in payload:
+    for span_data in sorted_payload:
         trace = get_or_create_trace(db, span_data.trace_id, project.id, span_data)
         traces_updated.add(trace.id)
 
@@ -344,3 +377,26 @@ async def get_trace_spans(
         )
         for s in spans
     ]
+
+
+@router.delete("/{trace_id}", status_code=204)
+async def delete_trace(
+    trace_id: str,
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> None:
+    """Delete a trace and all its spans."""
+    trace = (
+        db.query(Trace)
+        .filter(Trace.id == trace_id, Trace.project_id == project.id)
+        .first()
+    )
+    if not trace:
+        raise HTTPException(status_code=404, detail="Trace not found")
+
+    # Cascade delete handles spans, but explicit for curated labels
+    from app.models import CuratedLabel
+
+    db.query(CuratedLabel).filter(CuratedLabel.trace_id == trace_id).delete()
+    db.delete(trace)
+    db.commit()
