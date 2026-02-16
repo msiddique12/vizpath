@@ -69,7 +69,10 @@ Respond with JSON only:
         try:
             response = await self.client.chat.completions.create(
                 model=self.model,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[
+                    {"role": "system", "content": "detailed thinking off"},
+                    {"role": "user", "content": prompt},
+                ],
                 temperature=0.7,
                 max_tokens=2000,
             )
@@ -126,7 +129,10 @@ Respond with JSON only:
         try:
             response = await self.client.chat.completions.create(
                 model=self.model,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[
+                    {"role": "system", "content": "detailed thinking off"},
+                    {"role": "user", "content": prompt},
+                ],
                 temperature=0.5,
                 max_tokens=2000,
             )
