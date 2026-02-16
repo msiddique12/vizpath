@@ -121,7 +121,7 @@ def main():
 
     if not args.dry_run:
         print(f"\nTracing: {stats['traces']} traces, {stats['spans']} spans sent")
-        print(f"\nView traces at: http://localhost:3000/traces")
+        print("\nView traces at: http://localhost:3000/traces")
     elif args.verbose:
         print(f"\nTracing stats (dry run): {stats['traces']} traces, {stats['spans']} spans")
 
