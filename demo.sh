@@ -17,6 +17,22 @@ cd "$SCRIPT_DIR"
 echo -e "${GREEN}Starting Vizpath...${NC}"
 echo ""
 
+# Detect Python binary
+if command -v python >/dev/null 2>&1; then
+    PYTHON_BIN="python"
+elif command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="python3"
+else
+    echo -e "${YELLOW}Error: Python is not installed.${NC}"
+    exit 1
+fi
+
+# Verify npm is installed
+if ! command -v npm >/dev/null 2>&1; then
+    echo -e "${YELLOW}Error: npm is not installed. Please install Node.js 20+.${NC}"
+    exit 1
+fi
+
 # Detect docker compose command
 if command -v docker-compose >/dev/null 2>&1; then
     COMPOSE_CMD=(docker-compose)
@@ -39,15 +55,15 @@ fi
 # ============================================
 
 # Check and install SDK
-if ! python -c "import vizpath" 2>/dev/null; then
+if ! "$PYTHON_BIN" -c "import vizpath" 2>/dev/null; then
     echo -e "${BLUE}[Setup]${NC} Installing SDK..."
-    pip install -q -e "$SCRIPT_DIR/sdk"
+    "$PYTHON_BIN" -m pip install -q -e "$SCRIPT_DIR/sdk"
 fi
 
 # Check and install server dependencies (includes uvicorn)
-if ! python -c "import uvicorn; import fastapi" 2>/dev/null; then
+if ! "$PYTHON_BIN" -c "import uvicorn; import fastapi" 2>/dev/null; then
     echo -e "${BLUE}[Setup]${NC} Installing server dependencies..."
-    pip install -q -e "$SCRIPT_DIR/server[dev]"
+    "$PYTHON_BIN" -m pip install -q -e "$SCRIPT_DIR/server[dev]"
 fi
 
 # Check and install dashboard dependencies
