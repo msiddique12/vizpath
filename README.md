@@ -29,12 +29,20 @@ vizpath is an open-source observability and intelligence platform for AI agents.
 ### One-Command Demo
 
 ```bash
-git clone https://github.com/yourrepo/vizpath
+git clone https://github.com/yourusername/vizpath
 cd vizpath
-make install              # Install all dependencies
-export NVIDIA_API_KEY="nvapi-..."  # For intelligence features
-./demo.sh                 # Start everything
-# Open http://localhost:3000
+export NVIDIA_API_KEY="nvapi-..."  # Required for intelligence features
+./demo.sh                          # Auto-installs deps and starts everything
+# Dashboard: http://localhost:3000
+# API: http://localhost:8000
+```
+
+### Run the Demo Agent
+
+```bash
+# In a new terminal
+python -m examples.code_agent.run "How does the intelligence module work?"
+# Watch traces appear in real-time on the dashboard
 ```
 
 ### Manual Installation
@@ -72,7 +80,7 @@ from vizpath import tracer
 @tracer.span(name="llm_call", span_type="llm")
 def call_llm(prompt):
     response = client.chat.completions.create(
-        model="nvidia/llama-3.1-nemotron-70b-instruct",
+        model="nvidia/llama-3.3-nemotron-super-49b-v1.5",
         messages=[{"role": "user", "content": prompt}],
     )
     tracer.set_span_tokens(
@@ -158,7 +166,8 @@ vizpath/
 │   └── tests/              # pytest test suite
 ├── dashboard/              # React + Tailwind dark theme UI
 ├── examples/               # Example agents and demos
-│   ├── research_agent/     # Full research agent with tracing
+│   ├── code_agent/         # Code analysis agent (main demo)
+│   ├── research_agent/     # Research agent with mock tools
 │   └── self_analyze.py     # Trace self-analysis CLI demo
 └── docs/                   # Documentation
 ```
