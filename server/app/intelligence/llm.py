@@ -122,9 +122,7 @@ class LLMLabeler:
                 logger.warning(f"Redis GET failed for label {trace_id}: {e}")
 
         trace_text = trace_to_text(trace_data)
-        prompt = f"""You are an expert evaluator of AI agent behavior.
-
-Evaluate this agent trace and determine if it was successful.
+        prompt = f"""Evaluate this agent trace and determine if it was successful.
 
 Trace:
 {trace_text}
@@ -139,7 +137,10 @@ Respond ONLY with JSON:
         try:
             response = await self.client.chat.completions.create(
                 model=self.model,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[
+                    {"role": "system", "content": "detailed thinking off"},
+                    {"role": "user", "content": prompt},
+                ],
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
             )
@@ -229,9 +230,7 @@ Respond ONLY with JSON:
 
         spans_text = "\n".join(spans_summary) if spans_summary else "No spans recorded."
 
-        prompt = f"""You are an expert AI agent evaluator analyzing execution traces.
-
-Trace: {trace_data.get('name', 'unnamed')}
+        prompt = f"""Trace: {trace_data.get('name', 'unnamed')}
 Status: {trace_data.get('status', 'unknown')}
 Duration: {trace_data.get('duration_ms', 'unknown')}ms
 Total tokens: {trace_data.get('total_tokens', 'unknown')}
@@ -252,7 +251,10 @@ Labels should be relevant categories like: "efficient", "slow", "error_prone", "
         try:
             response = await self.client.chat.completions.create(
                 model=self.model,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[
+                    {"role": "system", "content": "detailed thinking off"},
+                    {"role": "user", "content": prompt},
+                ],
                 temperature=0.0,
                 max_tokens=2000,
             )
@@ -329,11 +331,7 @@ Labels should be relevant categories like: "efficient", "slow", "error_prone", "
 
         steps_text = "\n".join(spans_detail) if spans_detail else "No execution steps recorded."
 
-        prompt = f"""You are performing a thorough audit of an AI agent's execution trace. \
-Your job is to evaluate the agent's decision-making quality, identify strengths and weaknesses, \
-and provide actionable improvement suggestions.
-
-Agent Trace: {trace_data.get('name', 'unnamed')}
+        prompt = f"""Agent Trace: {trace_data.get('name', 'unnamed')}
 Status: {trace_data.get('status', 'unknown')}
 Total duration: {trace_data.get('duration_ms', 'unknown')}ms
 Total tokens used: {trace_data.get('total_tokens', 'unknown')}
@@ -342,12 +340,7 @@ Total cost: {trace_data.get('total_cost', 'unknown')}
 Execution steps:
 {steps_text}
 
-Analyze this agent's behavior thoroughly. Consider:
-1. How effective was the agent at achieving its goal?
-2. Was the reasoning quality high? Were decisions logical?
-3. Were tools used appropriately and efficiently?
-4. What were the agent's strengths?
-5. What were the agent's weaknesses?
+Analyze this agent's behavior. Consider effectiveness, reasoning quality, and tool usage.
 
 Respond with JSON only:
 {{
@@ -364,7 +357,10 @@ Respond with JSON only:
         try:
             response = await self.client.chat.completions.create(
                 model=self.model,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[
+                    {"role": "system", "content": "detailed thinking off"},
+                    {"role": "user", "content": prompt},
+                ],
                 temperature=0.0,
                 max_tokens=2000,
             )
