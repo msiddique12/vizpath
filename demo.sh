@@ -1,6 +1,6 @@
 #!/bin/bash
 # Vizpath Demo Startup Script
-# Starts all services in a single terminal for easy demos
+# One command to install dependencies and start all services
 
 set -euo pipefail
 
@@ -33,6 +33,32 @@ if [ -z "${NVIDIA_API_KEY:-}" ]; then
     echo "Set it with: export NVIDIA_API_KEY='nvapi-...'"
     echo ""
 fi
+
+# ============================================
+# Auto-install dependencies if needed
+# ============================================
+
+# Check and install SDK
+if ! python -c "import vizpath" 2>/dev/null; then
+    echo -e "${BLUE}[Setup]${NC} Installing SDK..."
+    pip install -q -e "$SCRIPT_DIR/sdk"
+fi
+
+# Check and install server dependencies (includes uvicorn)
+if ! python -c "import uvicorn; import fastapi" 2>/dev/null; then
+    echo -e "${BLUE}[Setup]${NC} Installing server dependencies..."
+    pip install -q -e "$SCRIPT_DIR/server[dev]"
+fi
+
+# Check and install dashboard dependencies
+if [ ! -d "$SCRIPT_DIR/dashboard/node_modules" ]; then
+    echo -e "${BLUE}[Setup]${NC} Installing dashboard dependencies..."
+    (cd "$SCRIPT_DIR/dashboard" && npm install --silent)
+fi
+
+# ============================================
+# Start services
+# ============================================
 
 # Start docker services (postgres + redis)
 echo -e "${BLUE}[1/3]${NC} Starting database services..."
