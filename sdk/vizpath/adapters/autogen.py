@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import types
 from typing import TYPE_CHECKING, Any
 
 from vizpath.span import SpanType
@@ -199,7 +200,7 @@ def wrap_autogen_agent(agent: Any, callback: VizpathAutoGenCallback) -> Any:
     original_execute_function = getattr(agent, "execute_function", None)
 
     if original_generate_reply:
-        def traced_generate_reply(*args: Any, **kwargs: Any) -> Any:
+        def traced_generate_reply(self_ref: Any, *args: Any, **kwargs: Any) -> Any:
             agent_name = getattr(agent, "name", "agent")
             messages = kwargs.get("messages") or (args[0] if args else None)
 
@@ -208,11 +209,12 @@ def wrap_autogen_agent(agent: Any, callback: VizpathAutoGenCallback) -> Any:
                 result = original_generate_reply(*args, **kwargs)
                 callback.on_llm_call_end(agent_name, response=result)
                 return result
-            except Exception as e:
+            except Exception:
                 callback.on_llm_call_end(agent_name, response=None)
                 raise
 
-        agent.generate_reply = traced_generate_reply
+        # Bind as an instance method to preserve method-like behavior in tests/integrations.
+        agent.generate_reply = types.MethodType(traced_generate_reply, agent)
 
     if original_execute_function:
         def traced_execute_function(func_call: dict, **kwargs: Any) -> Any:
