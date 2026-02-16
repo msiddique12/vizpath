@@ -22,9 +22,10 @@ LABEL_CACHE_PREFIX = "label:"
 
 
 def _extract_json(text: str) -> dict:
-    """Extract JSON from LLM response text with 3-tier fallback.
+    """Extract JSON from LLM response text with 4-tier fallback.
 
     Strategies (in order):
+    0. Strip <think>...</think> tags (model chain-of-thought)
     1. Direct json.loads on the full text
     2. Extract from ```json code block
     3. Regex for first {...} block
@@ -34,6 +35,12 @@ def _extract_json(text: str) -> dict:
     """
     if not text or not text.strip():
         raise ValueError("Empty text, cannot extract JSON")
+
+    # Strategy 0: Strip <think>...</think> tags (Nemotron outputs these)
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
+    if not text:
+        raise ValueError("Empty text after stripping think tags")
 
     # Strategy 1: Direct parse
     try:

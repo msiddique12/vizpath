@@ -74,7 +74,12 @@ export interface CurationStats {
 }
 
 export async function getLabel(traceId: string): Promise<CurationLabel | null> {
-  return fetchApi(`/curation/labels/${traceId}`)
+  try {
+    return await fetchApi(`/curation/labels/${traceId}`)
+  } catch {
+    // 404 means no label exists yet - that's OK
+    return null
+  }
 }
 
 export async function createOrUpdateLabel(data: {
