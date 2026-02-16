@@ -2,7 +2,7 @@
 # Vizpath Demo Startup Script
 # Starts all services in a single terminal for easy demos
 
-set -e
+set -euo pipefail
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -17,8 +17,18 @@ cd "$SCRIPT_DIR"
 echo -e "${GREEN}Starting Vizpath...${NC}"
 echo ""
 
+# Detect docker compose command
+if command -v docker-compose >/dev/null 2>&1; then
+    COMPOSE_CMD=(docker-compose)
+elif docker compose version >/dev/null 2>&1; then
+    COMPOSE_CMD=(docker compose)
+else
+    echo -e "${YELLOW}Error: docker compose is not installed.${NC}"
+    exit 1
+fi
+
 # Check for NVIDIA_API_KEY
-if [ -z "$NVIDIA_API_KEY" ]; then
+if [ -z "${NVIDIA_API_KEY:-}" ]; then
     echo -e "${YELLOW}Warning: NVIDIA_API_KEY not set. Intelligence features will not work.${NC}"
     echo "Set it with: export NVIDIA_API_KEY='nvapi-...'"
     echo ""
@@ -26,17 +36,24 @@ fi
 
 # Start docker services (postgres + redis)
 echo -e "${BLUE}[1/3]${NC} Starting database services..."
-docker-compose up -d postgres redis
+"${COMPOSE_CMD[@]}" up -d postgres redis
 sleep 3
 
 # Wait for postgres to be ready
 echo -e "${BLUE}[2/3]${NC} Waiting for database..."
+DB_READY=false
 for i in {1..30}; do
-    if docker-compose exec -T postgres pg_isready -U vizpath > /dev/null 2>&1; then
+    if "${COMPOSE_CMD[@]}" exec -T postgres pg_isready -U vizpath > /dev/null 2>&1; then
+        DB_READY=true
         break
     fi
     sleep 1
 done
+
+if [ "$DB_READY" = false ]; then
+    echo -e "${YELLOW}Error: Postgres did not become ready in time.${NC}"
+    exit 1
+fi
 
 # Start server in background
 echo -e "${BLUE}[3/3]${NC} Starting services..."
@@ -75,9 +92,13 @@ echo ""
 cleanup() {
     echo ""
     echo -e "${BLUE}Stopping services...${NC}"
-    kill $SERVER_PID 2>/dev/null || true
-    kill $DASH_PID 2>/dev/null || true
-    docker-compose down
+    if [ -n "${SERVER_PID:-}" ]; then
+        kill "$SERVER_PID" 2>/dev/null || true
+    fi
+    if [ -n "${DASH_PID:-}" ]; then
+        kill "$DASH_PID" 2>/dev/null || true
+    fi
+    "${COMPOSE_CMD[@]}" down
     echo -e "${GREEN}Vizpath stopped.${NC}"
     exit 0
 }
