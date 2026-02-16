@@ -68,8 +68,8 @@ def main():
     parser.add_argument(
         "--max-iterations",
         type=int,
-        default=15,
-        help="Maximum analysis iterations (default: 15)",
+        default=8,
+        help="Maximum analysis iterations (default: 8)",
     )
 
     args = parser.parse_args()
