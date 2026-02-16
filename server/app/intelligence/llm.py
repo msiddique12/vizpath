@@ -37,7 +37,17 @@ def _extract_json(text: str) -> dict:
         raise ValueError("Empty text, cannot extract JSON")
 
     # Strategy 0: Strip <think>...</think> tags (Nemotron outputs these)
+    # Handle both closed tags and unclosed tags (model may truncate)
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+    # Also handle unclosed <think> - strip everything from <think> to first {
+    if "<think>" in text:
+        think_start = text.find("<think>")
+        brace_start = text.find("{", think_start)
+        if brace_start > think_start:
+            text = text[brace_start:]
+        else:
+            # No JSON after think tag - try to find it before
+            text = text[:think_start].strip()
 
     if not text:
         raise ValueError("Empty text after stripping think tags")
@@ -77,7 +87,7 @@ class LLMLabeler:
         )
         self.model = settings.nvidia_llm_model
         self.temperature = 0.0
-        self.max_tokens = 100
+        self.max_tokens = 2000  # Needs room for <think> + JSON output
 
         # Redis setup
         try:
@@ -244,7 +254,7 @@ Labels should be relevant categories like: "efficient", "slow", "error_prone", "
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
-                max_tokens=500,
+                max_tokens=2000,
             )
             content = response.choices[0].message.content or ""
             analysis = _extract_json(content)
@@ -356,7 +366,7 @@ Respond with JSON only:
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
-                max_tokens=800,
+                max_tokens=2000,
             )
             content = response.choices[0].message.content or ""
             analysis = _extract_json(content)
