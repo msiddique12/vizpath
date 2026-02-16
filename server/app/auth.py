@@ -35,6 +35,13 @@ def generate_api_key() -> str:
     return f"vp_{secrets.token_urlsafe(32)}"
 
 
+def _to_utc(dt: datetime) -> datetime:
+    """Normalize DB datetimes to UTC-aware for safe comparisons."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def get_project_by_api_key(db: Session, api_key: str) -> Project | None:
     """Look up a project by current key hash or grace-period previous key hash."""
     key_hash = hash_api_key(api_key)
@@ -60,7 +67,7 @@ def get_project_by_api_key(db: Session, api_key: str) -> Project | None:
     if (
         project.previous_api_key_hash == key_hash
         and project.api_key_grace_expires_at is not None
-        and datetime.now(timezone.utc) <= project.api_key_grace_expires_at
+        and datetime.now(timezone.utc) <= _to_utc(project.api_key_grace_expires_at)
     ):
         return project
 

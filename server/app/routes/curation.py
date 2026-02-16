@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -187,7 +187,7 @@ def delete_label(
     trace_id: str,
     project: Project = Depends(verify_api_key),
     db: Session = Depends(get_db),
-) -> dict:
+) -> Response:
     """Delete a label for a trace."""
     label = db.execute(
         select(CuratedLabel)
@@ -200,7 +200,7 @@ def delete_label(
 
     db.delete(label)
     db.commit()
-    return {"status": "deleted"}
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/traces", response_model=list[CuratedTraceResponse])

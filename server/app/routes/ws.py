@@ -6,6 +6,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from sqlalchemy.orm import Session
 
 from app.auth import get_project_by_api_key
 from app.config import settings
@@ -41,21 +42,25 @@ async def broadcast_message(message: dict, project_id: str | None = None) -> Non
         active_connections.pop(conn, None)
 
 
-def _verify_ws_api_key(api_key: str | None) -> Project | None:
+def _verify_ws_api_key(api_key: str | None, db: Session | None = None) -> Project | None:
     """Verify API key for WebSocket connections (synchronous helper)."""
     if not api_key:
         return None
-    db = SessionLocal()
-    try:
+
+    if db is not None:
         return get_project_by_api_key(db, api_key)
+
+    session = SessionLocal()
+    try:
+        return get_project_by_api_key(session, api_key)
     finally:
-        db.close()
+        session.close()
 
 
 @router.websocket("/ws/traces")
 async def traces_websocket(
     websocket: WebSocket,
-    api_key: Optional[str] = Query(None, alias="api_key"),
+    api_key: str | None = Query(None, alias="api_key"),
 ) -> None:
     """
     WebSocket endpoint for real-time trace updates.

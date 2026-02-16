@@ -23,7 +23,7 @@ class TestWebSocketAuth:
 
     def test_verify_ws_api_key_invalid(self, test_db):
         """Returns None for invalid API key."""
-        result = _verify_ws_api_key("invalid-key")
+        result = _verify_ws_api_key("invalid-key", db=test_db)
         assert result is None
 
     def test_verify_ws_api_key_valid(self, test_db):
@@ -37,7 +37,7 @@ class TestWebSocketAuth:
         test_db.add(project)
         test_db.commit()
 
-        result = _verify_ws_api_key(api_key)
+        result = _verify_ws_api_key(api_key, db=test_db)
         assert result is not None
         assert result.name == "test-ws"
 
