@@ -33,6 +33,12 @@ if ! command -v npm >/dev/null 2>&1; then
     exit 1
 fi
 
+# Verify curl is installed (used for health checks)
+if ! command -v curl >/dev/null 2>&1; then
+    echo -e "${YELLOW}Error: curl is not installed.${NC}"
+    exit 1
+fi
+
 # Detect docker compose command
 if command -v docker-compose >/dev/null 2>&1; then
     COMPOSE_CMD=(docker-compose)
@@ -61,7 +67,7 @@ if ! "$PYTHON_BIN" -c "import vizpath" 2>/dev/null; then
 fi
 
 # Check and install server dependencies (includes uvicorn)
-if ! "$PYTHON_BIN" -c "import uvicorn; import fastapi" 2>/dev/null; then
+if ! "$PYTHON_BIN" -c "import uvicorn, fastapi, sqlalchemy, redis, pydantic_settings" 2>/dev/null; then
     echo -e "${BLUE}[Setup]${NC} Installing server dependencies..."
     "$PYTHON_BIN" -m pip install -q -e "$SCRIPT_DIR/server[dev]"
 fi
@@ -113,8 +119,27 @@ npm run dev &
 DASH_PID=$!
 cd "$SCRIPT_DIR"
 
-# Wait a moment for services to start
-sleep 3
+# Wait for API health check and verify processes are still running.
+echo -e "${BLUE}[Check]${NC} Verifying startup health..."
+for i in {1..20}; do
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+        echo -e "${YELLOW}Error: Server process exited during startup.${NC}"
+        exit 1
+    fi
+    if ! kill -0 "$DASH_PID" 2>/dev/null; then
+        echo -e "${YELLOW}Error: Dashboard process exited during startup.${NC}"
+        exit 1
+    fi
+    if curl -sf "http://localhost:8000/health" > /dev/null 2>&1; then
+        break
+    fi
+    sleep 1
+done
+
+if ! curl -sf "http://localhost:8000/health" > /dev/null 2>&1; then
+    echo -e "${YELLOW}Error: API health check failed (http://localhost:8000/health).${NC}"
+    exit 1
+fi
 
 echo ""
 echo -e "${GREEN}============================================${NC}"
