@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import case, func
+from sqlalchemy import case, desc, func, nullslast
 from sqlalchemy.orm import Session
 
 from app.auth import verify_api_key
@@ -227,6 +227,9 @@ async def ingest_spans(
         )
         db.add(span)
 
+    # Ensure newly added spans are visible to aggregate queries below.
+    db.flush()
+
     for trace_id in traces_updated:
         trace = db.query(Trace).filter(Trace.id == trace_id).first()
         if trace:
@@ -280,16 +283,50 @@ async def list_traces(
     db: Session = Depends(get_db),
     limit: int = Query(default=20, le=100),
     offset: int = Query(default=0, ge=0),
-    status: str | None = None,
+    status: str | None = Query(default=None, pattern=STATUS_PATTERN),
+    q: str | None = Query(default=None, max_length=256),
+    min_tokens: int | None = Query(default=None, ge=0),
+    min_cost: float | None = Query(default=None, ge=0),
+    has_errors: bool | None = Query(default=None),
+    sort_by: str = Query(
+        default="created_at",
+        pattern="^(created_at|duration_ms|total_tokens|total_cost|span_count|error_count|name)$",
+    ),
+    sort_order: str = Query(default="desc", pattern="^(asc|desc)$"),
 ) -> TraceListResponse:
     """List traces with pagination."""
     query = db.query(Trace).filter(Trace.project_id == project.id)
 
     if status:
         query = query.filter(Trace.status == status)
+    if q:
+        query = query.filter(Trace.name.ilike(f"%{q}%"))
+    if min_tokens is not None:
+        query = query.filter(Trace.total_tokens.isnot(None), Trace.total_tokens >= min_tokens)
+    if min_cost is not None:
+        query = query.filter(Trace.total_cost.isnot(None), Trace.total_cost >= min_cost)
+    if has_errors is True:
+        query = query.filter(Trace.error_count > 0)
+    elif has_errors is False:
+        query = query.filter(Trace.error_count == 0)
+
+    sort_column = {
+        "created_at": Trace.created_at,
+        "duration_ms": Trace.duration_ms,
+        "total_tokens": Trace.total_tokens,
+        "total_cost": Trace.total_cost,
+        "span_count": Trace.span_count,
+        "error_count": Trace.error_count,
+        "name": Trace.name,
+    }[sort_by]
+
+    if sort_order == "asc":
+        order_expr = sort_column.asc()
+    else:
+        order_expr = desc(sort_column)
 
     total = query.count()
-    traces = query.order_by(Trace.created_at.desc()).offset(offset).limit(limit).all()
+    traces = query.order_by(nullslast(order_expr), Trace.created_at.desc()).offset(offset).limit(limit).all()
 
     return TraceListResponse(
         traces=[

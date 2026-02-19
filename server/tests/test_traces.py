@@ -321,3 +321,79 @@ class TestTraceRetrieval:
 
         assert response.status_code == 200
         assert response.json()["traces"][0]["error_count"] == 0
+
+    def test_list_traces_supports_query_filters_and_sorting(self, client):
+        now = datetime.now(timezone.utc).isoformat()
+
+        client.post(
+            "/api/v1/traces/spans/batch",
+            json=[
+                {
+                    "span_id": "span-filter-1",
+                    "trace_id": "trace-filter-1",
+                    "name": "alpha-trace",
+                    "status": "error",
+                    "tokens": 10,
+                    "cost": 0.01,
+                    "start_time": now,
+                }
+            ],
+        )
+        client.post(
+            "/api/v1/traces/spans/batch",
+            json=[
+                {
+                    "span_id": "span-filter-2",
+                    "trace_id": "trace-filter-2",
+                    "name": "beta-trace",
+                    "status": "success",
+                    "tokens": 500,
+                    "cost": 0.50,
+                    "start_time": now,
+                }
+            ],
+        )
+
+        filtered = client.get("/api/v1/traces/?q=beta&min_tokens=100&has_errors=false")
+        assert filtered.status_code == 200
+        assert filtered.json()["total"] == 1
+        assert filtered.json()["traces"][0]["id"] == "trace-filter-2"
+
+        sorted_resp = client.get("/api/v1/traces/?sort_by=total_tokens&sort_order=desc")
+        assert sorted_resp.status_code == 200
+        traces = sorted_resp.json()["traces"]
+        assert traces[0]["id"] == "trace-filter-2"
+
+    def test_ingestion_updates_trace_aggregate_stats(self, client):
+        now = datetime.now(timezone.utc).isoformat()
+        payload = [
+            {
+                "span_id": "span-agg-1",
+                "trace_id": "trace-agg-1",
+                "name": "step-1",
+                "status": "success",
+                "tokens": 100,
+                "cost": 0.1,
+                "start_time": now,
+            },
+            {
+                "span_id": "span-agg-2",
+                "trace_id": "trace-agg-1",
+                "name": "step-2",
+                "status": "error",
+                "tokens": 50,
+                "cost": 0.05,
+                "start_time": now,
+            },
+        ]
+        ingest = client.post("/api/v1/traces/spans/batch", json=payload)
+        assert ingest.status_code == 201
+
+        traces = client.get("/api/v1/traces/")
+        assert traces.status_code == 200
+        trace = traces.json()["traces"][0]
+        assert trace["id"] == "trace-agg-1"
+        assert trace["span_count"] == 2
+        assert trace["total_tokens"] == 150
+        assert trace["error_count"] == 1
+        assert trace["status"] == "error"
