@@ -18,6 +18,22 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> 
   return response.json()
 }
 
+async function fetchRootApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
+  const response = await fetch(endpoint, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options?.headers,
+    },
+  })
+
+  if (!response.ok) {
+    throw new Error(`API error: ${response.status}`)
+  }
+
+  return response.json()
+}
+
 export async function getTraces(
   limit = 20,
   offset = 0,
@@ -203,4 +219,31 @@ export async function generateSynthetic(
     count: data.count ?? normalizedResults.length,
     results: normalizedResults,
   }
+}
+
+// Demo/System Status API
+
+export interface HealthDetailedResponse {
+  status: 'healthy' | 'degraded'
+  timestamp: string
+  version: string
+  checks: {
+    database?: { status: 'healthy' | 'unhealthy' }
+    redis?: { status: 'healthy' | 'unhealthy' }
+    intelligence?: { status: 'configured' | 'not_configured' }
+  }
+}
+
+export interface IntelligenceStatusResponse {
+  nvidia_api_key_configured: boolean
+  model: string
+  base_url: string
+}
+
+export async function getDetailedHealth(): Promise<HealthDetailedResponse> {
+  return fetchRootApi('/health/detailed')
+}
+
+export async function getIntelligenceStatus(): Promise<IntelligenceStatusResponse> {
+  return fetchApi('/intelligence/status')
 }
