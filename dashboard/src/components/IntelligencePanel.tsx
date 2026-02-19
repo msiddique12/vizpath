@@ -1,21 +1,31 @@
 import { useState, useEffect } from 'react'
-import { useMutation } from '@tanstack/react-query'
-import { Brain, Sparkles, Loader2, Star, Tag, Lightbulb } from 'lucide-react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Brain, Sparkles, Loader2, Star, Tag, Lightbulb, CheckCircle2, Wand2 } from 'lucide-react'
 import clsx from 'clsx'
-import { analyzeTrace, selfAnalyzeTrace, TraceAnalysis, SelfAnalysis } from '@/lib/api'
+import {
+  analyzeTrace,
+  selfAnalyzeTrace,
+  suggestCuration,
+  createOrUpdateLabel,
+  TraceAnalysis,
+  SelfAnalysis,
+} from '@/lib/api'
 
 interface IntelligencePanelProps {
   traceId: string
 }
 
 export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
+  const queryClient = useQueryClient()
   const [analysis, setAnalysis] = useState<TraceAnalysis | null>(null)
   const [selfAnalysis, setSelfAnalysis] = useState<SelfAnalysis | null>(null)
+  const [actionStatus, setActionStatus] = useState<string | null>(null)
 
   // Reset state when traceId changes to prevent showing stale data
   useEffect(() => {
     setAnalysis(null)
     setSelfAnalysis(null)
+    setActionStatus(null)
   }, [traceId])
 
   const analyzeMutation = useMutation({
@@ -27,6 +37,43 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
     mutationFn: () => selfAnalyzeTrace(traceId),
     onSuccess: (data) => setSelfAnalysis(data),
   })
+
+  const applySuggestionMutation = useMutation({
+    mutationFn: async () => {
+      const suggestion = await suggestCuration(traceId)
+      return createOrUpdateLabel({
+        trace_id: traceId,
+        label: suggestion.label,
+        quality_score: suggestion.quality_score,
+        notes: suggestion.notes || undefined,
+      })
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['curation-label', traceId] })
+      queryClient.invalidateQueries({ queryKey: ['curated-traces'] })
+      queryClient.invalidateQueries({ queryKey: ['curation-stats'] })
+      setActionStatus('Applied AI suggestion to Curation.')
+    },
+    onError: () => {
+      setActionStatus('Failed to apply AI suggestion.')
+    },
+  })
+
+  const qualityScore = analysis?.analysis.quality_score ?? 0
+  const primaryAction = qualityScore >= 80
+    ? 'Promote this trace for training export.'
+    : qualityScore >= 60
+      ? 'Label as good/needs improvement and keep for review.'
+      : 'Label as failure and generate corrections.'
+
+  const likelyIssue = analysis?.analysis.suggestions[0]
+    || selfAnalysis?.analysis.weaknesses[0]
+    || 'No major issue detected.'
+  const expectedGain = qualityScore >= 80
+    ? 'Higher quality examples with minimal rework.'
+    : qualityScore >= 60
+      ? 'Moderate quality lift by applying top suggestions.'
+      : 'Significant reliability gain from corrections.'
 
   return (
     <div className="bg-dark-800 rounded-lg p-4 space-y-4">
@@ -84,6 +131,49 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
           </p>
         </div>
       )}
+
+      <div className="bg-dark-900 border border-dark-700 rounded-lg p-3 space-y-2">
+        <p className="text-xs uppercase tracking-wide text-muted-400">Action Plan</p>
+        <div className="grid grid-cols-1 gap-2">
+          <div className="bg-dark-800 rounded-lg p-2">
+            <p className="text-xs text-muted-400">Likely Root Cause</p>
+            <p className="text-sm text-muted-200">{likelyIssue}</p>
+          </div>
+          <div className="bg-dark-800 rounded-lg p-2">
+            <p className="text-xs text-muted-400">Fix Now</p>
+            <p className="text-sm text-muted-200">{primaryAction}</p>
+          </div>
+          <div className="bg-dark-800 rounded-lg p-2">
+            <p className="text-xs text-muted-400">Expected Gain</p>
+            <p className="text-sm text-muted-200">{expectedGain}</p>
+          </div>
+        </div>
+
+        <button
+          onClick={() => applySuggestionMutation.mutate()}
+          disabled={applySuggestionMutation.isPending}
+          className={clsx(
+            'w-full flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg transition-colors',
+            applySuggestionMutation.isPending
+              ? 'bg-dark-700 text-muted-400 cursor-wait'
+              : 'bg-nvidia-500 text-black hover:bg-nvidia-400'
+          )}
+        >
+          {applySuggestionMutation.isPending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Wand2 className="h-4 w-4" />
+          )}
+          Apply AI Suggestion to Curation
+        </button>
+
+        {actionStatus && (
+          <p className="text-xs text-green-400 flex items-center gap-1">
+            <CheckCircle2 className="h-3 w-3" />
+            {actionStatus}
+          </p>
+        )}
+      </div>
 
       {analysis && (
         <div className="space-y-3 pt-2 border-t border-dark-700">

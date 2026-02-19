@@ -206,6 +206,14 @@ export interface SyntheticResult {
   results: Array<{ input: string; output: string; metadata?: Record<string, unknown> }>
 }
 
+export interface SuggestedCuration {
+  trace_id: string
+  label: string
+  quality_score: number
+  notes: string | null
+  source_quality_score: number
+}
+
 export async function analyzeTrace(traceId: string): Promise<TraceAnalysis> {
   return fetchApi('/intelligence/analyze', {
     method: 'POST',
@@ -215,6 +223,13 @@ export async function analyzeTrace(traceId: string): Promise<TraceAnalysis> {
 
 export async function selfAnalyzeTrace(traceId: string): Promise<SelfAnalysis> {
   return fetchApi('/intelligence/self-analyze', {
+    method: 'POST',
+    body: JSON.stringify({ trace_id: traceId }),
+  })
+}
+
+export async function suggestCuration(traceId: string): Promise<SuggestedCuration> {
+  return fetchApi('/intelligence/suggest-curation', {
     method: 'POST',
     body: JSON.stringify({ trace_id: traceId }),
   })
