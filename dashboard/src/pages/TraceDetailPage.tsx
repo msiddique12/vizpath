@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowLeft, Loader2, GitBranch, List, Grid2x2 } from 'lucide-react'
+import { ArrowLeft, Loader2, GitBranch, List, Grid2x2, X } from 'lucide-react'
 import clsx from 'clsx'
 import { getTrace } from '@/lib/api'
 import { exportTrace, ExportFormat } from '@/lib/export'
@@ -16,7 +16,14 @@ type ViewMode = 'timeline' | 'dag' | 'heatmap'
 
 export default function TraceDetailPage() {
   const { traceId } = useParams<{ traceId: string }>()
-  const [viewMode, setViewMode] = useState<ViewMode>('timeline')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const initialView = (searchParams.get('view') as ViewMode) || 'timeline'
+  const [viewMode, setViewMode] = useState<ViewMode>(
+    initialView === 'timeline' || initialView === 'dag' || initialView === 'heatmap'
+      ? initialView
+      : 'timeline'
+  )
+  const focusSpanName = searchParams.get('span_name')?.trim() || ''
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['trace', traceId],
@@ -116,7 +123,27 @@ export default function TraceDetailPage() {
           </div>
         </div>
 
-        {viewMode === 'timeline' && <SpanTimeline spans={spans} />}
+        {focusSpanName && viewMode === 'timeline' && (
+          <div className="mb-3 flex items-center justify-between rounded border border-primary-800 bg-primary-900/20 px-3 py-2">
+            <p className="text-xs text-muted-200">
+              Focused span: <span className="text-primary-400">{focusSpanName}</span>
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                const next = new URLSearchParams(searchParams)
+                next.delete('span_name')
+                setSearchParams(next)
+              }}
+              className="inline-flex items-center gap-1 text-xs text-muted-300 hover:text-muted-100"
+            >
+              <X className="h-3 w-3" />
+              Clear focus
+            </button>
+          </div>
+        )}
+
+        {viewMode === 'timeline' && <SpanTimeline spans={spans} focusSpanName={focusSpanName} />}
         {viewMode === 'dag' && <DAGView spans={spans} />}
         {viewMode === 'heatmap' && <HeatmapView spans={spans} />}
       </div>

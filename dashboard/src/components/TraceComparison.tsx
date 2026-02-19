@@ -1,6 +1,7 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import clsx from 'clsx'
 import { AlertTriangle, Loader2, TrendingDown, TrendingUp } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { IntelligenceComparison } from '@/lib/api'
 import { Span, Trace } from '@/lib/types'
 
@@ -17,6 +18,14 @@ interface ComparisonMetric {
   valueB: string | number
   diff: number
   unit: string
+}
+
+interface SpanDrillDownStats {
+  count: number
+  avgDurationMs: number
+  p95DurationMs: number
+  maxDurationMs: number
+  errorCount: number
 }
 
 function formatDuration(ms: number | null | undefined): string {
@@ -36,12 +45,36 @@ function calculateDiff(a: number, b: number): number {
   return ((b - a) / a) * 100
 }
 
+function getSpanDrillDownStats(spans: Span[], spanName: string): SpanDrillDownStats {
+  const matching = spans.filter((span) => span.name === spanName)
+  if (matching.length === 0) {
+    return { count: 0, avgDurationMs: 0, p95DurationMs: 0, maxDurationMs: 0, errorCount: 0 }
+  }
+
+  const durations = matching
+    .map((span) => span.duration_ms || 0)
+    .filter((duration) => duration >= 0)
+    .sort((a, b) => a - b)
+  const totalDuration = durations.reduce((sum, duration) => sum + duration, 0)
+  const p95Index = Math.min(durations.length - 1, Math.floor(durations.length * 0.95))
+
+  return {
+    count: matching.length,
+    avgDurationMs: totalDuration / durations.length,
+    p95DurationMs: durations[p95Index] || 0,
+    maxDurationMs: durations[durations.length - 1] || 0,
+    errorCount: matching.filter((span) => span.status === 'error').length,
+  }
+}
+
 export default function TraceComparison({
   traceA,
   traceB,
   intelligenceCompare,
   intelligenceCompareLoading = false,
 }: TraceComparisonProps) {
+  const [selectedSpanName, setSelectedSpanName] = useState<string | null>(null)
+
   const metrics = useMemo((): ComparisonMetric[] => {
     const durationA = traceA.trace.duration_ms || 0
     const durationB = traceB.trace.duration_ms || 0
@@ -129,6 +162,14 @@ export default function TraceComparison({
       .sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff))
       .slice(0, 10)
   }, [traceA, traceB])
+
+  const selectedSpanStats = useMemo(() => {
+    if (!selectedSpanName) return null
+    return {
+      traceA: getSpanDrillDownStats(traceA.spans, selectedSpanName),
+      traceB: getSpanDrillDownStats(traceB.spans, selectedSpanName),
+    }
+  }, [selectedSpanName, traceA.spans, traceB.spans])
 
   return (
     <div className="space-y-6">
@@ -291,12 +332,21 @@ export default function TraceComparison({
 
       {timelineComparison.length > 0 && (
         <div>
-          <h4 className="text-sm font-medium text-muted-200 mb-3">
-            Top Performance Differences by Span
-          </h4>
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-sm font-medium text-muted-200">Top Performance Differences by Span</h4>
+            <p className="text-xs text-muted-500">Click a row to inspect deeper.</p>
+          </div>
           <div className="space-y-2">
             {timelineComparison.map(({ name, avgDurationA, avgDurationB, diff }) => (
-              <div key={name} className="flex items-center gap-4 py-2 border-b border-dark-700">
+              <button
+                key={name}
+                type="button"
+                onClick={() => setSelectedSpanName(name)}
+                className={clsx(
+                  'w-full flex items-center gap-4 py-2 border-b border-dark-700 text-left hover:bg-dark-800 rounded px-1',
+                  selectedSpanName === name && 'bg-dark-800'
+                )}
+              >
                 <span className="text-sm text-muted-200 truncate flex-1">{name}</span>
                 <span className="text-xs text-muted-400 w-20 text-right">
                   {formatDuration(avgDurationA)}
@@ -318,8 +368,74 @@ export default function TraceComparison({
                 <span className="text-xs text-muted-400 w-20 text-left">
                   {formatDuration(avgDurationB)}
                 </span>
-              </div>
+              </button>
             ))}
+          </div>
+        </div>
+      )}
+
+      {selectedSpanName && selectedSpanStats && (
+        <div className="border border-dark-700 rounded-lg p-4 bg-dark-800/40">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h4 className="text-sm font-medium text-muted-100">Span Deep Dive</h4>
+              <p className="text-xs text-muted-400 mt-1">{selectedSpanName}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSelectedSpanName(null)}
+              className="text-xs text-muted-400 hover:text-muted-200"
+            >
+              Clear
+            </button>
+          </div>
+
+          <div className="mt-4 grid md:grid-cols-2 gap-3">
+            <div className="rounded border border-dark-700 p-3">
+              <p className="text-xs text-muted-400 mb-2">Trace A</p>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <p className="text-muted-300">Calls: {selectedSpanStats.traceA.count}</p>
+                <p className="text-muted-300">Errors: {selectedSpanStats.traceA.errorCount}</p>
+                <p className="text-muted-300">
+                  Avg: {formatDuration(selectedSpanStats.traceA.avgDurationMs)}
+                </p>
+                <p className="text-muted-300">
+                  P95: {formatDuration(selectedSpanStats.traceA.p95DurationMs)}
+                </p>
+                <p className="text-muted-300">
+                  Max: {formatDuration(selectedSpanStats.traceA.maxDurationMs)}
+                </p>
+              </div>
+              <Link
+                to={`/traces/${traceA.trace.id}?view=timeline&span_name=${encodeURIComponent(selectedSpanName)}`}
+                className="inline-flex mt-3 text-xs text-primary-500 hover:text-primary-400"
+              >
+                Open Trace A timeline
+              </Link>
+            </div>
+
+            <div className="rounded border border-dark-700 p-3">
+              <p className="text-xs text-muted-400 mb-2">Trace B</p>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <p className="text-muted-300">Calls: {selectedSpanStats.traceB.count}</p>
+                <p className="text-muted-300">Errors: {selectedSpanStats.traceB.errorCount}</p>
+                <p className="text-muted-300">
+                  Avg: {formatDuration(selectedSpanStats.traceB.avgDurationMs)}
+                </p>
+                <p className="text-muted-300">
+                  P95: {formatDuration(selectedSpanStats.traceB.p95DurationMs)}
+                </p>
+                <p className="text-muted-300">
+                  Max: {formatDuration(selectedSpanStats.traceB.maxDurationMs)}
+                </p>
+              </div>
+              <Link
+                to={`/traces/${traceB.trace.id}?view=timeline&span_name=${encodeURIComponent(selectedSpanName)}`}
+                className="inline-flex mt-3 text-xs text-primary-500 hover:text-primary-400"
+              >
+                Open Trace B timeline
+              </Link>
+            </div>
           </div>
         </div>
       )}

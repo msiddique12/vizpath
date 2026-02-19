@@ -45,14 +45,18 @@ function SpanRow({
   timeRange,
   expanded,
   onToggle,
+  focusSpanName,
 }: {
   node: SpanNode
   timeRange: { min: number; max: number }
   expanded: boolean
   onToggle: () => void
+  focusSpanName?: string
 }) {
   const { span } = node
   const hasChildren = node.children.length > 0
+  const hasFocus = Boolean(focusSpanName)
+  const isFocused = !hasFocus || span.name === focusSpanName
 
   const startTime = new Date(span.start_time).getTime()
   const endTime = span.end_time ? new Date(span.end_time).getTime() : Date.now()
@@ -63,8 +67,14 @@ function SpanRow({
   const widthPercent = Math.max((duration / totalDuration) * 100, 0.5)
 
   return (
-    <div className="group">
-      <div className="flex items-center py-2 hover:bg-dark-800 rounded">
+    <div className={clsx('group', hasFocus && !isFocused && 'opacity-45')}>
+      <div
+        className={clsx(
+          'flex items-center py-2 rounded',
+          isFocused ? 'hover:bg-dark-800' : 'hover:bg-dark-900/20',
+          hasFocus && isFocused && 'bg-primary-900/10 ring-1 ring-primary-900/60'
+        )}
+      >
         <div
           className="flex items-center gap-1 min-w-[200px] pr-4"
           style={{ paddingLeft: `${node.depth * 20}px` }}
@@ -106,7 +116,12 @@ function SpanRow({
 
       {expanded &&
         node.children.map((child) => (
-          <SpanRowWrapper key={child.span.id} node={child} timeRange={timeRange} />
+          <SpanRowWrapper
+            key={child.span.id}
+            node={child}
+            timeRange={timeRange}
+            focusSpanName={focusSpanName}
+          />
         ))}
     </div>
   )
@@ -115,9 +130,11 @@ function SpanRow({
 function SpanRowWrapper({
   node,
   timeRange,
+  focusSpanName,
 }: {
   node: SpanNode
   timeRange: { min: number; max: number }
+  focusSpanName?: string
 }) {
   const [expanded, setExpanded] = useState(true)
   return (
@@ -126,11 +143,18 @@ function SpanRowWrapper({
       timeRange={timeRange}
       expanded={expanded}
       onToggle={() => setExpanded(!expanded)}
+      focusSpanName={focusSpanName}
     />
   )
 }
 
-export default function SpanTimeline({ spans }: { spans: Span[] }) {
+export default function SpanTimeline({
+  spans,
+  focusSpanName,
+}: {
+  spans: Span[]
+  focusSpanName?: string
+}) {
   const tree = useMemo(() => buildSpanTree(spans), [spans])
 
   const timeRange = useMemo(() => {
@@ -161,7 +185,12 @@ export default function SpanTimeline({ spans }: { spans: Span[] }) {
         <div className="min-w-[80px] text-right">Duration</div>
       </div>
       {tree.map((node) => (
-        <SpanRowWrapper key={node.span.id} node={node} timeRange={timeRange} />
+        <SpanRowWrapper
+          key={node.span.id}
+          node={node}
+          timeRange={timeRange}
+          focusSpanName={focusSpanName}
+        />
       ))}
       <div className="flex items-center gap-4 pt-4 border-t border-dark-700 text-xs">
         {Object.entries(SPAN_COLORS).map(([type, color]) => (
