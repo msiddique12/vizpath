@@ -1,6 +1,7 @@
 """Intelligence API endpoints for Nemotron-powered trace analysis."""
 
 import logging
+from math import isfinite
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -16,6 +17,226 @@ from app.validation import ID_PATTERN
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/intelligence", tags=["Intelligence"])
+
+
+def _safe_number(value: Any) -> float:
+    """Convert nullable numeric values to finite float."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if not isfinite(number):
+        return 0.0
+    return number
+
+
+def _pct_change(previous: float, current: float) -> float:
+    """Return percent change from previous -> current."""
+    if previous == 0:
+        return 100.0 if current > 0 else 0.0
+    return ((current - previous) / previous) * 100.0
+
+
+def _compare_trace_metrics(
+    baseline_trace: Trace,
+    baseline_spans: list[Span],
+    candidate_trace: Trace,
+    candidate_spans: list[Span],
+) -> dict[str, Any]:
+    """Build deterministic metrics + regression signals between two traces."""
+    llm_calls_a = sum(1 for span in baseline_spans if span.span_type == "llm")
+    llm_calls_b = sum(1 for span in candidate_spans if span.span_type == "llm")
+    tool_calls_a = sum(1 for span in baseline_spans if span.span_type == "tool")
+    tool_calls_b = sum(1 for span in candidate_spans if span.span_type == "tool")
+
+    metrics = [
+        {
+            "name": "duration_ms",
+            "label": "Duration",
+            "a": _safe_number(baseline_trace.duration_ms),
+            "b": _safe_number(candidate_trace.duration_ms),
+            "higher_is_better": False,
+        },
+        {
+            "name": "error_count",
+            "label": "Errors",
+            "a": _safe_number(baseline_trace.error_count),
+            "b": _safe_number(candidate_trace.error_count),
+            "higher_is_better": False,
+        },
+        {
+            "name": "total_tokens",
+            "label": "Tokens",
+            "a": _safe_number(baseline_trace.total_tokens),
+            "b": _safe_number(candidate_trace.total_tokens),
+            "higher_is_better": False,
+        },
+        {
+            "name": "total_cost",
+            "label": "Cost",
+            "a": _safe_number(baseline_trace.total_cost),
+            "b": _safe_number(candidate_trace.total_cost),
+            "higher_is_better": False,
+        },
+        {
+            "name": "span_count",
+            "label": "Span Count",
+            "a": _safe_number(baseline_trace.span_count),
+            "b": _safe_number(candidate_trace.span_count),
+            "higher_is_better": False,
+        },
+        {
+            "name": "llm_calls",
+            "label": "LLM Calls",
+            "a": float(llm_calls_a),
+            "b": float(llm_calls_b),
+            "higher_is_better": False,
+        },
+        {
+            "name": "tool_calls",
+            "label": "Tool Calls",
+            "a": float(tool_calls_a),
+            "b": float(tool_calls_b),
+            "higher_is_better": False,
+        },
+    ]
+
+    enriched_metrics: list[dict[str, Any]] = []
+    for metric in metrics:
+        delta = metric["b"] - metric["a"]
+        delta_pct = _pct_change(metric["a"], metric["b"])
+        direction = "unchanged"
+        if abs(delta) > 0:
+            improved = delta > 0 if metric["higher_is_better"] else delta < 0
+            direction = "improved" if improved else "regressed"
+        enriched_metrics.append(
+            {
+                "name": metric["name"],
+                "label": metric["label"],
+                "trace_a": metric["a"],
+                "trace_b": metric["b"],
+                "delta": delta,
+                "delta_pct": delta_pct,
+                "direction": direction,
+            }
+        )
+
+    signals: list[dict[str, Any]] = []
+    actions: list[str] = []
+    severity_weight = {"critical": 35, "high": 25, "medium": 15, "low": 8}
+    score = 0
+
+    duration_pct = _pct_change(_safe_number(baseline_trace.duration_ms), _safe_number(candidate_trace.duration_ms))
+    if duration_pct >= 25:
+        signals.append(
+            {
+                "id": "latency-regression",
+                "title": "Latency Regression",
+                "severity": "high",
+                "kind": "performance",
+                "detail": f"Trace B is {duration_pct:.1f}% slower than Trace A.",
+                "recommendation": "Inspect the slowest span deltas and reduce redundant calls.",
+            }
+        )
+        actions.append("Profile top slow spans and remove duplicated steps.")
+        score += severity_weight["high"]
+    elif duration_pct <= -20:
+        signals.append(
+            {
+                "id": "latency-improvement",
+                "title": "Latency Improvement",
+                "severity": "low",
+                "kind": "performance",
+                "detail": f"Trace B is {-duration_pct:.1f}% faster than Trace A.",
+                "recommendation": "Promote this execution pattern as a default path.",
+            }
+        )
+
+    error_delta = int(_safe_number(candidate_trace.error_count) - _safe_number(baseline_trace.error_count))
+    if error_delta > 0:
+        signals.append(
+            {
+                "id": "error-regression",
+                "title": "Reliability Regression",
+                "severity": "critical",
+                "kind": "reliability",
+                "detail": f"Trace B has {error_delta} more error spans than Trace A.",
+                "recommendation": "Review erroring spans first; add retries/fallbacks only where deterministic.",
+            }
+        )
+        actions.append("Fix newly introduced erroring spans before optimizing for speed.")
+        score += severity_weight["critical"]
+
+    token_pct = _pct_change(_safe_number(baseline_trace.total_tokens), _safe_number(candidate_trace.total_tokens))
+    if token_pct >= 30 and duration_pct > -5:
+        signals.append(
+            {
+                "id": "token-inefficiency",
+                "title": "Token Inefficiency",
+                "severity": "medium",
+                "kind": "efficiency",
+                "detail": f"Trace B uses {token_pct:.1f}% more tokens with limited latency improvement.",
+                "recommendation": "Tighten prompts and reduce repeated context in LLM calls.",
+            }
+        )
+        actions.append("Reduce prompt/context size and cache repeatable intermediate results.")
+        score += severity_weight["medium"]
+
+    cost_pct = _pct_change(_safe_number(baseline_trace.total_cost), _safe_number(candidate_trace.total_cost))
+    if cost_pct >= 30:
+        signals.append(
+            {
+                "id": "cost-regression",
+                "title": "Cost Regression",
+                "severity": "medium",
+                "kind": "cost",
+                "detail": f"Trace B increases cost by {cost_pct:.1f}%.",
+                "recommendation": "Use cheaper models/tools on non-critical steps and trim excess calls.",
+            }
+        )
+        actions.append("Downshift model/tool usage for low-risk substeps.")
+        score += severity_weight["medium"]
+
+    tool_pct = _pct_change(float(tool_calls_a), float(tool_calls_b))
+    if tool_pct >= 40 and duration_pct >= 10:
+        signals.append(
+            {
+                "id": "tool-overhead",
+                "title": "Tooling Overhead",
+                "severity": "medium",
+                "kind": "complexity",
+                "detail": f"Trace B has {tool_pct:.1f}% more tool calls and is slower.",
+                "recommendation": "Batch or parallelize tool calls where ordering is not required.",
+            }
+        )
+        actions.append("Batch/parallelize tool calls to reduce serial overhead.")
+        score += severity_weight["medium"]
+
+    if not signals:
+        actions.append("No major regressions detected. Keep this trace as a baseline candidate.")
+
+    if score >= 55:
+        status = "regressed"
+    elif score == 0:
+        status = "improved" if duration_pct < 0 and error_delta <= 0 else "neutral"
+    else:
+        status = "mixed"
+
+    deduped_actions = list(dict.fromkeys(actions))[:3]
+    regression_score = max(0, min(100, score))
+
+    return {
+        "trace_a_id": str(baseline_trace.id),
+        "trace_b_id": str(candidate_trace.id),
+        "summary": {
+            "status": status,
+            "regression_score": regression_score,
+            "signal_count": len(signals),
+        },
+        "metrics": enriched_metrics,
+        "signals": signals,
+        "top_actions": deduped_actions,
+    }
 
 
 def _require_nvidia_key() -> None:
@@ -170,6 +391,13 @@ class SyntheticRequest(BaseModel):
         return self
 
 
+class CompareRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    trace_a_id: str = Field(min_length=1, max_length=128, pattern=ID_PATTERN)
+    trace_b_id: str = Field(min_length=1, max_length=128, pattern=ID_PATTERN)
+
+
 # --- Endpoints ---
 
 
@@ -188,6 +416,23 @@ async def analyze_trace(
     labeler = LLMLabeler()
     result = await labeler.analyze_trace(trace_data)
     return _normalize_analyze_result(result, req.trace_id)
+
+
+@router.post("/compare")
+async def compare_traces(
+    req: CompareRequest,
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Compare two traces and return deterministic regression signals."""
+    trace_a = db.query(Trace).filter(Trace.id == req.trace_a_id, Trace.project_id == project.id).first()
+    trace_b = db.query(Trace).filter(Trace.id == req.trace_b_id, Trace.project_id == project.id).first()
+    if not trace_a or not trace_b:
+        raise HTTPException(status_code=404, detail="Trace not found")
+
+    spans_a = db.query(Span).filter(Span.trace_id == req.trace_a_id).all()
+    spans_b = db.query(Span).filter(Span.trace_id == req.trace_b_id).all()
+    return _compare_trace_metrics(trace_a, spans_a, trace_b, spans_b)
 
 
 @router.get("/status")

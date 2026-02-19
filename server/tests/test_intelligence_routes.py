@@ -86,6 +86,94 @@ class TestAnalyzeEndpoint:
             assert data["quality_score"] == 85
 
 
+class TestCompareEndpoint:
+    def test_compare_success_with_regression_signals(self, client, test_db):
+        now = datetime.now(timezone.utc).isoformat()
+        payload = [
+            {
+                "span_id": "span-compare-a-1",
+                "trace_id": "trace-compare-a",
+                "name": "baseline_agent",
+                "span_type": "agent",
+                "status": "success",
+                "start_time": now,
+                "end_time": now,
+                "duration_ms": 1000,
+            },
+            {
+                "span_id": "span-compare-a-2",
+                "trace_id": "trace-compare-a",
+                "name": "baseline_llm",
+                "span_type": "llm",
+                "status": "success",
+                "start_time": now,
+                "end_time": now,
+                "duration_ms": 300,
+                "tokens": 100,
+                "cost": 0.01,
+            },
+            {
+                "span_id": "span-compare-b-1",
+                "trace_id": "trace-compare-b",
+                "name": "candidate_agent",
+                "span_type": "agent",
+                "status": "error",
+                "start_time": now,
+                "end_time": now,
+                "duration_ms": 1600,
+            },
+            {
+                "span_id": "span-compare-b-2",
+                "trace_id": "trace-compare-b",
+                "name": "candidate_llm",
+                "span_type": "llm",
+                "status": "success",
+                "start_time": now,
+                "end_time": now,
+                "duration_ms": 600,
+                "tokens": 220,
+                "cost": 0.03,
+            },
+            {
+                "span_id": "span-compare-b-3",
+                "trace_id": "trace-compare-b",
+                "name": "candidate_tool",
+                "span_type": "tool",
+                "status": "success",
+                "start_time": now,
+                "end_time": now,
+                "duration_ms": 200,
+            },
+        ]
+        ingest = client.post("/api/v1/traces/spans/batch", json=payload)
+        assert ingest.status_code == 201
+
+        resp = client.post(
+            "/api/v1/intelligence/compare",
+            json={"trace_a_id": "trace-compare-a", "trace_b_id": "trace-compare-b"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["summary"]["status"] in {"mixed", "regressed"}
+        assert data["summary"]["regression_score"] > 0
+        assert any(signal["id"] == "error-regression" for signal in data["signals"])
+        assert any(metric["name"] == "duration_ms" for metric in data["metrics"])
+
+    def test_compare_missing_trace_returns_404(self, client, trace_with_spans):
+        resp = client.post(
+            "/api/v1/intelligence/compare",
+            json={"trace_a_id": "test-trace-001", "trace_b_id": "does-not-exist"},
+        )
+        assert resp.status_code == 404
+
+    def test_compare_rejects_invalid_payload(self, client, test_db):
+        resp = client.post(
+            "/api/v1/intelligence/compare",
+            json={"trace_a_id": "ok-id", "trace_b_id": "bad id with spaces"},
+        )
+        assert resp.status_code == 422
+
+
 class TestIntelligenceStatusEndpoint:
     def test_status_reports_missing_key(self, client, test_db):
         with patch("app.routes.intelligence.settings") as mock_settings:
