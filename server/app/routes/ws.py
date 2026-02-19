@@ -47,11 +47,18 @@ def _verify_ws_api_key(api_key: str | None, db: Session | None = None) -> Projec
         return None
 
     if db is not None:
-        return get_project_by_api_key(db, api_key)
+        try:
+            return get_project_by_api_key(db, api_key)
+        except Exception:
+            logger.warning("WebSocket API key verification failed", exc_info=True)
+            return None
 
     session = SessionLocal()
     try:
         return get_project_by_api_key(session, api_key)
+    except Exception:
+        logger.warning("WebSocket API key verification failed", exc_info=True)
+        return None
     finally:
         session.close()
 

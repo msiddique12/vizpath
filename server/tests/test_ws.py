@@ -41,6 +41,14 @@ class TestWebSocketAuth:
         assert result is not None
         assert result.name == "test-ws"
 
+    def test_verify_ws_api_key_db_error_returns_none(self, test_db):
+        """DB errors during verification should fail closed."""
+        from unittest.mock import patch
+
+        with patch("app.routes.ws.get_project_by_api_key", side_effect=RuntimeError("db error")):
+            result = _verify_ws_api_key("some-key", db=test_db)
+            assert result is None
+
 
 class TestBroadcastMessage:
     """Tests for broadcast_message function."""
