@@ -90,6 +90,41 @@ def _normalize_self_analyze_result(result: dict[str, Any], trace_id: str) -> dic
     }
 
 
+def _suggest_curation_from_analysis(analysis_result: dict[str, Any], trace_id: str) -> dict[str, Any]:
+    """Build a deterministic curation suggestion from normalized analysis output."""
+    quality = int(analysis_result.get("quality_score", 0))
+    summary = str(analysis_result.get("analysis", {}).get("summary", "")).strip()
+    suggestions = analysis_result.get("suggestions", []) or []
+    labels = analysis_result.get("analysis", {}).get("labels", []) or []
+
+    if quality >= 85:
+        label = "excellent"
+    elif quality >= 70:
+        label = "good"
+    elif quality >= 50:
+        label = "needs_improvement"
+    else:
+        label = "failure"
+
+    quality_score_1_5 = max(1, min(5, int(round(quality / 20))))
+    top_suggestions = [str(s).strip() for s in suggestions[:2] if str(s).strip()]
+    notes_parts = []
+    if summary:
+        notes_parts.append(f"AI Summary: {summary}")
+    if top_suggestions:
+        notes_parts.append("Top suggestions: " + "; ".join(top_suggestions))
+    if labels:
+        notes_parts.append("Detected labels: " + ", ".join(str(label_name) for label_name in labels[:3]))
+
+    return {
+        "trace_id": trace_id,
+        "label": label,
+        "quality_score": quality_score_1_5,
+        "notes": " | ".join(notes_parts) if notes_parts else None,
+        "source_quality_score": quality,
+    }
+
+
 # --- Request/Response schemas ---
 
 
@@ -100,6 +135,12 @@ class AnalyzeRequest(BaseModel):
 
 
 class SelfAnalyzeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    trace_id: str = Field(min_length=1, max_length=128, pattern=ID_PATTERN)
+
+
+class SuggestCurationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     trace_id: str = Field(min_length=1, max_length=128, pattern=ID_PATTERN)
@@ -176,6 +217,24 @@ async def self_analyze_trace(
     labeler = LLMLabeler()
     result = await labeler.self_analyze(trace_data)
     return _normalize_self_analyze_result(result, req.trace_id)
+
+
+@router.post("/suggest-curation")
+async def suggest_curation(
+    req: SuggestCurationRequest,
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Generate a curation suggestion (label/score/notes) from AI trace analysis."""
+    _require_nvidia_key()
+
+    from app.intelligence.llm import LLMLabeler
+
+    trace_data = _get_trace_data(req.trace_id, project.id, db)
+    labeler = LLMLabeler()
+    result = await labeler.analyze_trace(trace_data)
+    normalized = _normalize_analyze_result(result, req.trace_id)
+    return _suggest_curation_from_analysis(normalized, req.trace_id)
 
 
 @router.post("/embed")

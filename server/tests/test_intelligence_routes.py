@@ -154,6 +154,57 @@ class TestSelfAnalyzeEndpoint:
             assert resp.json()["overall_score"] == 88
 
 
+class TestSuggestCurationEndpoint:
+    def test_suggest_curation_no_nvidia_key(self, client, test_db):
+        with patch("app.routes.intelligence.settings") as mock_settings:
+            mock_settings.nvidia_api_key = None
+            resp = client.post(
+                "/api/v1/intelligence/suggest-curation",
+                json={"trace_id": "test-trace-001"},
+            )
+            assert resp.status_code == 503
+
+    def test_suggest_curation_not_found(self, client, test_db):
+        with patch("app.routes.intelligence.settings") as mock_settings:
+            mock_settings.nvidia_api_key = "nvapi-test"
+            resp = client.post(
+                "/api/v1/intelligence/suggest-curation",
+                json={"trace_id": "missing-trace"},
+            )
+            assert resp.status_code == 404
+
+    def test_suggest_curation_success(self, client, trace_with_spans):
+        mock_analyze = {
+            "quality_score": 92,
+            "analysis": {
+                "quality_score": 92,
+                "labels": ["well_structured"],
+                "suggestions": ["Keep caching enabled", "Reduce redundant tool calls"],
+                "summary": "Strong execution with efficient tool usage.",
+            },
+            "suggestions": ["Keep caching enabled", "Reduce redundant tool calls"],
+        }
+
+        with (
+            patch("app.routes.intelligence.settings") as mock_settings,
+            patch("app.intelligence.llm.LLMLabeler") as MockLabeler,
+        ):
+            mock_settings.nvidia_api_key = "nvapi-test"
+            mock_instance = MockLabeler.return_value
+            mock_instance.analyze_trace = AsyncMock(return_value=mock_analyze)
+
+            resp = client.post(
+                "/api/v1/intelligence/suggest-curation",
+                json={"trace_id": "test-trace-001"},
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["label"] == "excellent"
+            assert data["quality_score"] == 5
+            assert data["source_quality_score"] == 92
+            assert "AI Summary:" in (data["notes"] or "")
+
+
 class TestGenerateSyntheticEndpoint:
     def test_synthetic_no_key(self, client, test_db):
         with patch("app.routes.intelligence.settings") as mock_settings:
