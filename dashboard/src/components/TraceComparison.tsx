@@ -28,6 +28,16 @@ interface SpanDrillDownStats {
   errorCount: number
 }
 
+type SeverityLevel = 'critical' | 'high' | 'medium' | 'low'
+
+interface ChangeReasonGroup {
+  key: string
+  title: string
+  severity: SeverityLevel
+  signals: NonNullable<IntelligenceComparison['signals']>
+  impactedMetrics: string[]
+}
+
 function formatDuration(ms: number | null | undefined): string {
   if (!ms) return '-'
   if (ms < 1000) return `${ms.toFixed(0)}ms`
@@ -43,6 +53,27 @@ function calculateDiff(a: number, b: number): number {
   if (a === 0 && b === 0) return 0
   if (a === 0) return 100
   return ((b - a) / a) * 100
+}
+
+function severityRank(severity: SeverityLevel): number {
+  const rank: Record<SeverityLevel, number> = {
+    critical: 4,
+    high: 3,
+    medium: 2,
+    low: 1,
+  }
+  return rank[severity]
+}
+
+function kindTitle(kind: string): string {
+  const map: Record<string, string> = {
+    performance: 'Performance Changes',
+    reliability: 'Reliability Changes',
+    efficiency: 'Efficiency Changes',
+    cost: 'Cost Changes',
+    complexity: 'Complexity Changes',
+  }
+  return map[kind] || `${kind.charAt(0).toUpperCase()}${kind.slice(1)} Changes`
 }
 
 function getSpanDrillDownStats(spans: Span[], spanName: string): SpanDrillDownStats {
@@ -171,6 +202,52 @@ export default function TraceComparison({
     }
   }, [selectedSpanName, traceA.spans, traceB.spans])
 
+  const reasonGroups = useMemo((): ChangeReasonGroup[] => {
+    if (!intelligenceCompare) return []
+
+    const groups = new Map<string, ChangeReasonGroup>()
+    const metricByKind: Record<string, string[]> = {
+      performance: ['duration_ms'],
+      reliability: ['error_count'],
+      efficiency: ['total_tokens'],
+      cost: ['total_cost'],
+      complexity: ['span_count', 'llm_calls', 'tool_calls'],
+    }
+
+    intelligenceCompare.signals.forEach((signal) => {
+      const current = groups.get(signal.kind)
+      if (!current) {
+        groups.set(signal.kind, {
+          key: signal.kind,
+          title: kindTitle(signal.kind),
+          severity: signal.severity,
+          signals: [signal],
+          impactedMetrics: [],
+        })
+      } else {
+        current.signals.push(signal)
+        if (severityRank(signal.severity) > severityRank(current.severity)) {
+          current.severity = signal.severity
+        }
+      }
+    })
+
+    for (const group of groups.values()) {
+      const candidateMetrics = metricByKind[group.key] || []
+      group.impactedMetrics = intelligenceCompare.metrics
+        .filter(
+          (metric) =>
+            candidateMetrics.includes(metric.name) &&
+            (metric.direction === 'regressed' || metric.direction === 'improved')
+        )
+        .map((metric) => metric.label)
+    }
+
+    return Array.from(groups.values()).sort(
+      (a, b) => severityRank(b.severity) - severityRank(a.severity)
+    )
+  }, [intelligenceCompare])
+
   return (
     <div className="space-y-6">
       <div className="border border-dark-700 rounded-lg p-4 bg-dark-800/60">
@@ -244,6 +321,51 @@ export default function TraceComparison({
                 <p className="text-xs text-muted-300">{action}</p>
               </div>
             ))}
+          </div>
+        )}
+
+        {reasonGroups.length > 0 && (
+          <div className="mt-4">
+            <h5 className="text-xs font-medium text-muted-200 mb-2 uppercase tracking-wide">
+              Change Reasons
+            </h5>
+            <div className="space-y-2">
+              {reasonGroups.map((group) => (
+                <details key={group.key} className="rounded border border-dark-700 bg-dark-900/70 p-2">
+                  <summary className="flex cursor-pointer list-none items-center gap-2">
+                    <span
+                      className={clsx(
+                        'px-1.5 py-0.5 rounded text-[10px] font-medium uppercase',
+                        group.severity === 'critical' && 'bg-red-900/60 text-red-300',
+                        group.severity === 'high' && 'bg-orange-900/60 text-orange-300',
+                        group.severity === 'medium' && 'bg-yellow-900/60 text-yellow-300',
+                        group.severity === 'low' && 'bg-green-900/50 text-green-400'
+                      )}
+                    >
+                      {group.severity}
+                    </span>
+                    <span className="text-xs text-muted-100">{group.title}</span>
+                    <span className="ml-auto text-[11px] text-muted-400">
+                      {group.signals.length} signal{group.signals.length === 1 ? '' : 's'}
+                    </span>
+                  </summary>
+                  <div className="pt-2 space-y-2">
+                    {group.impactedMetrics.length > 0 && (
+                      <p className="text-[11px] text-muted-400">
+                        Impacted metrics: {group.impactedMetrics.join(', ')}
+                      </p>
+                    )}
+                    {group.signals.map((signal) => (
+                      <div key={signal.id} className="rounded border border-dark-700 p-2">
+                        <p className="text-xs text-muted-100">{signal.title}</p>
+                        <p className="text-xs text-muted-400 mt-1">{signal.detail}</p>
+                        <p className="text-xs text-muted-300 mt-1">{signal.recommendation}</p>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              ))}
+            </div>
           </div>
         )}
       </div>
