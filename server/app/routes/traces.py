@@ -1,7 +1,7 @@
 """Trace ingestion and retrieval endpoints."""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -18,6 +18,13 @@ from app.validation import ID_PATTERN, SPAN_TYPE_PATTERN, STATUS_PATTERN, normal
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/traces", tags=["Traces"])
+
+
+def _to_utc(dt: datetime) -> datetime:
+    """Normalize DB datetime values to UTC-aware for safe arithmetic."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 class SpanCreate(BaseModel):
@@ -253,7 +260,7 @@ async def ingest_spans(
             if stats.latest_end:
                 trace.end_time = stats.latest_end
                 if trace.start_time:
-                    delta = (trace.end_time - trace.start_time).total_seconds() * 1000
+                    delta = (_to_utc(trace.end_time) - _to_utc(trace.start_time)).total_seconds() * 1000
                     trace.duration_ms = delta
 
             # Update trace status based on span statuses
