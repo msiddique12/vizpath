@@ -37,7 +37,15 @@ async function fetchRootApi<T>(endpoint: string, options?: RequestInit): Promise
 export async function getTraces(
   limit = 20,
   offset = 0,
-  status?: string
+  status?: string,
+  options?: {
+    q?: string
+    min_tokens?: number
+    min_cost?: number
+    has_errors?: boolean
+    sort_by?: 'created_at' | 'duration_ms' | 'total_tokens' | 'total_cost' | 'span_count' | 'error_count' | 'name'
+    sort_order?: 'asc' | 'desc'
+  }
 ): Promise<TraceListResponse> {
   const params = new URLSearchParams({
     limit: String(limit),
@@ -45,6 +53,24 @@ export async function getTraces(
   })
   if (status) {
     params.set('status', status)
+  }
+  if (options?.q) {
+    params.set('q', options.q)
+  }
+  if (options?.min_tokens !== undefined) {
+    params.set('min_tokens', String(options.min_tokens))
+  }
+  if (options?.min_cost !== undefined) {
+    params.set('min_cost', String(options.min_cost))
+  }
+  if (options?.has_errors !== undefined) {
+    params.set('has_errors', String(options.has_errors))
+  }
+  if (options?.sort_by) {
+    params.set('sort_by', options.sort_by)
+  }
+  if (options?.sort_order) {
+    params.set('sort_order', options.sort_order)
   }
   return fetchApi(`/traces?${params}`)
 }

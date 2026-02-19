@@ -1,14 +1,28 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { formatDistanceToNow } from 'date-fns'
-import { AlertCircle, CheckCircle, Clock, Loader2, Wifi, WifiOff, ChevronLeft, ChevronRight } from 'lucide-react'
+import {
+  AlertCircle,
+  CheckCircle,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  Loader2,
+  Search,
+  Wifi,
+  WifiOff,
+} from 'lucide-react'
 import clsx from 'clsx'
 import { getTraces } from '@/lib/api'
 import { Trace, SpanStatus } from '@/lib/types'
 import { useWebSocket } from '@/hooks/useWebSocket'
 
 const PAGE_SIZE = 50
+
+type SortBy = 'created_at' | 'duration_ms' | 'total_tokens' | 'total_cost' | 'span_count' | 'error_count' | 'name'
+type SortOrder = 'asc' | 'desc'
+type StatusFilter = '' | 'running' | 'success' | 'error'
 
 function StatusBadge({ status }: { status: SpanStatus }) {
   const config = {
@@ -68,6 +82,60 @@ function TraceRow({ trace }: { trace: Trace }) {
 export default function TracesPage() {
   const queryClient = useQueryClient()
   const [page, setPage] = useState(1)
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('')
+  const [minTokens, setMinTokens] = useState('')
+  const [minCost, setMinCost] = useState('')
+  const [hasErrors, setHasErrors] = useState<'' | 'true' | 'false'>('')
+  const [sortBy, setSortBy] = useState<SortBy>('created_at')
+  const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
+
+  useEffect(() => {
+    const saved = localStorage.getItem('traces_filters_v1')
+    if (!saved) return
+    try {
+      const parsed = JSON.parse(saved)
+      setSearch(parsed.search ?? '')
+      setStatusFilter(parsed.statusFilter ?? '')
+      setMinTokens(parsed.minTokens ?? '')
+      setMinCost(parsed.minCost ?? '')
+      setHasErrors(parsed.hasErrors ?? '')
+      setSortBy(parsed.sortBy ?? 'created_at')
+      setSortOrder(parsed.sortOrder ?? 'desc')
+    } catch {
+      // Ignore invalid saved settings.
+    }
+  }, [])
+
+  useEffect(() => {
+    localStorage.setItem(
+      'traces_filters_v1',
+      JSON.stringify({
+        search,
+        statusFilter,
+        minTokens,
+        minCost,
+        hasErrors,
+        sortBy,
+        sortOrder,
+      })
+    )
+  }, [hasErrors, minCost, minTokens, search, sortBy, sortOrder, statusFilter])
+
+  useEffect(() => {
+    setPage(1)
+  }, [search, statusFilter, minTokens, minCost, hasErrors, sortBy, sortOrder])
+
+  const queryOptions = useMemo(() => {
+    return {
+      q: search.trim() || undefined,
+      min_tokens: minTokens ? Number(minTokens) : undefined,
+      min_cost: minCost ? Number(minCost) : undefined,
+      has_errors: hasErrors === '' ? undefined : hasErrors === 'true',
+      sort_by: sortBy,
+      sort_order: sortOrder,
+    }
+  }, [hasErrors, minCost, minTokens, search, sortBy, sortOrder])
 
   const { connected } = useWebSocket({
     onMessage: (msg) => {
@@ -78,8 +146,14 @@ export default function TracesPage() {
   })
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['traces', page],
-    queryFn: () => getTraces(PAGE_SIZE, (page - 1) * PAGE_SIZE),
+    queryKey: ['traces', page, statusFilter, queryOptions],
+    queryFn: () =>
+      getTraces(
+        PAGE_SIZE,
+        (page - 1) * PAGE_SIZE,
+        statusFilter || undefined,
+        queryOptions
+      ),
     refetchInterval: connected ? false : 5000,
   })
 
@@ -118,6 +192,137 @@ export default function TracesPage() {
         )}>
           {connected ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
           {connected ? 'Live' : 'Polling'}
+        </div>
+      </div>
+
+      <div className="mb-4 bg-dark-900 rounded-lg border border-dark-700 p-4 space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+          <label className="relative">
+            <Search className="h-4 w-4 text-muted-500 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search trace name"
+              className="w-full bg-dark-800 border border-dark-700 rounded-lg pl-9 pr-3 py-2 text-sm text-muted-100 placeholder:text-muted-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            />
+          </label>
+
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+            className="bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-sm text-muted-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            <option value="">All statuses</option>
+            <option value="running">Running</option>
+            <option value="success">Success</option>
+            <option value="error">Error</option>
+          </select>
+
+          <select
+            value={hasErrors}
+            onChange={(e) => setHasErrors(e.target.value as '' | 'true' | 'false')}
+            className="bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-sm text-muted-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            <option value="">Any error count</option>
+            <option value="true">Only traces with errors</option>
+            <option value="false">Only traces without errors</option>
+          </select>
+
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              value={minTokens}
+              onChange={(e) => setMinTokens(e.target.value.replace(/[^\d]/g, ''))}
+              placeholder="Min tokens"
+              className="bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-sm text-muted-100 placeholder:text-muted-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            />
+            <input
+              value={minCost}
+              onChange={(e) => setMinCost(e.target.value.replace(/[^\d.]/g, ''))}
+              placeholder="Min cost"
+              className="bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-sm text-muted-100 placeholder:text-muted-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            />
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as SortBy)}
+            className="bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-sm text-muted-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            <option value="created_at">Sort: Newest</option>
+            <option value="duration_ms">Sort: Duration</option>
+            <option value="total_tokens">Sort: Total tokens</option>
+            <option value="total_cost">Sort: Total cost</option>
+            <option value="span_count">Sort: Span count</option>
+            <option value="error_count">Sort: Error count</option>
+            <option value="name">Sort: Name</option>
+          </select>
+          <select
+            value={sortOrder}
+            onChange={(e) => setSortOrder(e.target.value as SortOrder)}
+            className="bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-sm text-muted-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            <option value="desc">Desc</option>
+            <option value="asc">Asc</option>
+          </select>
+
+          <button
+            onClick={() => {
+              setStatusFilter('running')
+              setSearch('')
+              setMinTokens('')
+              setMinCost('')
+              setHasErrors('')
+              setSortBy('created_at')
+              setSortOrder('desc')
+            }}
+            className="px-3 py-2 text-xs bg-dark-800 border border-dark-700 rounded-lg text-muted-200 hover:bg-dark-700"
+          >
+            Preset: Live
+          </button>
+          <button
+            onClick={() => {
+              setStatusFilter('')
+              setSearch('')
+              setMinTokens('')
+              setMinCost('')
+              setHasErrors('true')
+              setSortBy('error_count')
+              setSortOrder('desc')
+            }}
+            className="px-3 py-2 text-xs bg-dark-800 border border-dark-700 rounded-lg text-muted-200 hover:bg-dark-700"
+          >
+            Preset: Error traces
+          </button>
+          <button
+            onClick={() => {
+              setStatusFilter('')
+              setSearch('')
+              setMinTokens('')
+              setMinCost('')
+              setHasErrors('')
+              setSortBy('total_cost')
+              setSortOrder('desc')
+            }}
+            className="px-3 py-2 text-xs bg-dark-800 border border-dark-700 rounded-lg text-muted-200 hover:bg-dark-700"
+          >
+            Preset: High cost
+          </button>
+          <button
+            onClick={() => {
+              setStatusFilter('')
+              setSearch('')
+              setMinTokens('')
+              setMinCost('')
+              setHasErrors('')
+              setSortBy('created_at')
+              setSortOrder('desc')
+            }}
+            className="px-3 py-2 text-xs bg-dark-900 border border-dark-700 rounded-lg text-muted-300 hover:bg-dark-800"
+          >
+            Clear
+          </button>
         </div>
       </div>
 
