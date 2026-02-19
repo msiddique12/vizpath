@@ -129,6 +129,9 @@ class GlobalTracer:
             base = base.rstrip("/") + "/api/v1"
 
         with self._lock:
+            old_client = self._client
+            if old_client is not None:
+                old_client.close()
             self._config = Config(
                 base_url=base,
                 api_key=api_key,
