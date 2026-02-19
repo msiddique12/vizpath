@@ -149,6 +149,18 @@ async def analyze_trace(
     return _normalize_analyze_result(result, req.trace_id)
 
 
+@router.get("/status")
+async def intelligence_status(
+    _project: Project = Depends(verify_api_key),
+) -> dict[str, Any]:
+    """Return intelligence setup status for dashboard/demo checks."""
+    return {
+        "nvidia_api_key_configured": bool(settings.nvidia_api_key),
+        "model": settings.nvidia_llm_model,
+        "base_url": settings.nvidia_base_url,
+    }
+
+
 @router.post("/self-analyze")
 async def self_analyze_trace(
     req: SelfAnalyzeRequest,

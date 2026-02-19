@@ -86,6 +86,28 @@ class TestAnalyzeEndpoint:
             assert data["quality_score"] == 85
 
 
+class TestIntelligenceStatusEndpoint:
+    def test_status_reports_missing_key(self, client, test_db):
+        with patch("app.routes.intelligence.settings") as mock_settings:
+            mock_settings.nvidia_api_key = None
+            mock_settings.nvidia_llm_model = "nvidia/model"
+            mock_settings.nvidia_base_url = "https://integrate.api.nvidia.com/v1"
+            resp = client.get("/api/v1/intelligence/status")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["nvidia_api_key_configured"] is False
+
+    def test_status_reports_configured_key(self, client, test_db):
+        with patch("app.routes.intelligence.settings") as mock_settings:
+            mock_settings.nvidia_api_key = "nvapi-test"
+            mock_settings.nvidia_llm_model = "nvidia/model"
+            mock_settings.nvidia_base_url = "https://integrate.api.nvidia.com/v1"
+            resp = client.get("/api/v1/intelligence/status")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["nvidia_api_key_configured"] is True
+
+
 class TestSelfAnalyzeEndpoint:
     def test_self_analyze_no_key(self, client, test_db):
         with patch("app.routes.intelligence.settings") as mock_settings:

@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
 
+import redis
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -121,12 +122,23 @@ async def health() -> dict[str, Any]:
 async def health_detailed() -> dict[str, Any]:
     """Detailed health check including dependencies."""
     db_healthy = check_db_connection()
+    redis_healthy = False
+
+    try:
+        redis_client = redis.from_url(settings.redis_url)
+        redis_healthy = bool(redis_client.ping())
+    except Exception:
+        redis_healthy = False
 
     return {
-        "status": "healthy" if db_healthy else "degraded",
+        "status": "healthy" if db_healthy and redis_healthy else "degraded",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "version": __version__,
         "checks": {
             "database": {"status": "healthy" if db_healthy else "unhealthy"},
+            "redis": {"status": "healthy" if redis_healthy else "unhealthy"},
+            "intelligence": {
+                "status": "configured" if settings.nvidia_api_key else "not_configured",
+            },
         },
     }

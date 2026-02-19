@@ -1,5 +1,7 @@
 """Tests for health check endpoints."""
 
+from unittest.mock import patch
+
 
 class TestHealthEndpoints:
     def test_root_endpoint(self, client):
@@ -20,7 +22,9 @@ class TestHealthEndpoints:
         assert "timestamp" in data
 
     def test_health_detailed_endpoint(self, client):
-        response = client.get("/health/detailed")
+        with patch("app.main.redis.from_url") as mock_redis:
+            mock_redis.return_value.ping.return_value = True
+            response = client.get("/health/detailed")
 
         assert response.status_code == 200
         data = response.json()
@@ -28,3 +32,5 @@ class TestHealthEndpoints:
         assert "version" in data
         assert "checks" in data
         assert "database" in data["checks"]
+        assert "redis" in data["checks"]
+        assert "intelligence" in data["checks"]
