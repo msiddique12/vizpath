@@ -12,7 +12,6 @@ from app.intelligence.embeddings import (
     trace_to_text,
 )
 
-
 SAMPLE_TRACE = {
     "id": "trace-001",
     "name": "research_session",

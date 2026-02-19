@@ -7,7 +7,6 @@ import pytest
 
 from app.intelligence.synthetic import SyntheticDataGenerator
 
-
 SAMPLE_TRACE = {
     "id": "trace-001",
     "name": "research_session",

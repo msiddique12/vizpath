@@ -1,11 +1,10 @@
 """Tests for framework adapters."""
 
-import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, patch
 
+from vizpath.adapters.autogen import AutoGenTracer, VizpathAutoGenCallback, wrap_autogen_agent
 from vizpath.adapters.langchain import VizpathCallbackHandler
 from vizpath.adapters.langgraph import LangGraphAdapter, TracedGraph
-from vizpath.adapters.autogen import VizpathAutoGenCallback, wrap_autogen_agent, AutoGenTracer
 
 
 class TestLangChainAdapter:

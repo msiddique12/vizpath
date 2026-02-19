@@ -1,7 +1,5 @@
 """Tests for project management endpoints."""
 
-from app.auth import hash_api_key
-from app.models import Project
 
 
 class TestProjectCreate:

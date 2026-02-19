@@ -1,15 +1,15 @@
 """Tests for WebSocket endpoints."""
 
+from unittest.mock import MagicMock
+
 import pytest
-from unittest.mock import patch, MagicMock
-from datetime import datetime, timezone
 
 from app.models import Project
 from app.routes.ws import (
+    _verify_ws_api_key,
     active_connections,
     broadcast_message,
     notify_span_ingested,
-    _verify_ws_api_key,
 )
 
 

@@ -1,6 +1,5 @@
 """Tests for Tracer class."""
 
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -89,7 +88,7 @@ class TestTraceContext:
 
         with tracer.trace("test") as trace:
             with trace.span("parent") as parent:
-                with parent.span("child") as child:
+                with parent.span("child"):
                     pass
 
         assert len(trace._context._spans) == 2

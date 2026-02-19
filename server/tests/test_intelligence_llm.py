@@ -7,7 +7,6 @@ import pytest
 
 from app.intelligence.llm import LLMLabeler, _extract_json
 
-
 # --- _extract_json tests ---
 
 
