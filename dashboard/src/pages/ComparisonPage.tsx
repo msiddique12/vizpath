@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Loader2, GitCompare, X } from 'lucide-react'
 import clsx from 'clsx'
-import { getTraces, getTrace } from '@/lib/api'
+import { compareTraces, getTraces, getTrace } from '@/lib/api'
 import { Trace } from '@/lib/types'
 import TraceComparison from '@/components/TraceComparison'
 
@@ -25,6 +25,12 @@ export default function ComparisonPage() {
     queryKey: ['trace', selectedTraceB],
     queryFn: () => getTrace(selectedTraceB!),
     enabled: !!selectedTraceB,
+  })
+
+  const { data: intelligenceCompare, isLoading: compareLoading } = useQuery({
+    queryKey: ['trace-compare', selectedTraceA, selectedTraceB],
+    queryFn: () => compareTraces(selectedTraceA!, selectedTraceB!),
+    enabled: !!selectedTraceA && !!selectedTraceB,
   })
 
   const traces = tracesData?.traces || []
@@ -137,7 +143,12 @@ export default function ComparisonPage() {
                     <Loader2 className="h-6 w-6 text-primary-600 animate-spin" />
                   </div>
                 ) : traceAData && traceBData ? (
-                  <TraceComparison traceA={traceAData} traceB={traceBData} />
+                  <TraceComparison
+                    traceA={traceAData}
+                    traceB={traceBData}
+                    intelligenceCompare={intelligenceCompare}
+                    intelligenceCompareLoading={compareLoading}
+                  />
                 ) : (
                   <p className="text-muted-400 text-center py-8">
                     Failed to load trace data

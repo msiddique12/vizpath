@@ -1,10 +1,14 @@
 import { useMemo } from 'react'
 import clsx from 'clsx'
+import { AlertTriangle, Loader2, TrendingDown, TrendingUp } from 'lucide-react'
+import { IntelligenceComparison } from '@/lib/api'
 import { Span, Trace } from '@/lib/types'
 
 interface TraceComparisonProps {
   traceA: { trace: Trace; spans: Span[] }
   traceB: { trace: Trace; spans: Span[] }
+  intelligenceCompare?: IntelligenceComparison
+  intelligenceCompareLoading?: boolean
 }
 
 interface ComparisonMetric {
@@ -32,7 +36,12 @@ function calculateDiff(a: number, b: number): number {
   return ((b - a) / a) * 100
 }
 
-export default function TraceComparison({ traceA, traceB }: TraceComparisonProps) {
+export default function TraceComparison({
+  traceA,
+  traceB,
+  intelligenceCompare,
+  intelligenceCompareLoading = false,
+}: TraceComparisonProps) {
   const metrics = useMemo((): ComparisonMetric[] => {
     const durationA = traceA.trace.duration_ms || 0
     const durationB = traceB.trace.duration_ms || 0
@@ -123,6 +132,81 @@ export default function TraceComparison({ traceA, traceB }: TraceComparisonProps
 
   return (
     <div className="space-y-6">
+      <div className="border border-dark-700 rounded-lg p-4 bg-dark-800/60">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h4 className="text-sm font-medium text-muted-100">Intelligence Delta</h4>
+            <p className="text-xs text-muted-400 mt-1">
+              Deterministic regression signals and recommended next actions.
+            </p>
+          </div>
+          {intelligenceCompareLoading ? (
+            <Loader2 className="h-4 w-4 text-primary-500 animate-spin mt-1" />
+          ) : (
+            intelligenceCompare && (
+              <span
+                className={clsx(
+                  'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium',
+                  intelligenceCompare.summary.status === 'regressed' &&
+                    'bg-red-900/50 text-red-400',
+                  intelligenceCompare.summary.status === 'mixed' &&
+                    'bg-yellow-900/50 text-yellow-300',
+                  intelligenceCompare.summary.status === 'improved' &&
+                    'bg-green-900/50 text-green-400',
+                  intelligenceCompare.summary.status === 'neutral' &&
+                    'bg-dark-700 text-muted-300'
+                )}
+              >
+                {intelligenceCompare.summary.status.toUpperCase()} · Score{' '}
+                {intelligenceCompare.summary.regression_score}
+              </span>
+            )
+          )}
+        </div>
+
+        {intelligenceCompare && intelligenceCompare.signals.length > 0 ? (
+          <div className="mt-4 space-y-2">
+            {intelligenceCompare.signals.slice(0, 3).map((signal) => (
+              <div key={signal.id} className="rounded border border-dark-700 p-3">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 text-yellow-400" />
+                  <p className="text-sm text-muted-100">{signal.title}</p>
+                  <span
+                    className={clsx(
+                      'ml-auto px-1.5 py-0.5 rounded text-[10px] font-medium uppercase',
+                      signal.severity === 'critical' && 'bg-red-900/60 text-red-300',
+                      signal.severity === 'high' && 'bg-orange-900/60 text-orange-300',
+                      signal.severity === 'medium' && 'bg-yellow-900/60 text-yellow-300',
+                      signal.severity === 'low' && 'bg-green-900/50 text-green-400'
+                    )}
+                  >
+                    {signal.severity}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-400 mt-1">{signal.detail}</p>
+                <p className="text-xs text-muted-300 mt-2">{signal.recommendation}</p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          !intelligenceCompareLoading && (
+            <p className="mt-4 text-xs text-muted-400">
+              No major regression signals detected for this pair.
+            </p>
+          )
+        )}
+
+        {intelligenceCompare && intelligenceCompare.top_actions.length > 0 && (
+          <div className="mt-4 grid md:grid-cols-3 gap-2">
+            {intelligenceCompare.top_actions.map((action, index) => (
+              <div key={`${action}-${index}`} className="rounded bg-dark-900 border border-dark-700 p-2">
+                <p className="text-xs text-muted-300">{action}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div className="grid grid-cols-3 gap-4">
         <div className="col-span-1" />
         <div className="text-center">
@@ -162,6 +246,11 @@ export default function TraceComparison({ traceA, traceB }: TraceComparisonProps
                           : 'bg-red-900/50 text-red-400'
                     )}
                   >
+                    {metric.diff < 0 ? (
+                      <TrendingDown className="h-3 w-3 mr-1" />
+                    ) : metric.diff > 0 ? (
+                      <TrendingUp className="h-3 w-3 mr-1" />
+                    ) : null}
                     {metric.diff === 0
                       ? 'No change'
                       : `${metric.diff > 0 ? '+' : ''}${metric.diff.toFixed(1)}%`}

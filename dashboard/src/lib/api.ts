@@ -214,10 +214,52 @@ export interface SuggestedCuration {
   source_quality_score: number
 }
 
+export interface TraceComparisonMetric {
+  name: string
+  label: string
+  trace_a: number
+  trace_b: number
+  delta: number
+  delta_pct: number
+  direction: 'improved' | 'regressed' | 'unchanged'
+}
+
+export interface TraceComparisonSignal {
+  id: string
+  title: string
+  severity: 'critical' | 'high' | 'medium' | 'low'
+  kind: string
+  detail: string
+  recommendation: string
+}
+
+export interface IntelligenceComparison {
+  trace_a_id: string
+  trace_b_id: string
+  summary: {
+    status: 'regressed' | 'mixed' | 'improved' | 'neutral'
+    regression_score: number
+    signal_count: number
+  }
+  metrics: TraceComparisonMetric[]
+  signals: TraceComparisonSignal[]
+  top_actions: string[]
+}
+
 export async function analyzeTrace(traceId: string): Promise<TraceAnalysis> {
   return fetchApi('/intelligence/analyze', {
     method: 'POST',
     body: JSON.stringify({ trace_id: traceId }),
+  })
+}
+
+export async function compareTraces(
+  traceAId: string,
+  traceBId: string
+): Promise<IntelligenceComparison> {
+  return fetchApi('/intelligence/compare', {
+    method: 'POST',
+    body: JSON.stringify({ trace_a_id: traceAId, trace_b_id: traceBId }),
   })
 }
 
