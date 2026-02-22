@@ -37,7 +37,7 @@ Vizpath comprises three systems:
 ## Intelligence Layer (Nemotron via NIM)
 
 All LLM and embedding calls go through NVIDIA NIM API (OpenAI-compatible):
-- **LLM**: `nvidia/llama-3.1-nemotron-70b-instruct` for trace analysis, self-analysis, labeling
+- **LLM**: `nvidia/llama-3.3-nemotron-super-49b-v1.5` for trace analysis, self-analysis, labeling
 - **Embeddings**: `nvidia/nv-embedqa-e5-v5` (1024-dim) for trace embedding and clustering
 - **Synthetic Data**: Nemotron generates training data variations and corrections from real traces
 - **Config**: `NVIDIA_API_KEY` env var, base URL `https://integrate.api.nvidia.com/v1`

@@ -9,7 +9,7 @@ The Code Analysis Agent demonstrates Vizpath's tracing capabilities with a pract
 ## Features
 
 - **Real File Operations**: Searches, reads, and analyzes actual files
-- **Nemotron-Powered**: Uses NVIDIA's Llama-3.1-Nemotron-70B for reasoning
+- **Nemotron-Powered**: Uses NVIDIA's Llama-3.3-Nemotron-Super-49B for reasoning
 - **Full Tracing**: Every operation traced with vizpath
 - **Multi-Step Analysis**: Agent loop with tool calling until completion
 
@@ -88,7 +88,7 @@ analyze()                    # @tracer.trace - top-level trace
 from examples.code_agent import CodeAnalysisAgent
 
 agent = CodeAnalysisAgent(
-    model="nvidia/llama-3.1-nemotron-70b-instruct",
+    model="nvidia/llama-3.3-nemotron-super-49b-v1.5",
     max_iterations=20,  # More iterations for complex analysis
     verbose=True,       # Print progress
 )

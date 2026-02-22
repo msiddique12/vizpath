@@ -29,7 +29,7 @@ class ResearchAgent:
         self,
         api_key: str | None = None,
         base_url: str | None = None,
-        model: str = "nvidia/llama-3.1-nemotron-70b-instruct",
+        model: str = "nvidia/llama-3.3-nemotron-super-49b-v1.5",
         max_iterations: int = 10,
         verbose: bool = False,
     ):
