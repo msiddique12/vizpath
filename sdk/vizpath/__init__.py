@@ -32,7 +32,7 @@ from vizpath.config import Config
 from vizpath.decorators import configure
 from vizpath.decorators import tracer as _tracer_instance
 from vizpath.span import Span, SpanStatus, SpanType
-from vizpath.tracer import Tracer
+from vizpath.tracer import NoopSpan, NoopTrace, Tracer
 
 # Explicit assignment to ensure tracer refers to the GlobalTracer instance
 # (not the vizpath.tracer module which would shadow it)
@@ -41,6 +41,8 @@ tracer = _tracer_instance
 __version__ = "0.1.0"
 __all__ = [
     "Config",
+    "NoopSpan",
+    "NoopTrace",
     "Span",
     "SpanStatus",
     "SpanType",

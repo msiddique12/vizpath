@@ -20,9 +20,14 @@ class Config:
     timeout: float = 30.0
     max_retries: int = 3
     enabled: bool = field(default_factory=lambda: os.environ.get("VIZPATH_ENABLED", "true").lower() == "true")
+    sample_rate: float = field(
+        default_factory=lambda: float(os.environ.get("VIZPATH_SAMPLE_RATE", "1.0"))
+    )
 
     def __post_init__(self) -> None:
         if self.buffer_size < 1:
             raise ValueError("buffer_size must be at least 1")
         if self.flush_interval < 0.1:
             raise ValueError("flush_interval must be at least 0.1 seconds")
+        if not 0.0 <= self.sample_rate <= 1.0:
+            raise ValueError("sample_rate must be between 0.0 and 1.0")

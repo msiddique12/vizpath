@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -146,6 +147,74 @@ class Trace:
         self.end()
 
 
+class NoopSpan:
+    """
+    A span that records nothing.
+
+    Returned by NoopTrace when a trace is dropped by sampling.
+    Implements the same interface as Span so call-sites need no changes.
+    """
+
+    def span(self, name: str, span_type: SpanType = SpanType.CUSTOM) -> NoopSpan:
+        return NoopSpan()
+
+    def set_input(self, value: Any) -> NoopSpan:
+        return self
+
+    def set_output(self, value: Any) -> NoopSpan:
+        return self
+
+    def set_attributes(self, **kwargs: Any) -> NoopSpan:
+        return self
+
+    def set_tokens(self, count: int, cost: float | None = None) -> NoopSpan:
+        return self
+
+    def set_error(self, error: str) -> NoopSpan:
+        return self
+
+    def add_event(self, name: str, **attributes: Any) -> NoopSpan:
+        return self
+
+    def end(self, status: Any = None) -> None:
+        pass
+
+    def __enter__(self) -> NoopSpan:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        pass
+
+
+class NoopTrace:
+    """
+    A trace that records nothing.
+
+    Returned by Tracer.trace() when the trace is dropped by the configured
+    sample_rate.  Implements the same interface as Trace so adapters and
+    application code work without modification.
+    """
+
+    @property
+    def trace_id(self) -> str:
+        return ""
+
+    def span(self, name: str, span_type: SpanType = SpanType.CUSTOM) -> NoopSpan:
+        return NoopSpan()
+
+    def set_metadata(self, **kwargs: Any) -> NoopTrace:
+        return self
+
+    def end(self, status: Any = None) -> None:
+        pass
+
+    def __enter__(self) -> NoopTrace:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        pass
+
+
 class Tracer:
     """
     Main entry point for tracing agent executions.
@@ -176,8 +245,17 @@ class Tracer:
 
         self._client = Client(self._config)
 
-    def trace(self, name: str) -> Trace:
-        """Create a new trace with the given name."""
+    def trace(self, name: str) -> Trace | NoopTrace:
+        """
+        Create a new trace with the given name.
+
+        If sample_rate < 1.0 and this trace is not selected by the sampler,
+        returns a NoopTrace that records nothing.  This lets high-throughput
+        production services reduce overhead while keeping statistical coverage.
+        """
+        if self._config.sample_rate < 1.0 and random.random() >= self._config.sample_rate:
+            return NoopTrace()
+
         trace_id = str(uuid.uuid4())
         context = TraceContext(
             trace_id=trace_id,
