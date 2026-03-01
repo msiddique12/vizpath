@@ -6,6 +6,7 @@ from vizpath.adapters.haystack import HaystackAdapter, TracedPipeline, VizpathHa
 from vizpath.adapters.langchain import VizpathCallbackHandler
 from vizpath.adapters.langgraph import LangGraphAdapter
 from vizpath.adapters.llamaindex import VizpathLlamaIndexCallback
+from vizpath.adapters.openai_agents import VizpathAgentsTraceProcessor
 from vizpath.adapters.semantic_kernel import SemanticKernelAdapter, VizpathKernelFilter
 
 __all__ = [
@@ -27,6 +28,8 @@ __all__ = [
     "LangGraphAdapter",
     # LlamaIndex
     "VizpathLlamaIndexCallback",
+    # OpenAI Agents
+    "VizpathAgentsTraceProcessor",
     # Semantic Kernel
     "SemanticKernelAdapter",
     "VizpathKernelFilter",
