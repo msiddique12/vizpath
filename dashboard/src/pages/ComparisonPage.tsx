@@ -1,14 +1,20 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Loader2, GitCompare, X } from 'lucide-react'
+import { Loader2, GitCompare, X, ArrowLeftRight, Sparkles } from 'lucide-react'
 import clsx from 'clsx'
+import { useSearchParams } from 'react-router-dom'
 import { compareTraces, getTraces, getTrace } from '@/lib/api'
 import { Trace } from '@/lib/types'
 import TraceComparison from '@/components/TraceComparison'
 
 export default function ComparisonPage() {
-  const [selectedTraceA, setSelectedTraceA] = useState<string | null>(null)
-  const [selectedTraceB, setSelectedTraceB] = useState<string | null>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [selectedTraceA, setSelectedTraceA] = useState<string | null>(
+    searchParams.get('traceA')
+  )
+  const [selectedTraceB, setSelectedTraceB] = useState<string | null>(
+    searchParams.get('traceB')
+  )
 
   const { data: tracesData, isLoading: tracesLoading } = useQuery({
     queryKey: ['traces', 50],
@@ -33,7 +39,25 @@ export default function ComparisonPage() {
     enabled: !!selectedTraceA && !!selectedTraceB,
   })
 
-  const traces = tracesData?.traces || []
+  const traces = useMemo(() => tracesData?.traces || [], [tracesData?.traces])
+
+  useEffect(() => {
+    const next = new URLSearchParams(window.location.search)
+    if (selectedTraceA) next.set('traceA', selectedTraceA)
+    else next.delete('traceA')
+    if (selectedTraceB) next.set('traceB', selectedTraceB)
+    else next.delete('traceB')
+    setSearchParams(next, { replace: true })
+  }, [selectedTraceA, selectedTraceB, setSearchParams])
+
+  const traceOptions = useMemo(
+    () =>
+      traces.map((trace: Trace) => ({
+        id: trace.id,
+        label: `${trace.name} - ${formatTimestamp(trace.created_at)}`,
+      })),
+    [traces]
+  )
 
   const handleSelectTrace = (traceId: string, slot: 'A' | 'B') => {
     if (slot === 'A') {
@@ -52,6 +76,17 @@ export default function ComparisonPage() {
     })
   }
 
+  const applyLatestTwo = () => {
+    if (traces.length < 2) return
+    setSelectedTraceA(traces[0].id)
+    setSelectedTraceB(traces[1].id)
+  }
+
+  const swapSelected = () => {
+    setSelectedTraceA(selectedTraceB)
+    setSelectedTraceB(selectedTraceA)
+  }
+
   const TraceSelector = ({
     slot,
     selected,
@@ -66,8 +101,8 @@ export default function ComparisonPage() {
     return (
       <div className="flex-1">
         <label className="block text-sm font-medium text-muted-200 mb-2">Trace {slot}</label>
-        {selected && selectedTrace ? (
-          <div className="flex items-center gap-2 bg-primary-900/20 border border-primary-800 rounded-lg px-3 py-2">
+            {selected && selectedTrace ? (
+              <div className="flex items-center gap-2 bg-primary-900/20 border border-primary-800 rounded-lg px-3 py-2">
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-muted-100 truncate">{selectedTrace.name}</p>
               <p className="text-xs text-muted-400">{formatTimestamp(selectedTrace.created_at)}</p>
@@ -86,11 +121,11 @@ export default function ComparisonPage() {
             onChange={(e) => handleSelectTrace(e.target.value, slot)}
           >
             <option value="">Select a trace...</option>
-            {traces
-              .filter((t: Trace) => t.id !== (slot === 'A' ? selectedTraceB : selectedTraceA))
-              .map((trace: Trace) => (
+            {traceOptions
+              .filter((t) => t.id !== (slot === 'A' ? selectedTraceB : selectedTraceA))
+              .map((trace) => (
                 <option key={trace.id} value={trace.id}>
-                  {trace.name} - {formatTimestamp(trace.created_at)}
+                  {trace.label}
                 </option>
               ))}
           </select>
@@ -120,6 +155,35 @@ export default function ComparisonPage() {
           </div>
         ) : (
           <>
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <button
+                onClick={applyLatestTwo}
+                disabled={traces.length < 2}
+                className={clsx(
+                  'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border',
+                  traces.length >= 2
+                    ? 'bg-dark-800 border-dark-700 text-muted-200 hover:bg-dark-700'
+                    : 'bg-dark-900 border-dark-700 text-muted-500 cursor-not-allowed'
+                )}
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                Use latest two traces
+              </button>
+              <button
+                onClick={swapSelected}
+                disabled={!selectedTraceA || !selectedTraceB}
+                className={clsx(
+                  'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border',
+                  selectedTraceA && selectedTraceB
+                    ? 'bg-dark-800 border-dark-700 text-muted-200 hover:bg-dark-700'
+                    : 'bg-dark-900 border-dark-700 text-muted-500 cursor-not-allowed'
+                )}
+              >
+                <ArrowLeftRight className="h-3.5 w-3.5" />
+                Swap A/B
+              </button>
+            </div>
+
             <div className="flex items-end gap-4 mb-6">
               <TraceSelector
                 slot="A"
