@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowLeft, Loader2, GitBranch, List, Grid2x2, X } from 'lucide-react'
+import { ArrowLeft, Loader2, GitBranch, List, Grid2x2, X, Link2, Check } from 'lucide-react'
 import clsx from 'clsx'
 import { getTrace } from '@/lib/api'
 import { exportTrace, ExportFormat } from '@/lib/export'
@@ -17,6 +17,7 @@ type ViewMode = 'timeline' | 'dag' | 'heatmap'
 export default function TraceDetailPage() {
   const { traceId } = useParams<{ traceId: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
+  const [copiedLink, setCopiedLink] = useState(false)
   const initialView = (searchParams.get('view') as ViewMode) || 'timeline'
   const [viewMode, setViewMode] = useState<ViewMode>(
     initialView === 'timeline' || initialView === 'dag' || initialView === 'heatmap'
@@ -24,6 +25,29 @@ export default function TraceDetailPage() {
       : 'timeline'
   )
   const focusSpanName = searchParams.get('span_name')?.trim() || ''
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      const tag = target?.tagName?.toLowerCase() || ''
+      const isTypingContext =
+        tag === 'input' || tag === 'textarea' || tag === 'select' || target?.isContentEditable
+      if (isTypingContext) return
+      if (event.key === '1') setViewMode('timeline')
+      if (event.key === '2') setViewMode('dag')
+      if (event.key === '3') setViewMode('heatmap')
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
+  useEffect(() => {
+    const next = new URLSearchParams(window.location.search)
+    if (next.get('view') === viewMode) return
+    next.set('view', viewMode)
+    setSearchParams(next, { replace: true })
+  }, [setSearchParams, viewMode])
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['trace', traceId],
@@ -76,7 +100,21 @@ export default function TraceDetailPage() {
               {trace.total_tokens && ` · ${trace.total_tokens.toLocaleString()} tokens`}
             </p>
           </div>
-          <ExportMenu onExport={handleExport} />
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={async () => {
+                await navigator.clipboard.writeText(window.location.href)
+                setCopiedLink(true)
+                setTimeout(() => setCopiedLink(false), 1200)
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm text-muted-200 hover:bg-dark-700"
+            >
+              {copiedLink ? <Check className="h-4 w-4 text-green-400" /> : <Link2 className="h-4 w-4" />}
+              {copiedLink ? 'Copied' : 'Copy link'}
+            </button>
+            <ExportMenu onExport={handleExport} />
+          </div>
         </div>
       </div>
 
