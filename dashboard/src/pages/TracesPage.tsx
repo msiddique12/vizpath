@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { formatDistanceToNow } from 'date-fns'
@@ -12,6 +12,7 @@ import {
   Search,
   Wifi,
   WifiOff,
+  X,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { getTraces } from '@/lib/api'
@@ -81,6 +82,7 @@ function TraceRow({ trace }: { trace: Trace }) {
 
 export default function TracesPage() {
   const queryClient = useQueryClient()
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('')
@@ -126,6 +128,24 @@ export default function TracesPage() {
     setPage(1)
   }, [search, statusFilter, minTokens, minCost, hasErrors, sortBy, sortOrder])
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      const tag = target?.tagName?.toLowerCase() || ''
+      const isTypingContext =
+        tag === 'input' || tag === 'textarea' || tag === 'select' || target?.isContentEditable
+
+      if (event.key === '/' && !isTypingContext) {
+        event.preventDefault()
+        searchInputRef.current?.focus()
+        searchInputRef.current?.select()
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
   const queryOptions = useMemo(() => {
     return {
       q: search.trim() || undefined,
@@ -160,6 +180,37 @@ export default function TracesPage() {
   const totalPages = data?.total ? Math.ceil(data.total / PAGE_SIZE) : 1
   const hasNextPage = page < totalPages
   const hasPrevPage = page > 1
+  const activeFilterChips = [
+    search ? { key: 'search', label: `Search: ${search}`, clear: () => setSearch('') } : null,
+    statusFilter
+      ? {
+          key: 'status',
+          label: `Status: ${statusFilter}`,
+          clear: () => setStatusFilter(''),
+        }
+      : null,
+    hasErrors
+      ? {
+          key: 'errors',
+          label: hasErrors === 'true' ? 'With errors only' : 'Without errors only',
+          clear: () => setHasErrors(''),
+        }
+      : null,
+    minTokens
+      ? {
+          key: 'minTokens',
+          label: `Min tokens: ${minTokens}`,
+          clear: () => setMinTokens(''),
+        }
+      : null,
+    minCost
+      ? {
+          key: 'minCost',
+          label: `Min cost: ${minCost}`,
+          clear: () => setMinCost(''),
+        }
+      : null,
+  ].filter(Boolean) as Array<{ key: string; label: string; clear: () => void }>
 
   if (isLoading) {
     return (
@@ -200,8 +251,14 @@ export default function TracesPage() {
           <label className="relative">
             <Search className="h-4 w-4 text-muted-500 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
+              ref={searchInputRef}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape' && search) {
+                  setSearch('')
+                }
+              }}
               placeholder="Search trace name"
               className="w-full bg-dark-800 border border-dark-700 rounded-lg pl-9 pr-3 py-2 text-sm text-muted-100 placeholder:text-muted-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
             />
@@ -324,6 +381,22 @@ export default function TracesPage() {
             Clear
           </button>
         </div>
+
+        {activeFilterChips.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            {activeFilterChips.map((chip) => (
+              <button
+                key={chip.key}
+                onClick={chip.clear}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-dark-800 border border-dark-700 text-muted-300 hover:text-muted-100 hover:bg-dark-700"
+                title={`Clear ${chip.label}`}
+              >
+                <span>{chip.label}</span>
+                <X className="h-3 w-3" />
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="bg-dark-900 rounded-lg border border-dark-700 divide-y divide-dark-700">
