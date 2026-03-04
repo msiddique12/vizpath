@@ -1,24 +1,24 @@
 """Tests for the Semantic Kernel adapter."""
 
+from __future__ import annotations
+
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from vizpath.adapters.semantic_kernel import (
     SemanticKernelAdapter,
     VizpathKernelFilter,
-    _ConversationContext,
     _capture_token_usage,
+    _ConversationContext,
     _extract_arguments,
     _extract_function_name,
     _extract_result,
     _infer_span_type,
     _safe_str,
-    _set_function_metadata,
 )
 from vizpath.span import SpanType
-
 
 # ---------------------------------------------------------------------------
 # Helpers to build fake SK context objects
