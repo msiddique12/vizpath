@@ -7,6 +7,7 @@ import ComparisonPage from './pages/ComparisonPage'
 import CostPage from './pages/CostPage'
 import CurationPage from './pages/CurationPage'
 import DemoPage from './pages/DemoPage'
+import ExperimentsPage from './pages/ExperimentsPage'
 
 interface ErrorBoundaryProps {
   children: ReactNode
@@ -82,6 +83,7 @@ function App() {
             <Route index element={<TracesPage />} />
             <Route path="traces" element={<TracesPage />} />
             <Route path="traces/:traceId" element={<TraceDetailPage />} />
+            <Route path="experiments" element={<ExperimentsPage />} />
             <Route path="compare" element={<ComparisonPage />} />
             <Route path="costs" element={<CostPage />} />
             <Route path="curation" element={<CurationPage />} />

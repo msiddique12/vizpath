@@ -83,6 +83,42 @@ export async function getTraceSpans(traceId: string): Promise<Span[]> {
   return fetchApi(`/traces/${traceId}/spans`)
 }
 
+export interface ExperimentSummary {
+  experiment_id: string
+  trace_count: number
+  latest_trace_id: string
+  latest_trace_name: string
+  latest_created_at: string
+  statuses: Record<'running' | 'success' | 'error', number>
+  avg_duration_ms: number | null
+  total_tokens: number | null
+  total_cost: number | null
+  error_rate: number
+  sample_compare_pair: { trace_a_id: string; trace_b_id: string } | null
+}
+
+export interface ExperimentListResponse {
+  field: 'run_id' | 'model' | 'prompt_version'
+  experiments: ExperimentSummary[]
+  total: number
+}
+
+export async function getExperiments(options?: {
+  field?: 'run_id' | 'model' | 'prompt_version'
+  limit?: number
+  offset?: number
+  include_ungrouped?: boolean
+}): Promise<ExperimentListResponse> {
+  const params = new URLSearchParams()
+  if (options?.field) params.set('field', options.field)
+  if (options?.limit !== undefined) params.set('limit', String(options.limit))
+  if (options?.offset !== undefined) params.set('offset', String(options.offset))
+  if (options?.include_ungrouped !== undefined) {
+    params.set('include_ungrouped', String(options.include_ungrouped))
+  }
+  return fetchApi(`/traces/experiments?${params}`)
+}
+
 // Curation API
 
 export interface CurationLabel {
