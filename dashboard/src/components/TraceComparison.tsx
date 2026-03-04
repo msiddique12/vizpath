@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import clsx from 'clsx'
 import { AlertTriangle, Loader2, TrendingDown, TrendingUp } from 'lucide-react'
 import { Link } from 'react-router-dom'
@@ -36,6 +36,13 @@ interface ChangeReasonGroup {
   severity: SeverityLevel
   signals: NonNullable<IntelligenceComparison['signals']>
   impactedMetrics: string[]
+}
+
+interface GuardrailConfig {
+  maxLatencyRegressionPct: number
+  maxTokenRegressionPct: number
+  maxCostRegressionPct: number
+  maxErrorIncrease: number
 }
 
 function formatDuration(ms: number | null | undefined): string {
@@ -105,6 +112,32 @@ export default function TraceComparison({
   intelligenceCompareLoading = false,
 }: TraceComparisonProps) {
   const [selectedSpanName, setSelectedSpanName] = useState<string | null>(null)
+  const [guardrails, setGuardrails] = useState<GuardrailConfig>({
+    maxLatencyRegressionPct: 20,
+    maxTokenRegressionPct: 25,
+    maxCostRegressionPct: 20,
+    maxErrorIncrease: 0,
+  })
+
+  useEffect(() => {
+    const saved = localStorage.getItem('compare_guardrails_v1')
+    if (!saved) return
+    try {
+      const parsed = JSON.parse(saved)
+      setGuardrails((prev) => ({
+        maxLatencyRegressionPct: Number(parsed.maxLatencyRegressionPct ?? prev.maxLatencyRegressionPct),
+        maxTokenRegressionPct: Number(parsed.maxTokenRegressionPct ?? prev.maxTokenRegressionPct),
+        maxCostRegressionPct: Number(parsed.maxCostRegressionPct ?? prev.maxCostRegressionPct),
+        maxErrorIncrease: Number(parsed.maxErrorIncrease ?? prev.maxErrorIncrease),
+      }))
+    } catch {
+      // Ignore malformed stored values.
+    }
+  }, [])
+
+  useEffect(() => {
+    localStorage.setItem('compare_guardrails_v1', JSON.stringify(guardrails))
+  }, [guardrails])
 
   const metrics = useMemo((): ComparisonMetric[] => {
     const durationA = traceA.trace.duration_ms || 0
@@ -248,6 +281,52 @@ export default function TraceComparison({
     )
   }, [intelligenceCompare])
 
+  const guardrailChecks = useMemo(() => {
+    if (!intelligenceCompare) return null
+
+    const findMetric = (name: string) => intelligenceCompare.metrics.find((metric) => metric.name === name)
+    const latency = findMetric('duration_ms')
+    const tokens = findMetric('total_tokens')
+    const cost = findMetric('total_cost')
+    const errors = findMetric('error_count')
+
+    const checks = [
+      {
+        key: 'latency',
+        label: `Latency regression <= ${guardrails.maxLatencyRegressionPct}%`,
+        actual: latency?.delta_pct ?? 0,
+        pass: (latency?.delta_pct ?? 0) <= guardrails.maxLatencyRegressionPct,
+        renderValue: `${(latency?.delta_pct ?? 0).toFixed(1)}%`,
+      },
+      {
+        key: 'tokens',
+        label: `Token regression <= ${guardrails.maxTokenRegressionPct}%`,
+        actual: tokens?.delta_pct ?? 0,
+        pass: (tokens?.delta_pct ?? 0) <= guardrails.maxTokenRegressionPct,
+        renderValue: `${(tokens?.delta_pct ?? 0).toFixed(1)}%`,
+      },
+      {
+        key: 'cost',
+        label: `Cost regression <= ${guardrails.maxCostRegressionPct}%`,
+        actual: cost?.delta_pct ?? 0,
+        pass: (cost?.delta_pct ?? 0) <= guardrails.maxCostRegressionPct,
+        renderValue: `${(cost?.delta_pct ?? 0).toFixed(1)}%`,
+      },
+      {
+        key: 'errors',
+        label: `Error increase <= ${guardrails.maxErrorIncrease}`,
+        actual: errors?.delta ?? 0,
+        pass: (errors?.delta ?? 0) <= guardrails.maxErrorIncrease,
+        renderValue: `${(errors?.delta ?? 0).toFixed(0)}`,
+      },
+    ]
+
+    return {
+      checks,
+      pass: checks.every((check) => check.pass),
+    }
+  }, [guardrails, intelligenceCompare])
+
   return (
     <div className="space-y-6">
       <div className="border border-dark-700 rounded-lg p-4 bg-dark-800/60">
@@ -364,6 +443,101 @@ export default function TraceComparison({
                     ))}
                   </div>
                 </details>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {guardrailChecks && (
+          <div className="mt-4 rounded border border-dark-700 bg-dark-900/70 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <h5 className="text-xs font-medium text-muted-200 uppercase tracking-wide">
+                Regression Guardrails
+              </h5>
+              <span
+                className={clsx(
+                  'text-[11px] px-2 py-0.5 rounded font-medium',
+                  guardrailChecks.pass
+                    ? 'bg-green-900/50 text-green-400'
+                    : 'bg-red-900/50 text-red-400'
+                )}
+              >
+                {guardrailChecks.pass ? 'PASS' : 'FAIL'}
+              </span>
+            </div>
+
+            <div className="mt-3 grid md:grid-cols-4 gap-2">
+              <input
+                type="number"
+                min={0}
+                value={guardrails.maxLatencyRegressionPct}
+                onChange={(event) =>
+                  setGuardrails((prev) => ({
+                    ...prev,
+                    maxLatencyRegressionPct: Number(event.target.value || 0),
+                  }))
+                }
+                className="bg-dark-800 border border-dark-700 rounded px-2 py-1 text-xs text-muted-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                aria-label="Max latency regression percent"
+                placeholder="Max latency %"
+              />
+              <input
+                type="number"
+                min={0}
+                value={guardrails.maxTokenRegressionPct}
+                onChange={(event) =>
+                  setGuardrails((prev) => ({
+                    ...prev,
+                    maxTokenRegressionPct: Number(event.target.value || 0),
+                  }))
+                }
+                className="bg-dark-800 border border-dark-700 rounded px-2 py-1 text-xs text-muted-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                aria-label="Max token regression percent"
+                placeholder="Max token %"
+              />
+              <input
+                type="number"
+                min={0}
+                value={guardrails.maxCostRegressionPct}
+                onChange={(event) =>
+                  setGuardrails((prev) => ({
+                    ...prev,
+                    maxCostRegressionPct: Number(event.target.value || 0),
+                  }))
+                }
+                className="bg-dark-800 border border-dark-700 rounded px-2 py-1 text-xs text-muted-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                aria-label="Max cost regression percent"
+                placeholder="Max cost %"
+              />
+              <input
+                type="number"
+                min={0}
+                value={guardrails.maxErrorIncrease}
+                onChange={(event) =>
+                  setGuardrails((prev) => ({
+                    ...prev,
+                    maxErrorIncrease: Number(event.target.value || 0),
+                  }))
+                }
+                className="bg-dark-800 border border-dark-700 rounded px-2 py-1 text-xs text-muted-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                aria-label="Max error increase"
+                placeholder="Max errors"
+              />
+            </div>
+
+            <div className="mt-3 space-y-1.5">
+              {guardrailChecks.checks.map((check) => (
+                <div key={check.key} className="flex items-center justify-between text-xs">
+                  <span className="text-muted-300">{check.label}</span>
+                  <span
+                    className={clsx(
+                      'px-1.5 py-0.5 rounded font-medium',
+                      check.pass ? 'bg-green-900/50 text-green-400' : 'bg-red-900/50 text-red-400'
+                    )}
+                  >
+                    {check.renderValue}
+                  </span>
+                </div>
               ))}
             </div>
           </div>
