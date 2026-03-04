@@ -323,10 +323,32 @@ export interface IntelligenceStatusResponse {
   base_url: string
 }
 
+export interface StoryModeSeedResponse {
+  scenario: 'agent_regression'
+  seeded: number
+  trace_ids: string[]
+  recommended_flow: {
+    compare: string
+    trace_baseline: string
+    trace_candidate: string
+    trace_recovery: string
+    curation: string
+  }
+}
+
 export async function getDetailedHealth(): Promise<HealthDetailedResponse> {
   return fetchRootApi('/health/detailed')
 }
 
 export async function getIntelligenceStatus(): Promise<IntelligenceStatusResponse> {
   return fetchApi('/intelligence/status')
+}
+
+export async function seedStoryMode(
+  scenario: 'agent_regression' = 'agent_regression'
+): Promise<StoryModeSeedResponse> {
+  return fetchApi('/demo/story-mode', {
+    method: 'POST',
+    body: JSON.stringify({ scenario }),
+  })
 }

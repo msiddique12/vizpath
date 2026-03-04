@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import clsx from 'clsx'
 import { CheckCircle2, Circle, Copy, ExternalLink, Loader2, PlayCircle, Server, Sparkles } from 'lucide-react'
-import { getDetailedHealth, getIntelligenceStatus } from '@/lib/api'
+import { getDetailedHealth, getIntelligenceStatus, seedStoryMode } from '@/lib/api'
 
 function StatusDot({ ok }: { ok: boolean }) {
   return ok ? (
@@ -35,6 +35,10 @@ export default function DemoPage() {
 
   const runCommand = 'python -m examples.code_agent.run "How does the intelligence module work?" -v'
   const startupCommand = './demo.sh'
+
+  const storyModeMutation = useMutation({
+    mutationFn: () => seedStoryMode('agent_regression'),
+  })
 
   const copyText = async (text: string, key: string) => {
     try {
@@ -95,6 +99,39 @@ export default function DemoPage() {
           <PlayCircle className="h-4 w-4" />
           Demo Checklist
         </h2>
+        <div className="mt-3 mb-3">
+          <button
+            onClick={async () => {
+              const data = await storyModeMutation.mutateAsync()
+              window.location.href = data.recommended_flow.compare
+            }}
+            disabled={storyModeMutation.isPending}
+            className={clsx(
+              'inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm border',
+              storyModeMutation.isPending
+                ? 'bg-dark-800 border-dark-700 text-muted-500 cursor-not-allowed'
+                : 'bg-primary-900/30 border-primary-800 text-primary-300 hover:bg-primary-900/45'
+            )}
+          >
+            {storyModeMutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Sparkles className="h-4 w-4" />
+            )}
+            Start Story Mode (seed + open compare)
+          </button>
+          {storyModeMutation.isError && (
+            <p className="text-xs text-red-400 mt-2">
+              Failed to seed story mode data. Confirm the API is running.
+            </p>
+          )}
+          {storyModeMutation.data && (
+            <p className="text-xs text-green-400 mt-2">
+              Seeded {storyModeMutation.data.seeded} traces for scenario{' '}
+              <span className="text-muted-100">{storyModeMutation.data.scenario}</span>.
+            </p>
+          )}
+        </div>
         <ol className="mt-3 space-y-3 text-sm text-muted-300">
           <li className="bg-dark-800 rounded-lg p-3">
             In terminal 1, run the stack startup script.
@@ -183,4 +220,3 @@ export default function DemoPage() {
     </div>
   )
 }
-
