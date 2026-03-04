@@ -1,7 +1,7 @@
 """Trace ingestion and retrieval endpoints."""
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -121,6 +121,20 @@ class ExperimentListResponse(BaseModel):
     field: str
     experiments: list[ExperimentSummaryResponse]
     total: int
+
+
+class TraceSummaryResponse(BaseModel):
+    """High-level KPIs for a time window."""
+
+    window_days: int
+    trace_count: int
+    success_rate: float
+    running_count: int
+    error_count: int
+    p50_duration_ms: float | None
+    p95_duration_ms: float | None
+    avg_tokens: float | None
+    avg_cost: float | None
 
 
 class SpanResponse(BaseModel):
@@ -279,6 +293,18 @@ def _to_experiment_summaries(
 
     summaries.sort(key=lambda exp: exp.latest_created_at, reverse=True)
     return summaries
+
+
+def _percentile(sorted_values: list[float], percentile: float) -> float | None:
+    if not sorted_values:
+        return None
+    if len(sorted_values) == 1:
+        return sorted_values[0]
+    rank = (percentile / 100) * (len(sorted_values) - 1)
+    lower = int(rank)
+    upper = min(lower + 1, len(sorted_values) - 1)
+    weight = rank - lower
+    return sorted_values[lower] * (1 - weight) + sorted_values[upper] * weight
 
 
 @router.post("/spans/batch", status_code=201)
@@ -480,6 +506,70 @@ async def list_experiments(
         field=field,
         experiments=paginated,
         total=total,
+    )
+
+
+@router.get("/summary", response_model=TraceSummaryResponse)
+async def trace_summary(
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+    window_days: int = Query(default=7, ge=1, le=90),
+) -> TraceSummaryResponse:
+    """Return top-level KPIs for traces in the selected time window."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=window_days)
+    traces = (
+        db.query(Trace)
+        .filter(Trace.project_id == project.id, Trace.created_at >= cutoff)
+        .order_by(Trace.created_at.desc())
+        .limit(5000)
+        .all()
+    )
+
+    if not traces:
+        return TraceSummaryResponse(
+            window_days=window_days,
+            trace_count=0,
+            success_rate=0.0,
+            running_count=0,
+            error_count=0,
+            p50_duration_ms=None,
+            p95_duration_ms=None,
+            avg_tokens=None,
+            avg_cost=None,
+        )
+
+    trace_count = len(traces)
+    success_count = sum(1 for trace in traces if trace.status == "success")
+    running_count = sum(1 for trace in traces if trace.status == "running")
+    error_count = sum(1 for trace in traces if trace.status == "error")
+    durations: list[float] = [trace.duration_ms for trace in traces if trace.duration_ms is not None]
+    missing_duration_ids = [trace.id for trace in traces if trace.duration_ms is None]
+    if missing_duration_ids:
+        fallback_rows = (
+            db.query(Span.trace_id, func.sum(Span.duration_ms))
+            .filter(Span.trace_id.in_(missing_duration_ids))
+            .group_by(Span.trace_id)
+            .all()
+        )
+        durations.extend(
+            float(total_duration)
+            for _trace_id, total_duration in fallback_rows
+            if total_duration is not None
+        )
+    durations = sorted(durations)
+    tokens = [trace.total_tokens for trace in traces if trace.total_tokens is not None]
+    costs = [trace.total_cost for trace in traces if trace.total_cost is not None]
+
+    return TraceSummaryResponse(
+        window_days=window_days,
+        trace_count=trace_count,
+        success_rate=(success_count / trace_count) * 100,
+        running_count=running_count,
+        error_count=error_count,
+        p50_duration_ms=_percentile(durations, 50),
+        p95_duration_ms=_percentile(durations, 95),
+        avg_tokens=(sum(tokens) / len(tokens)) if tokens else None,
+        avg_cost=(sum(costs) / len(costs)) if costs else None,
     )
 
 

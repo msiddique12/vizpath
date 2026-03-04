@@ -459,3 +459,48 @@ class TestTraceRetrieval:
         data = response.json()
         assert data["total"] == 1
         assert data["experiments"][0]["experiment_id"] == "ungrouped"
+
+    def test_trace_summary_empty_window(self, client):
+        response = client.get("/api/v1/traces/summary?window_days=7")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["trace_count"] == 0
+        assert data["success_rate"] == 0
+        assert data["p50_duration_ms"] is None
+
+    def test_trace_summary_with_data(self, client):
+        now = datetime.now(timezone.utc).isoformat()
+        payload = [
+            {
+                "span_id": "span-summary-1",
+                "trace_id": "trace-summary-1",
+                "name": "agent.plan",
+                "status": "success",
+                "start_time": now,
+                "duration_ms": 1000,
+                "tokens": 100,
+                "cost": 0.01,
+            },
+            {
+                "span_id": "span-summary-2",
+                "trace_id": "trace-summary-2",
+                "name": "agent.plan",
+                "status": "error",
+                "trace_status": "error",
+                "start_time": now,
+                "duration_ms": 2000,
+                "tokens": 300,
+                "cost": 0.05,
+            },
+        ]
+        ingest = client.post("/api/v1/traces/spans/batch", json=payload)
+        assert ingest.status_code == 201
+
+        response = client.get("/api/v1/traces/summary?window_days=7")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["trace_count"] == 2
+        assert data["error_count"] == 1
+        assert data["success_rate"] == 50.0
+        assert data["p50_duration_ms"] is not None
+        assert data["avg_tokens"] == 200.0
