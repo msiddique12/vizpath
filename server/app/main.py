@@ -14,7 +14,7 @@ from app import __version__
 from app.config import settings
 from app.database import check_db_connection, engine, init_db
 from app.rate_limit import rate_limit_middleware
-from app.routes import curation, intelligence, projects, traces, ws
+from app.routes import curation, demo, intelligence, projects, traces, ws
 from app.security import (
     build_error_response,
     redact_headers,
@@ -72,6 +72,7 @@ app.include_router(traces.router, prefix="/api/v1")
 app.include_router(projects.router, prefix="/api/v1")
 app.include_router(curation.router, prefix="/api/v1")
 app.include_router(intelligence.router, prefix="/api/v1")
+app.include_router(demo.router, prefix="/api/v1")
 app.include_router(ws.router)
 
 
