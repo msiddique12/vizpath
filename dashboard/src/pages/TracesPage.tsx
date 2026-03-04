@@ -15,7 +15,7 @@ import {
   X,
 } from 'lucide-react'
 import clsx from 'clsx'
-import { getTraces } from '@/lib/api'
+import { getTraceSummary, getTraces } from '@/lib/api'
 import { Trace, SpanStatus } from '@/lib/types'
 import { useWebSocket } from '@/hooks/useWebSocket'
 
@@ -91,6 +91,7 @@ export default function TracesPage() {
   const [hasErrors, setHasErrors] = useState<'' | 'true' | 'false'>('')
   const [sortBy, setSortBy] = useState<SortBy>('created_at')
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
+  const [summaryWindowDays, setSummaryWindowDays] = useState<7 | 30>(7)
 
   useEffect(() => {
     const saved = localStorage.getItem('traces_filters_v1')
@@ -177,6 +178,12 @@ export default function TracesPage() {
     refetchInterval: connected ? false : 5000,
   })
 
+  const summaryQuery = useQuery({
+    queryKey: ['trace-summary', summaryWindowDays],
+    queryFn: () => getTraceSummary(summaryWindowDays),
+    refetchInterval: connected ? false : 5000,
+  })
+
   const totalPages = data?.total ? Math.ceil(data.total / PAGE_SIZE) : 1
   const hasNextPage = page < totalPages
   const hasPrevPage = page > 1
@@ -245,6 +252,77 @@ export default function TracesPage() {
           {connected ? 'Live' : 'Polling'}
         </div>
       </div>
+
+      {summaryQuery.data && (
+        <div className="mb-4 bg-dark-900 rounded-lg border border-dark-700 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-medium text-muted-200">KPI Summary</h2>
+            <div className="flex items-center gap-1 bg-dark-800 rounded-lg p-1">
+              <button
+                onClick={() => setSummaryWindowDays(7)}
+                className={clsx(
+                  'px-2 py-1 text-xs rounded',
+                  summaryWindowDays === 7
+                    ? 'bg-dark-700 text-muted-100'
+                    : 'text-muted-400 hover:text-muted-200'
+                )}
+              >
+                7d
+              </button>
+              <button
+                onClick={() => setSummaryWindowDays(30)}
+                className={clsx(
+                  'px-2 py-1 text-xs rounded',
+                  summaryWindowDays === 30
+                    ? 'bg-dark-700 text-muted-100'
+                    : 'text-muted-400 hover:text-muted-200'
+                )}
+              >
+                30d
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div className="bg-dark-800 rounded-lg p-3">
+              <p className="text-xs text-muted-400">Success rate</p>
+              <p className="text-sm text-muted-100 mt-1">{summaryQuery.data.success_rate.toFixed(1)}%</p>
+            </div>
+            <div className="bg-dark-800 rounded-lg p-3">
+              <p className="text-xs text-muted-400">p50 latency</p>
+              <p className="text-sm text-muted-100 mt-1">
+                {summaryQuery.data.p50_duration_ms
+                  ? summaryQuery.data.p50_duration_ms < 1000
+                    ? `${summaryQuery.data.p50_duration_ms.toFixed(0)}ms`
+                    : `${(summaryQuery.data.p50_duration_ms / 1000).toFixed(2)}s`
+                  : '-'}
+              </p>
+            </div>
+            <div className="bg-dark-800 rounded-lg p-3">
+              <p className="text-xs text-muted-400">p95 latency</p>
+              <p className="text-sm text-muted-100 mt-1">
+                {summaryQuery.data.p95_duration_ms
+                  ? summaryQuery.data.p95_duration_ms < 1000
+                    ? `${summaryQuery.data.p95_duration_ms.toFixed(0)}ms`
+                    : `${(summaryQuery.data.p95_duration_ms / 1000).toFixed(2)}s`
+                  : '-'}
+              </p>
+            </div>
+            <div className="bg-dark-800 rounded-lg p-3">
+              <p className="text-xs text-muted-400">Avg tokens</p>
+              <p className="text-sm text-muted-100 mt-1">
+                {summaryQuery.data.avg_tokens ? summaryQuery.data.avg_tokens.toFixed(0) : '-'}
+              </p>
+            </div>
+            <div className="bg-dark-800 rounded-lg p-3">
+              <p className="text-xs text-muted-400">Avg cost</p>
+              <p className="text-sm text-muted-100 mt-1">
+                {summaryQuery.data.avg_cost ? `$${summaryQuery.data.avg_cost.toFixed(4)}` : '-'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="mb-4 bg-dark-900 rounded-lg border border-dark-700 p-4 space-y-3">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">

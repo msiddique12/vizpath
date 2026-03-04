@@ -103,6 +103,18 @@ export interface ExperimentListResponse {
   total: number
 }
 
+export interface TraceSummaryResponse {
+  window_days: number
+  trace_count: number
+  success_rate: number
+  running_count: number
+  error_count: number
+  p50_duration_ms: number | null
+  p95_duration_ms: number | null
+  avg_tokens: number | null
+  avg_cost: number | null
+}
+
 export async function getExperiments(options?: {
   field?: 'run_id' | 'model' | 'prompt_version'
   limit?: number
@@ -117,6 +129,10 @@ export async function getExperiments(options?: {
     params.set('include_ungrouped', String(options.include_ungrouped))
   }
   return fetchApi(`/traces/experiments?${params}`)
+}
+
+export async function getTraceSummary(windowDays = 7): Promise<TraceSummaryResponse> {
+  return fetchApi(`/traces/summary?window_days=${windowDays}`)
 }
 
 // Curation API
