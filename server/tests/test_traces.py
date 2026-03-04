@@ -1,6 +1,6 @@
 """Tests for trace ingestion and retrieval endpoints."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.auth import hash_api_key
 from app.models import Project
@@ -397,3 +397,65 @@ class TestTraceRetrieval:
         assert trace["total_tokens"] == 150
         assert trace["error_count"] == 1
         assert trace["status"] == "error"
+
+    def test_list_experiments_by_run_id(self, client):
+        now = datetime.now(timezone.utc)
+        payload = [
+            {
+                "span_id": "span-exp-1",
+                "trace_id": "trace-exp-1",
+                "name": "agent.plan",
+                "start_time": now.isoformat(),
+                "duration_ms": 400,
+                "trace_metadata": {"run_id": "exp-alpha", "model": "nemo-a"},
+            },
+            {
+                "span_id": "span-exp-2",
+                "trace_id": "trace-exp-2",
+                "name": "agent.plan",
+                "start_time": (now + timedelta(seconds=1)).isoformat(),
+                "duration_ms": 700,
+                "status": "error",
+                "trace_status": "error",
+                "trace_metadata": {"run_id": "exp-alpha", "model": "nemo-a"},
+            },
+            {
+                "span_id": "span-exp-3",
+                "trace_id": "trace-exp-3",
+                "name": "agent.plan",
+                "start_time": (now + timedelta(seconds=2)).isoformat(),
+                "duration_ms": 300,
+                "trace_metadata": {"run_id": "exp-beta", "model": "nemo-b"},
+            },
+        ]
+        ingest = client.post("/api/v1/traces/spans/batch", json=payload)
+        assert ingest.status_code == 201
+
+        response = client.get("/api/v1/traces/experiments?field=run_id")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["field"] == "run_id"
+        assert data["total"] == 2
+
+        exp_alpha = next(exp for exp in data["experiments"] if exp["experiment_id"] == "exp-alpha")
+        assert exp_alpha["trace_count"] == 2
+        assert exp_alpha["statuses"]["error"] == 1
+        assert exp_alpha["sample_compare_pair"] is not None
+
+    def test_list_experiments_can_include_ungrouped(self, client):
+        payload = [
+            {
+                "span_id": "span-ungrouped-1",
+                "trace_id": "trace-ungrouped-1",
+                "name": "agent.plan",
+                "start_time": datetime.now(timezone.utc).isoformat(),
+            }
+        ]
+        ingest = client.post("/api/v1/traces/spans/batch", json=payload)
+        assert ingest.status_code == 201
+
+        response = client.get("/api/v1/traces/experiments?include_ungrouped=true")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 1
+        assert data["experiments"][0]["experiment_id"] == "ungrouped"

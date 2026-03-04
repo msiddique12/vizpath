@@ -99,6 +99,30 @@ class TraceListResponse(BaseModel):
     offset: int
 
 
+class ExperimentSummaryResponse(BaseModel):
+    """Summary for an experiment group (run/model/prompt version)."""
+
+    experiment_id: str
+    trace_count: int
+    latest_trace_id: str
+    latest_trace_name: str
+    latest_created_at: datetime
+    statuses: dict[str, int]
+    avg_duration_ms: float | None
+    total_tokens: int | None
+    total_cost: float | None
+    error_rate: float
+    sample_compare_pair: dict[str, str] | None
+
+
+class ExperimentListResponse(BaseModel):
+    """Response schema for experiment list."""
+
+    field: str
+    experiments: list[ExperimentSummaryResponse]
+    total: int
+
+
 class SpanResponse(BaseModel):
     """Response schema for span details."""
 
@@ -188,6 +212,73 @@ def _topological_sort_spans(spans: list[SpanCreate]) -> list[SpanCreate]:
         queue.extend(children.get(span_id, []))
 
     return sorted_spans
+
+
+def _to_experiment_summaries(
+    traces: list[Trace],
+    field: str,
+    include_ungrouped: bool,
+) -> list[ExperimentSummaryResponse]:
+    groups: dict[str, list[Trace]] = {}
+
+    for trace in traces:
+        metadata = trace.trace_metadata or {}
+        raw_value = metadata.get(field)
+        if raw_value is None:
+            if not include_ungrouped:
+                continue
+            value = "ungrouped"
+        else:
+            value = str(raw_value).strip() or "ungrouped"
+            if value == "ungrouped" and not include_ungrouped:
+                continue
+        groups.setdefault(value, []).append(trace)
+
+    summaries: list[ExperimentSummaryResponse] = []
+    for experiment_id, members in groups.items():
+        sorted_members = sorted(members, key=lambda t: t.created_at, reverse=True)
+        latest = sorted_members[0]
+        status_counts = {"running": 0, "success": 0, "error": 0}
+        durations: list[float] = []
+        total_tokens = 0
+        total_cost = 0.0
+        total_errors = 0
+        for member in members:
+            if member.status in status_counts:
+                status_counts[member.status] += 1
+            if member.duration_ms is not None:
+                durations.append(member.duration_ms)
+            if member.total_tokens is not None:
+                total_tokens += member.total_tokens
+            if member.total_cost is not None:
+                total_cost += member.total_cost
+            total_errors += member.error_count or 0
+
+        sample_compare_pair = None
+        if len(sorted_members) >= 2:
+            sample_compare_pair = {
+                "trace_a_id": str(sorted_members[1].id),
+                "trace_b_id": str(sorted_members[0].id),
+            }
+
+        summaries.append(
+            ExperimentSummaryResponse(
+                experiment_id=experiment_id,
+                trace_count=len(members),
+                latest_trace_id=str(latest.id),
+                latest_trace_name=latest.name,
+                latest_created_at=latest.created_at,
+                statuses=status_counts,
+                avg_duration_ms=(sum(durations) / len(durations)) if durations else None,
+                total_tokens=total_tokens if total_tokens > 0 else None,
+                total_cost=total_cost if total_cost > 0 else None,
+                error_rate=(total_errors / len(members)),
+                sample_compare_pair=sample_compare_pair,
+            )
+        )
+
+    summaries.sort(key=lambda exp: exp.latest_created_at, reverse=True)
+    return summaries
 
 
 @router.post("/spans/batch", status_code=201)
@@ -356,6 +447,39 @@ async def list_traces(
         total=total,
         limit=limit,
         offset=offset,
+    )
+
+
+@router.get("/experiments", response_model=ExperimentListResponse)
+async def list_experiments(
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+    field: str = Query(default="run_id", pattern="^(run_id|model|prompt_version)$"),
+    limit: int = Query(default=20, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    include_ungrouped: bool = Query(default=False),
+) -> ExperimentListResponse:
+    """Group traces into experiments using metadata fields (run/model/prompt version)."""
+    traces = (
+        db.query(Trace)
+        .filter(Trace.project_id == project.id)
+        .order_by(Trace.created_at.desc())
+        .limit(5000)
+        .all()
+    )
+
+    summaries = _to_experiment_summaries(
+        traces=traces,
+        field=field,
+        include_ungrouped=include_ungrouped,
+    )
+
+    total = len(summaries)
+    paginated = summaries[offset : offset + limit]
+    return ExperimentListResponse(
+        field=field,
+        experiments=paginated,
+        total=total,
     )
 
 
