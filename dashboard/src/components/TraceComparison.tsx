@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import clsx from 'clsx'
-import { AlertTriangle, Loader2, TrendingDown, TrendingUp } from 'lucide-react'
+import { AlertTriangle, Check, Copy, Loader2, TrendingDown, TrendingUp } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { IntelligenceComparison } from '@/lib/api'
 import { Span, Trace } from '@/lib/types'
@@ -112,6 +112,7 @@ export default function TraceComparison({
   intelligenceCompareLoading = false,
 }: TraceComparisonProps) {
   const [selectedSpanName, setSelectedSpanName] = useState<string | null>(null)
+  const [copiedReport, setCopiedReport] = useState(false)
   const [guardrails, setGuardrails] = useState<GuardrailConfig>({
     maxLatencyRegressionPct: 20,
     maxTokenRegressionPct: 25,
@@ -327,6 +328,46 @@ export default function TraceComparison({
     }
   }, [guardrails, intelligenceCompare])
 
+  const compareReport = useMemo(() => {
+    if (!intelligenceCompare || !guardrailChecks) return null
+    const lines = [
+      `# Vizpath Compare Report`,
+      ``,
+      `- Trace A: ${traceA.trace.name} (${traceA.trace.id})`,
+      `- Trace B: ${traceB.trace.name} (${traceB.trace.id})`,
+      `- Status: ${intelligenceCompare.summary.status}`,
+      `- Regression score: ${intelligenceCompare.summary.regression_score}`,
+      `- Guardrails: ${guardrailChecks.pass ? "PASS" : "FAIL"}`,
+      ``,
+      `## Top Signals`,
+    ]
+
+    const topSignals = intelligenceCompare.signals.slice(0, 5)
+    if (topSignals.length === 0) {
+      lines.push(`- No major signals detected.`)
+    } else {
+      for (const signal of topSignals) {
+        lines.push(`- [${signal.severity}] ${signal.title}: ${signal.detail}`)
+      }
+    }
+
+    lines.push(``, `## Top Actions`)
+    if (intelligenceCompare.top_actions.length === 0) {
+      lines.push(`- None`)
+    } else {
+      for (const action of intelligenceCompare.top_actions) {
+        lines.push(`- ${action}`)
+      }
+    }
+
+    lines.push(``, `## Guardrail Checks`)
+    for (const check of guardrailChecks.checks) {
+      lines.push(`- ${check.pass ? "PASS" : "FAIL"} ${check.label} (actual: ${check.renderValue})`)
+    }
+
+    return lines.join('\n')
+  }, [guardrailChecks, intelligenceCompare, traceA.trace.id, traceA.trace.name, traceB.trace.id, traceB.trace.name])
+
   return (
     <div className="space-y-6">
       <div className="border border-dark-700 rounded-lg p-4 bg-dark-800/60">
@@ -341,22 +382,37 @@ export default function TraceComparison({
             <Loader2 className="h-4 w-4 text-primary-500 animate-spin mt-1" />
           ) : (
             intelligenceCompare && (
-              <span
-                className={clsx(
-                  'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium',
-                  intelligenceCompare.summary.status === 'regressed' &&
-                    'bg-red-900/50 text-red-400',
-                  intelligenceCompare.summary.status === 'mixed' &&
-                    'bg-yellow-900/50 text-yellow-300',
-                  intelligenceCompare.summary.status === 'improved' &&
-                    'bg-green-900/50 text-green-400',
-                  intelligenceCompare.summary.status === 'neutral' &&
-                    'bg-dark-700 text-muted-300'
-                )}
-              >
-                {intelligenceCompare.summary.status.toUpperCase()} · Score{' '}
-                {intelligenceCompare.summary.regression_score}
-              </span>
+              <div className="flex items-center gap-2">
+                <span
+                  className={clsx(
+                    'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium',
+                    intelligenceCompare.summary.status === 'regressed' &&
+                      'bg-red-900/50 text-red-400',
+                    intelligenceCompare.summary.status === 'mixed' &&
+                      'bg-yellow-900/50 text-yellow-300',
+                    intelligenceCompare.summary.status === 'improved' &&
+                      'bg-green-900/50 text-green-400',
+                    intelligenceCompare.summary.status === 'neutral' &&
+                      'bg-dark-700 text-muted-300'
+                  )}
+                >
+                  {intelligenceCompare.summary.status.toUpperCase()} · Score{' '}
+                  {intelligenceCompare.summary.regression_score}
+                </span>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!compareReport) return
+                    await navigator.clipboard.writeText(compareReport)
+                    setCopiedReport(true)
+                    setTimeout(() => setCopiedReport(false), 1400)
+                  }}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs border border-dark-700 bg-dark-900 text-muted-300 hover:text-muted-100 hover:bg-dark-800"
+                >
+                  {copiedReport ? <Check className="h-3.5 w-3.5 text-green-400" /> : <Copy className="h-3.5 w-3.5" />}
+                  {copiedReport ? 'Copied report' : 'Copy report'}
+                </button>
+              </div>
             )
           )}
         </div>
