@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Awaitable
+from collections.abc import Awaitable
+from typing import Any, Callable
 
 from vizpath.span import SpanType
 from vizpath.tracer import Tracer
@@ -98,7 +99,7 @@ class VizpathKernelFilter:
             span.__exit__(None, None, None)
             self._spans.pop(span_id, None)
 
-    def trace_conversation(self, name: str = "sk-conversation") -> "_ConversationContext":
+    def trace_conversation(self, name: str = "sk-conversation") -> _ConversationContext:
         """
         Return a context manager that scopes a single multi-turn trace.
 

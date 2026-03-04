@@ -41,7 +41,7 @@ class TracedPipeline:
                     )
                 else:
                     result = self._pipeline.run(data, **kwargs)
-            except Exception as e:
+            except Exception:
                 # Let trace context manager handle error status
                 raise
 
@@ -232,7 +232,7 @@ class _HaystackSpanContext:
         self._tags = tags
         self._span_id: str | None = None
 
-    def __enter__(self) -> "_HaystackSpanContext":
+    def __enter__(self) -> _HaystackSpanContext:
         component_type = self._tags.get("haystack.component.type")
         inputs = self._tags.get("haystack.component.input")
         self._span_id = self._vizpath_tracer.trace_component(
