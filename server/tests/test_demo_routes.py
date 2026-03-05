@@ -1,5 +1,7 @@
 """Tests for demo helper endpoints."""
 
+from unittest.mock import patch
+
 from app.models import Span, Trace
 
 
@@ -24,3 +26,24 @@ class TestStoryModeEndpoint:
     def test_story_mode_rejects_unknown_scenario(self, client):
         response = client.post("/api/v1/demo/story-mode", json={"scenario": "anything_else"})
         assert response.status_code == 422
+
+
+class TestDemoPreflight:
+    def test_preflight_reports_required_checks(self, client):
+        with (
+            patch("app.routes.demo.check_db_connection", return_value=True),
+            patch("app.routes.demo.redis.from_url") as mock_redis,
+        ):
+            mock_redis.return_value.ping.return_value = True
+
+            response = client.get("/api/v1/demo/preflight")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["ready"] is True
+        assert data["can_seed"] is True
+        assert data["blockers"] == []
+        check_map = {item["component"]: item for item in data["checks"]}
+        assert check_map["database"]["status"] == "ok"
+        assert check_map["database"]["required"] is True
+        assert check_map["redis"]["required"] is False

@@ -369,6 +369,19 @@ export interface HealthDetailedResponse {
   }
 }
 
+export interface DemoPreflightResponse {
+  ready: boolean
+  can_seed: boolean
+  checks: Array<{
+    component: 'database' | 'redis' | 'intelligence' | string
+    status: 'ok' | 'warning' | 'error'
+    required: boolean
+    message: string
+  }>
+  blockers: string[]
+  recommendations: string[]
+}
+
 export interface IntelligenceStatusResponse {
   nvidia_api_key_configured: boolean
   model: string
@@ -390,6 +403,10 @@ export interface StoryModeSeedResponse {
 
 export async function getDetailedHealth(): Promise<HealthDetailedResponse> {
   return fetchRootApi('/health/detailed')
+}
+
+export async function getDemoPreflight(): Promise<DemoPreflightResponse> {
+  return fetchApi('/demo/preflight')
 }
 
 export async function getIntelligenceStatus(): Promise<IntelligenceStatusResponse> {

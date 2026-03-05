@@ -2,7 +2,13 @@ import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import clsx from 'clsx'
 import { CheckCircle2, Circle, Copy, ExternalLink, Loader2, PlayCircle, Server, Sparkles } from 'lucide-react'
-import { getDetailedHealth, getIntelligenceStatus, seedStoryMode } from '@/lib/api'
+import {
+  getDemoPreflight,
+  getDetailedHealth,
+  getIntelligenceStatus,
+  seedStoryMode,
+  type DemoPreflightResponse,
+} from '@/lib/api'
 
 function StatusDot({ ok }: { ok: boolean }) {
   return ok ? (
@@ -21,17 +27,28 @@ export default function DemoPage() {
     refetchInterval: 5000,
   })
 
+  const preflightQuery = useQuery({
+    queryKey: ['demo-preflight'],
+    queryFn: getDemoPreflight,
+    refetchInterval: 5000,
+  })
+
   const intelligenceQuery = useQuery({
     queryKey: ['intelligence-status'],
     queryFn: getIntelligenceStatus,
     refetchInterval: 5000,
   })
 
-  const isLoading = healthQuery.isLoading || intelligenceQuery.isLoading
+  const isLoading =
+    healthQuery.isLoading || intelligenceQuery.isLoading || preflightQuery.isLoading
   const dbReady = healthQuery.data?.checks.database?.status === 'healthy'
   const redisReady = healthQuery.data?.checks.redis?.status === 'healthy'
   const apiReady = healthQuery.data?.status === 'healthy' || healthQuery.data?.status === 'degraded'
   const nimReady = intelligenceQuery.data?.nvidia_api_key_configured ?? false
+  const preflightData: DemoPreflightResponse | undefined = preflightQuery.data
+  const canSeedStory = preflightData?.can_seed ?? false
+  const demoBlockers = preflightData?.blockers ?? []
+  const demoRecommendations = preflightData?.recommendations ?? []
 
   const runCommand = 'python -m examples.code_agent.run "How does the intelligence module work?" -v'
   const startupCommand = './demo.sh'
@@ -105,25 +122,39 @@ export default function DemoPage() {
               const data = await storyModeMutation.mutateAsync()
               window.location.href = data.recommended_flow.compare
             }}
-            disabled={storyModeMutation.isPending}
+            disabled={storyModeMutation.isPending || !canSeedStory}
             className={clsx(
               'inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm border',
-              storyModeMutation.isPending
+              storyModeMutation.isPending || !canSeedStory
                 ? 'bg-dark-800 border-dark-700 text-muted-500 cursor-not-allowed'
                 : 'bg-primary-900/30 border-primary-800 text-primary-300 hover:bg-primary-900/45'
             )}
           >
-            {storyModeMutation.isPending ? (
+            {storyModeMutation.isPending || !canSeedStory ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <Sparkles className="h-4 w-4" />
             )}
-            Start Story Mode (seed + open compare)
+            {!canSeedStory ? 'Waiting for database readiness' : 'Start Story Mode (seed + open compare)'}
           </button>
           {storyModeMutation.isError && (
             <p className="text-xs text-red-400 mt-2">
               Failed to seed story mode data. Confirm the API is running.
             </p>
+          )}
+          {demoBlockers.length > 0 && (
+            <div className="mt-2 text-xs text-red-400">
+              {demoBlockers.map((item, index) => (
+                <div key={`${item}-${index}`}>• {item}</div>
+              ))}
+            </div>
+          )}
+          {demoRecommendations.length > 0 && demoBlockers.length === 0 && (
+            <div className="mt-2 text-xs text-amber-400">
+              {demoRecommendations.map((item, index) => (
+                <div key={`${item}-${index}`}>• {item}</div>
+              ))}
+            </div>
           )}
           {storyModeMutation.data && (
             <p className="text-xs text-green-400 mt-2">

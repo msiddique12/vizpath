@@ -1,14 +1,18 @@
 """Demo helper endpoints for one-click story mode setup."""
 
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 from typing import Any
+from uuid import uuid4
 
+import redis
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from app.auth import verify_api_key
-from app.database import get_db
+from app.config import settings
+from app.database import check_db_connection, get_db
 from app.models import Project, Span, Trace
 from app.routes.ws import notify_span_ingested
 
@@ -21,12 +25,37 @@ class StoryModeRequest(BaseModel):
     scenario: str = Field(default="agent_regression", pattern="^(agent_regression)$")
 
 
+class DemoCheckStatus(str, Enum):
+    OK = "ok"
+    WARNING = "warning"
+    ERROR = "error"
+
+
+class DemoPreflightCheck(BaseModel):
+    component: str
+    status: DemoCheckStatus
+    required: bool
+    message: str
+
+
+class DemoPreflightResponse(BaseModel):
+    ready: bool
+    can_seed: bool
+    checks: list[DemoPreflightCheck]
+    blockers: list[str]
+    recommendations: list[str]
+
+
 def _build_trace_payloads(now: datetime) -> list[dict[str, Any]]:
     """Build deterministic trace payloads for live demo storytelling."""
     base_id = now.strftime("%Y%m%d%H%M%S")
+    seed_suffix = uuid4().hex[:8]
     trace_a_id = f"demo-{base_id}-baseline"
     trace_b_id = f"demo-{base_id}-regression"
     trace_c_id = f"demo-{base_id}-recovery"
+    trace_a_id = f"{trace_a_id}-{seed_suffix}"
+    trace_b_id = f"{trace_b_id}-{seed_suffix}"
+    trace_c_id = f"{trace_c_id}-{seed_suffix}"
 
     start_a = now - timedelta(minutes=4)
     start_b = now - timedelta(minutes=3)
@@ -274,3 +303,73 @@ async def seed_story_mode(
             "curation": "/curation",
         },
     }
+
+
+def _build_demo_preflight() -> DemoPreflightResponse:
+    checks: list[DemoPreflightCheck] = []
+    blockers: list[str] = []
+    recommendations: list[str] = []
+
+    db_ready = bool(check_db_connection())
+    checks.append(
+        DemoPreflightCheck(
+            component="database",
+            status=DemoCheckStatus.OK if db_ready else DemoCheckStatus.ERROR,
+            required=True,
+            message="Database reachable" if db_ready else "Database not reachable",
+        )
+    )
+    if not db_ready:
+        blockers.append("Start PostgreSQL and ensure DATABASE_URL is valid.")
+
+    redis_ready = False
+    try:
+        redis_client = redis.from_url(settings.redis_url)
+        redis_ready = bool(redis_client.ping())
+    except Exception:
+        redis_ready = False
+    checks.append(
+        DemoPreflightCheck(
+            component="redis",
+            status=DemoCheckStatus.OK if redis_ready else DemoCheckStatus.WARNING,
+            required=False,
+            message="Redis reachable" if redis_ready else "Redis not reachable (optional for demo)",
+        )
+    )
+    if not redis_ready:
+        recommendations.append("Start Redis if you want live websocket streaming during the demo.")
+
+    intelligence_ready = bool(settings.nvidia_api_key)
+    checks.append(
+        DemoPreflightCheck(
+            component="intelligence",
+            status=DemoCheckStatus.OK
+            if intelligence_ready
+            else DemoCheckStatus.WARNING,
+            required=False,
+            message=(
+                "NVIDIA API key configured"
+                if intelligence_ready
+                else "NVIDIA_API_KEY not configured (AI features disabled)"
+            ),
+        )
+    )
+    if not intelligence_ready:
+        recommendations.append("Set NVIDIA_API_KEY to unlock analysis and synthetic generation features.")
+
+    ready = all(check.status != DemoCheckStatus.ERROR for check in checks if check.required)
+    can_seed = db_ready
+
+    return DemoPreflightResponse(
+        ready=ready,
+        can_seed=can_seed,
+        checks=checks,
+        blockers=blockers,
+        recommendations=recommendations,
+    )
+
+
+@router.get("/preflight", response_model=DemoPreflightResponse)
+async def preflight_demo() -> DemoPreflightResponse:
+    """Check demo-critical service readiness."""
+    return _build_demo_preflight()
