@@ -2,6 +2,7 @@
 
 
 from collections.abc import Sequence
+from urllib.parse import urlparse
 
 from pydantic import Field, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -62,6 +63,9 @@ class Settings(BaseSettings):
     def validate_database_url(cls, v: str, info: ValidationInfo) -> str:
         if not v:
             raise ValueError("DATABASE_URL is required")
+        parsed = urlparse(v)
+        if not parsed.scheme:
+            raise ValueError("DATABASE_URL must include a URL scheme")
         return v
 
     @field_validator("cors_allowed_origins", mode="before")
@@ -72,6 +76,52 @@ class Settings(BaseSettings):
         if isinstance(v, Sequence):
             return [str(origin).strip() for origin in v if str(origin).strip()]
         raise ValueError("CORS_ALLOWED_ORIGINS must be a comma-separated string or list")
+
+    @field_validator("port", mode="after")
+    @classmethod
+    def validate_port(cls, v: int) -> int:
+        if not 1 <= v <= 65535:
+            raise ValueError("PORT must be between 1 and 65535")
+        return v
+
+    @field_validator(
+        "db_pool_size",
+        "db_max_overflow",
+        "rate_limit_rpm",
+        "rate_limit_ip_rpm",
+        "rate_limit_user_rpm",
+    )
+    @classmethod
+    def validate_positive_ints(cls, v: int, info: ValidationInfo) -> int:
+        if v < 0:
+            raise ValueError(f"{info.field_name} must be 0 or greater")
+        return v
+
+    @field_validator("trace_retention_days")
+    @classmethod
+    def validate_trace_retention_days(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("TRACE_RETENTION_DAYS must be at least 1")
+        return v
+
+    @field_validator("rate_limit_burst_multiplier")
+    @classmethod
+    def validate_rate_limit_burst_multiplier(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("RATE_LIMIT_BURST_MULTIPLIER must be greater than 0")
+        return v
+
+    @field_validator("redis_url")
+    @classmethod
+    def validate_redis_url(cls, v: str) -> str:
+        if not v:
+            return v
+        parsed = urlparse(v)
+        if not parsed.scheme:
+            raise ValueError("REDIS_URL must include a URL scheme")
+        if parsed.scheme not in {"redis", "rediss"}:
+            raise ValueError("REDIS_URL must use redis or rediss scheme")
+        return v
 
     @property
     def is_production(self) -> bool:
