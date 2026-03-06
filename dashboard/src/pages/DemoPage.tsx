@@ -56,6 +56,7 @@ export default function DemoPage() {
   const canSeedStory = preflightData?.can_seed ?? false
   const demoBlockers = preflightData?.blockers ?? []
   const demoRecommendations = preflightData?.recommendations ?? []
+  const demoFixCommands = preflightData?.fix_commands ?? []
   const latestStoryMode = latestStoryModeQuery.data
 
   const runCommand = 'python -m examples.code_agent.run "How does the intelligence module work?" -v'
@@ -111,6 +112,29 @@ export default function DemoPage() {
             <StatusDot ok={nimReady} />
           </div>
         </div>
+
+        {demoFixCommands.length > 0 && (
+          <div className="mt-3 text-xs text-muted-300">
+            <div className="mb-1 text-muted-200">Suggested setup commands:</div>
+            <div className="space-y-2">
+              {demoFixCommands.map((command, index) => (
+                <div
+                  key={`${command}-${index}`}
+                  className="bg-dark-800 rounded-lg p-2 flex items-center justify-between gap-2"
+                >
+                  <code className="text-muted-200 text-[11px] break-all">{command}</code>
+                  <button
+                    onClick={() => copyText(command, `fix-${index}`)}
+                    className="inline-flex items-center gap-1 text-xs text-muted-300 hover:text-muted-100 shrink-0"
+                  >
+                    <Copy className="h-3 w-3" />
+                    {copiedCmd === `fix-${index}` ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {(healthQuery.isError || intelligenceQuery.isError || latestStoryModeQuery.isError) && (
           <div className="mt-3 text-xs text-red-400">

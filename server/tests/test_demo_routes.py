@@ -48,6 +48,20 @@ class TestDemoPreflight:
         assert check_map["database"]["required"] is True
         assert check_map["redis"]["required"] is False
 
+    def test_preflight_includes_fix_commands_when_blocked(self, client):
+        with (
+            patch("app.routes.demo.check_db_connection", return_value=False),
+            patch("app.routes.demo.redis.from_url") as mock_redis,
+        ):
+            mock_redis.return_value.ping.side_effect = Exception("redis down")
+
+            response = client.get("/api/v1/demo/preflight")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["ready"] is False
+        assert "docker compose up -d postgres" in data["fix_commands"]
+
 
 class TestLatestStoryMode:
     def test_latest_story_mode_returns_last_run(self, client, test_db):

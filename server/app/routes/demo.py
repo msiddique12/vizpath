@@ -45,6 +45,7 @@ class DemoPreflightResponse(BaseModel):
     checks: list[DemoPreflightCheck]
     blockers: list[str]
     recommendations: list[str]
+    fix_commands: list[str]
 
 
 class StoryModeLatestResponse(BaseModel):
@@ -318,6 +319,7 @@ def _build_demo_preflight() -> DemoPreflightResponse:
     checks: list[DemoPreflightCheck] = []
     blockers: list[str] = []
     recommendations: list[str] = []
+    fix_commands: list[str] = []
 
     db_ready = bool(check_db_connection())
     checks.append(
@@ -330,6 +332,7 @@ def _build_demo_preflight() -> DemoPreflightResponse:
     )
     if not db_ready:
         blockers.append("Start PostgreSQL and ensure DATABASE_URL is valid.")
+        fix_commands.append("docker compose up -d postgres")
 
     redis_ready = False
     try:
@@ -347,6 +350,7 @@ def _build_demo_preflight() -> DemoPreflightResponse:
     )
     if not redis_ready:
         recommendations.append("Start Redis if you want live websocket streaming during the demo.")
+        fix_commands.append("docker compose up -d redis")
 
     intelligence_ready = bool(settings.nvidia_api_key)
     checks.append(
@@ -365,6 +369,7 @@ def _build_demo_preflight() -> DemoPreflightResponse:
     )
     if not intelligence_ready:
         recommendations.append("Set NVIDIA_API_KEY to unlock analysis and synthetic generation features.")
+        fix_commands.append("export NVIDIA_API_KEY='nvapi-...'")
 
     ready = all(check.status != DemoCheckStatus.ERROR for check in checks if check.required)
     can_seed = db_ready
@@ -375,6 +380,7 @@ def _build_demo_preflight() -> DemoPreflightResponse:
         checks=checks,
         blockers=blockers,
         recommendations=recommendations,
+        fix_commands=fix_commands,
     )
 
 

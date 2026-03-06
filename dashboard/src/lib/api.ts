@@ -380,6 +380,7 @@ export interface DemoPreflightResponse {
   }>
   blockers: string[]
   recommendations: string[]
+  fix_commands: string[]
 }
 
 export interface StoryModeLatestResponse {
