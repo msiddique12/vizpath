@@ -1,5 +1,6 @@
 """Demo helper endpoints for one-click story mode setup."""
 
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any
@@ -44,6 +45,14 @@ class DemoPreflightResponse(BaseModel):
     checks: list[DemoPreflightCheck]
     blockers: list[str]
     recommendations: list[str]
+
+
+class StoryModeLatestResponse(BaseModel):
+    found: bool
+    scenario: str | None = None
+    seeded: int = 0
+    trace_ids: list[str] = Field(default_factory=list)
+    recommended_flow: dict[str, str] = Field(default_factory=dict)
 
 
 def _build_trace_payloads(now: datetime) -> list[dict[str, Any]]:
@@ -373,3 +382,69 @@ def _build_demo_preflight() -> DemoPreflightResponse:
 async def preflight_demo() -> DemoPreflightResponse:
     """Check demo-critical service readiness."""
     return _build_demo_preflight()
+
+
+@router.get("/story-mode/latest", response_model=StoryModeLatestResponse)
+async def get_latest_story_mode_run(
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> StoryModeLatestResponse:
+    """Return the latest complete story-mode run for this project."""
+    traces = (
+        db.query(Trace)
+        .filter(
+            Trace.project_id == project.id,
+            Trace.name.like("Story Mode:%"),
+        )
+        .order_by(Trace.created_at.desc())
+        .limit(30)
+        .all()
+    )
+
+    if not traces:
+        return StoryModeLatestResponse(found=False)
+
+    grouped: defaultdict[str, dict[str, Trace]] = defaultdict(dict)
+    latest_seen: dict[str, datetime] = {}
+
+    for trace in traces:
+        trace_id = str(trace.id)
+        suffix = trace_id.rsplit("-", 1)[-1]
+        if "Baseline" in trace.name:
+            variant = "baseline"
+        elif "Candidate" in trace.name:
+            variant = "candidate"
+        elif "Recovery" in trace.name:
+            variant = "recovery"
+        else:
+            continue
+        grouped[suffix][variant] = trace
+        if suffix not in latest_seen:
+            latest_seen[suffix] = trace.created_at
+        else:
+            latest_seen[suffix] = max(latest_seen[suffix], trace.created_at)
+
+    ordered_groups = sorted(
+        grouped.items(),
+        key=lambda item: latest_seen[item[0]],
+        reverse=True,
+    )
+
+    for _, run in ordered_groups:
+        if {"baseline", "candidate", "recovery"}.issubset(run):
+            candidate_trace = run["candidate"]
+            return StoryModeLatestResponse(
+                found=True,
+                scenario=(candidate_trace.trace_metadata or {}).get("scenario", "agent_regression"),
+                seeded=3,
+                trace_ids=[str(run["baseline"].id), str(run["candidate"].id), str(run["recovery"].id)],
+                recommended_flow={
+                    "compare": f"/compare?traceA={run['baseline'].id}&traceB={run['candidate'].id}",
+                    "trace_baseline": f"/traces/{run['baseline'].id}",
+                    "trace_candidate": f"/traces/{run['candidate'].id}",
+                    "trace_recovery": f"/traces/{run['recovery'].id}",
+                    "curation": "/curation",
+                },
+            )
+
+    return StoryModeLatestResponse(found=False)

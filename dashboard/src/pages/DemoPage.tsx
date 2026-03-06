@@ -6,6 +6,7 @@ import {
   getDemoPreflight,
   getDetailedHealth,
   getIntelligenceStatus,
+  getLatestStoryMode,
   seedStoryMode,
   type DemoPreflightResponse,
 } from '@/lib/api'
@@ -39,6 +40,12 @@ export default function DemoPage() {
     refetchInterval: 5000,
   })
 
+  const latestStoryModeQuery = useQuery({
+    queryKey: ['latest-story-mode'],
+    queryFn: getLatestStoryMode,
+    refetchInterval: 5000,
+  })
+
   const isLoading =
     healthQuery.isLoading || intelligenceQuery.isLoading || preflightQuery.isLoading
   const dbReady = healthQuery.data?.checks.database?.status === 'healthy'
@@ -49,6 +56,7 @@ export default function DemoPage() {
   const canSeedStory = preflightData?.can_seed ?? false
   const demoBlockers = preflightData?.blockers ?? []
   const demoRecommendations = preflightData?.recommendations ?? []
+  const latestStoryMode = latestStoryModeQuery.data
 
   const runCommand = 'python -m examples.code_agent.run "How does the intelligence module work?" -v'
   const startupCommand = './demo.sh'
@@ -104,7 +112,7 @@ export default function DemoPage() {
           </div>
         </div>
 
-        {(healthQuery.isError || intelligenceQuery.isError) && (
+        {(healthQuery.isError || intelligenceQuery.isError || latestStoryModeQuery.isError) && (
           <div className="mt-3 text-xs text-red-400">
             Could not fetch readiness data. Make sure `./demo.sh` is running.
           </div>
@@ -162,7 +170,24 @@ export default function DemoPage() {
               <span className="text-muted-100">{storyModeMutation.data.scenario}</span>.
             </p>
           )}
+
+          {latestStoryMode?.found && (
+            <p className="text-xs text-muted-300 mt-2">
+              Resume existing story-mode scenario: <span className="text-muted-100">{latestStoryMode.scenario}</span>.
+            </p>
+          )}
         </div>
+
+        {latestStoryMode?.found && (
+          <button
+            onClick={() => {
+              window.location.href = latestStoryMode.recommended_flow.compare
+            }}
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm border bg-dark-800 border-dark-700 text-muted-300 hover:bg-dark-700"
+          >
+            Open Latest Story-Mode Run
+          </button>
+        )}
         <ol className="mt-3 space-y-3 text-sm text-muted-300">
           <li className="bg-dark-800 rounded-lg p-3">
             In terminal 1, run the stack startup script.

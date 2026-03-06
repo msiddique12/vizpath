@@ -382,6 +382,20 @@ export interface DemoPreflightResponse {
   recommendations: string[]
 }
 
+export interface StoryModeLatestResponse {
+  found: boolean
+  scenario: 'agent_regression' | string | null
+  seeded: number
+  trace_ids: string[]
+  recommended_flow: {
+    compare: string
+    trace_baseline: string
+    trace_candidate: string
+    trace_recovery: string
+    curation: string
+  }
+}
+
 export interface IntelligenceStatusResponse {
   nvidia_api_key_configured: boolean
   model: string
@@ -407,6 +421,10 @@ export async function getDetailedHealth(): Promise<HealthDetailedResponse> {
 
 export async function getDemoPreflight(): Promise<DemoPreflightResponse> {
   return fetchApi('/demo/preflight')
+}
+
+export async function getLatestStoryMode(): Promise<StoryModeLatestResponse> {
+  return fetchApi('/demo/story-mode/latest')
 }
 
 export async function getIntelligenceStatus(): Promise<IntelligenceStatusResponse> {
