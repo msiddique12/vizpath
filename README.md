@@ -260,6 +260,10 @@ curl -X POST http://localhost:8000/api/v1/projects/ \
   -d '{"name":"my-project"}'
 ```
 
+For endpoint-level details and integration examples, use:
+
+- `docs/api.md` (API reference)
+
 Rotate key with grace period (both old and new keys valid during grace):
 
 ```bash
