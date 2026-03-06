@@ -44,6 +44,7 @@ git clone <your-vizpath-repo-url>
 cd vizpath
 cp .env.example .env
 make bootstrap
+make check-env
 ```
 
 Then start services locally:

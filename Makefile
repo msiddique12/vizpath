@@ -1,4 +1,4 @@
-.PHONY: help install install-dev lint format typecheck test test-sdk test-server build bootstrap bootstrap-env bootstrap-deps clean
+.PHONY: help install install-dev lint format typecheck test test-sdk test-server build bootstrap bootstrap-env bootstrap-deps check-env doctor clean
 
 # Default target
 help:
@@ -10,6 +10,8 @@ help:
 	@echo "  make bootstrap    Prepare and install all dependencies"
 	@echo "  make bootstrap-env  Copy and validate local environment files"
 	@echo "  make bootstrap-deps Install dependencies for all components"
+	@echo "  make check-env    Validate required local environment settings"
+	@echo "  make doctor       Full local environment and lint sanity check"
 	@echo ""
 	@echo "Quality:"
 	@echo "  make lint         Run linters (ruff + eslint)"
@@ -41,6 +43,11 @@ bootstrap-deps:
 	cd sdk && uv sync
 	cd server && uv sync
 	cd dashboard && npm install
+
+check-env:
+	python scripts/check_env.py
+
+doctor: check-env lint
 
 # Installation
 install:
