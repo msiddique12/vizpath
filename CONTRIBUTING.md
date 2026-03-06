@@ -6,43 +6,40 @@ Thank you for your interest in contributing to vizpath. This document provides g
 
 ### Prerequisites
 
-- Python 3.9+
-- Node.js 18+
+- Python 3.10+
+- Node.js 20+
 - Docker and Docker Compose
 
 ### Local Development Setup
 
 1. Clone the repository:
-   ```bash
-   git clone https://github.com/yourusername/vizpath.git
-   cd vizpath
-   ```
+```bash
+git clone https://github.com/yourusername/vizpath.git
+cd vizpath
+```
 
-2. Start the development services:
-   ```bash
-   docker-compose up -d postgres redis
-   ```
+2. Copy and inspect environment:
+```bash
+cp .env.example .env
+```
 
-3. Set up the SDK:
-   ```bash
-   cd sdk
-   pip install -e ".[dev]"
-   ```
+3. Bootstrap dependencies:
+```bash
+make bootstrap
+```
 
-4. Set up the server:
-   ```bash
-   cd server
-   pip install -r requirements.txt
-   cp ../.env.example .env
-   uvicorn app.main:app --reload
-   ```
+4. Start local services:
+```bash
+docker-compose up -d postgres redis
+```
 
-5. Set up the dashboard:
-   ```bash
-   cd dashboard
-   npm install
-   npm run dev
-   ```
+5. Start API server and dashboard in separate terminals:
+```bash
+make dev-server    # terminal 1
+make dev-dashboard # terminal 2
+```
+
+6. Optional: use `./demo.sh` for end-to-end startup with one command.
 
 ## Development Workflow
 
@@ -114,6 +111,16 @@ cd server && pytest
 # Dashboard tests
 cd dashboard && npm test
 ```
+
+For CI parity:
+
+```bash
+make test-sdk
+make test-server
+make lint
+```
+
+When adding code that changes API responses, include/update tests in the relevant package.
 
 ## Pull Request Process
 

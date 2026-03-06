@@ -37,6 +37,25 @@ export NVIDIA_API_KEY="nvapi-..."  # Set this before demo.sh for intelligence fe
 # API: http://localhost:8000
 ```
 
+### Open-Source Contributor Setup
+
+```bash
+git clone <your-vizpath-repo-url>
+cd vizpath
+cp .env.example .env
+make bootstrap
+```
+
+Then start services locally:
+
+```bash
+docker-compose up -d postgres redis
+make dev-server   # terminal 1
+make dev-dashboard  # terminal 2
+```
+
+This path keeps dependencies explicit for contributors who do not use the demo script.
+
 ### Run the Demo Agent
 
 ```bash
@@ -179,6 +198,12 @@ vizpath/
 - Python 3.10+
 - Node.js 20+
 - NVIDIA API key (for intelligence features)
+
+### Environment setup
+
+```bash
+cp .env.example .env   # copy defaults
+```
 
 ### Setup
 

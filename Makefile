@@ -1,4 +1,4 @@
-.PHONY: help install install-dev lint format typecheck test test-sdk test-server build clean
+.PHONY: help install install-dev lint format typecheck test test-sdk test-server build bootstrap bootstrap-env bootstrap-deps clean
 
 # Default target
 help:
@@ -7,6 +7,9 @@ help:
 	@echo "Setup:"
 	@echo "  make install      Install all dependencies"
 	@echo "  make install-dev  Install with dev dependencies"
+	@echo "  make bootstrap    Prepare and install all dependencies"
+	@echo "  make bootstrap-env  Copy and validate local environment files"
+	@echo "  make bootstrap-deps Install dependencies for all components"
 	@echo ""
 	@echo "Quality:"
 	@echo "  make lint         Run linters (ruff + eslint)"
@@ -21,6 +24,23 @@ help:
 	@echo "Build:"
 	@echo "  make build        Build all packages"
 	@echo "  make clean        Remove build artifacts"
+
+# Bootstrap for first-time contributors / OSS users
+bootstrap: bootstrap-env bootstrap-deps
+
+bootstrap-env:
+	@if [ ! -f .env ]; then \
+		echo "Creating .env from .env.example"; \
+		cp .env.example .env; \
+		echo "Created .env. Fill in any secrets before running services."; \
+	else \
+		echo ".env already exists, skipping copy."; \
+	fi
+
+bootstrap-deps:
+	cd sdk && uv sync
+	cd server && uv sync
+	cd dashboard && npm install
 
 # Installation
 install:
