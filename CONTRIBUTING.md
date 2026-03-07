@@ -41,6 +41,14 @@ make dev-dashboard # terminal 2
 
 6. Optional: use `./demo.sh` for end-to-end startup with one command.
 
+Optional: run pre-commit checks locally:
+
+```bash
+pip install pre-commit
+pre-commit install
+pre-commit run --all-files
+```
+
 ## Development Workflow
 
 ### Branching Strategy
