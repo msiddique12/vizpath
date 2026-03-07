@@ -48,4 +48,4 @@ jobs:
 
       - name: Run ESLint
         working-directory: ./dashboard
-        run: npm run lint || true
+        run: npm run lint
