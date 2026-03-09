@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { CheckCircle2, Circle, Copy, ExternalLink, Loader2, PlayCircle, Server, Sparkles } from 'lucide-react'
+import { CheckCircle2, Circle, Copy, ExternalLink, Loader2, PlayCircle, Server, Sparkles, Wifi, WifiOff } from 'lucide-react'
 import {
   getDemoPreflight,
   getDetailedHealth,
@@ -10,6 +10,7 @@ import {
   seedStoryMode,
   type DemoPreflightResponse,
 } from '@/lib/api'
+import { useWebSocket } from '@/hooks/useWebSocket'
 
 function StatusDot({ ok }: { ok: boolean }) {
   return ok ? (
@@ -21,6 +22,8 @@ function StatusDot({ ok }: { ok: boolean }) {
 
 export default function DemoPage() {
   const [copiedCmd, setCopiedCmd] = useState<string | null>(null)
+  const [lastWsEvent, setLastWsEvent] = useState<string | null>(null)
+  const [lastWsTimestamp, setLastWsTimestamp] = useState<string | null>(null)
 
   const healthQuery = useQuery({
     queryKey: ['health-detailed'],
@@ -38,6 +41,23 @@ export default function DemoPage() {
     queryKey: ['intelligence-status'],
     queryFn: getIntelligenceStatus,
     refetchInterval: 5000,
+  })
+
+  const { connected: websocketConnected } = useWebSocket({
+    onConnect: () => {
+      setLastWsEvent('WebSocket connected to trace stream')
+      setLastWsTimestamp(new Date().toLocaleTimeString())
+    },
+    onDisconnect: () => {
+      setLastWsEvent('WebSocket disconnected from trace stream')
+    },
+    onMessage: (message) => {
+      const traceId = message.trace_id ? `Trace ${message.trace_id}` : 'Trace stream'
+      const spanCount =
+        message.span_count !== undefined ? ` (${message.span_count} spans)` : ''
+      setLastWsEvent(`Received ${message.type} for ${traceId}${spanCount}`)
+      setLastWsTimestamp(new Date().toLocaleTimeString())
+    },
   })
 
   const latestStoryModeQuery = useQuery({
@@ -141,6 +161,27 @@ export default function DemoPage() {
             Could not fetch readiness data. Make sure `./demo.sh` is running.
           </div>
         )}
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span
+            className={clsx(
+              'inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs',
+              websocketConnected
+                ? 'bg-green-900/30 text-green-400'
+                : 'bg-dark-700 text-muted-400'
+            )}
+          >
+            {websocketConnected ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
+            {websocketConnected ? 'Trace stream live' : 'Trace stream reconnecting'}
+          </span>
+
+          {(lastWsEvent || lastWsTimestamp) && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-dark-800 px-3 py-1 text-xs text-muted-200">
+              {lastWsEvent && <span>{lastWsEvent}</span>}
+              {lastWsTimestamp && <span className="text-muted-500">· {lastWsTimestamp}</span>}
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="bg-dark-900 rounded-lg border border-dark-700 p-4">
