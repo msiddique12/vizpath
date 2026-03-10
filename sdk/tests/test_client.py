@@ -1,5 +1,10 @@
 """Tests for SDK client header behavior."""
 
+from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock, patch
+
+import httpx
+
 from vizpath.client import Client
 from vizpath.config import Config
 
@@ -51,3 +56,105 @@ class TestClientHeaders:
         client = Client(config)
 
         assert client._client is None
+
+
+class TestClientRetry:
+    """Test retry/backoff behavior for SDK client response handling."""
+
+    def test_rate_limit_uses_retry_after_header(self) -> None:
+        """Retry-After should be honored on 429 responses."""
+        config = Config(
+            api_key="vp_test_key",
+            base_url="http://localhost:8000/api/v1",
+            max_retries=2,
+            enabled=True,
+        )
+        client = Client(config)
+        span = MagicMock()
+        span.model_dump.return_value = {"name": "span"}
+
+        with (
+            patch.object(client, "_client") as http_client,
+            patch("vizpath.client.time.sleep") as sleep,
+        ):
+            http_client.post.side_effect = [
+                httpx.Response(
+                    429,
+                    headers={"Retry-After": "0.75"},
+                ),
+                httpx.Response(200),
+            ]
+
+            client._send_with_retry([span])
+
+            assert sleep.call_count == 1
+            assert sleep.call_args_list[0].args[0] == 0.75
+            assert http_client.post.call_count == 2
+
+        client.close()
+
+    def test_rate_limit_with_invalid_retry_after_falls_back_to_backoff(self) -> None:
+        """Invalid Retry-After should use exponential backoff."""
+        config = Config(
+            api_key="vp_test_key",
+            base_url="http://localhost:8000/api/v1",
+            max_retries=2,
+        )
+        client = Client(config)
+        span = MagicMock()
+        span.model_dump.return_value = {"name": "span"}
+
+        with (
+            patch.object(client, "_client") as http_client,
+            patch("vizpath.client.time.sleep") as sleep,
+        ):
+            http_client.post.side_effect = [
+                httpx.Response(
+                    429,
+                    headers={"Retry-After": "invalid"},
+                ),
+                httpx.Response(200),
+            ]
+
+            client._send_with_retry([span])
+
+            assert sleep.call_count == 1
+            assert sleep.call_args_list[0].args[0] == 1.0
+            assert http_client.post.call_count == 2
+
+        client.close()
+
+    def test_rate_limit_with_http_date_retry_after(self) -> None:
+        """HTTP-date Retry-After values should be converted to seconds."""
+        config = Config(
+            api_key="vp_test_key",
+            base_url="http://localhost:8000/api/v1",
+            max_retries=2,
+        )
+        client = Client(config)
+        span = MagicMock()
+        span.model_dump.return_value = {"name": "span"}
+
+        retry_dt = datetime.now(timezone.utc) + timedelta(seconds=45)
+        retry_header = retry_dt.strftime("%a, %d %b %Y %H:%M:%S GMT")
+
+        with (
+            patch.object(client, "_client") as http_client,
+            patch("vizpath.client.time.sleep") as sleep,
+        ):
+            http_client.post.side_effect = [
+                httpx.Response(
+                    429,
+                    headers={"Retry-After": retry_header},
+                ),
+                httpx.Response(200),
+            ]
+
+            client._send_with_retry([span])
+
+            assert sleep.call_count == 1
+            assert sleep.call_args_list[0].args[0] >= 44.0
+            assert sleep.call_args_list[0].args[0] <= 46.0
+            assert http_client.post.call_count == 2
+
+        client.close()

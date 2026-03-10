@@ -5,6 +5,8 @@ from __future__ import annotations
 import atexit
 import logging
 import time
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from queue import Empty, Queue
 from threading import Event, Lock, Thread
 
@@ -114,7 +116,7 @@ class Client:
             except RateLimitError as e:
                 last_error = e
                 if attempt < self._config.max_retries - 1:
-                    wait_time = (2 ** attempt) * 1.0  # Longer wait for rate limits
+                    wait_time = e.retry_after if e.retry_after is not None else (2 ** attempt) * 1.0  # Longer wait for rate limits
                     logger.warning(f"Rate limited, retry in {wait_time}s")
                     time.sleep(wait_time)
             except VizpathError as e:
@@ -134,7 +136,21 @@ class Client:
         if response.status_code == 401:
             raise AuthenticationError("Invalid API key")
         if response.status_code == 429:
-            raise RateLimitError("Rate limit exceeded")
+            raw_retry_after = response.headers.get("Retry-After")
+            retry_after: float | None = None
+            if raw_retry_after is not None:
+                try:
+                    retry_after = float(raw_retry_after)
+                except (TypeError, ValueError):
+                    try:
+                        retry_dt = parsedate_to_datetime(raw_retry_after)
+                        if retry_dt is not None:
+                            now = datetime.now(timezone.utc)
+                            retry_after = max(0.0, (retry_dt - now).total_seconds())
+                    except (TypeError, ValueError, OverflowError):
+                        retry_after = None
+
+            raise RateLimitError("Rate limit exceeded", retry_after=retry_after)
         if response.status_code >= 500:
             raise ConnectionError(f"Server error: {response.status_code}")
         if not response.is_success:
