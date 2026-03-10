@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Brain, Sparkles, Loader2, Star, Tag, Lightbulb, CheckCircle2, Wand2 } from 'lucide-react'
 import clsx from 'clsx'
 import {
   analyzeTrace,
   selfAnalyzeTrace,
+  getIntelligenceStatus,
   suggestCuration,
   createOrUpdateLabel,
   TraceAnalysis,
@@ -20,6 +21,11 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
   const [analysis, setAnalysis] = useState<TraceAnalysis | null>(null)
   const [selfAnalysis, setSelfAnalysis] = useState<SelfAnalysis | null>(null)
   const [actionStatus, setActionStatus] = useState<string | null>(null)
+  const intelligenceStatus = useQuery({
+    queryKey: ['intelligence-status'],
+    queryFn: getIntelligenceStatus,
+    staleTime: 30000,
+  })
 
   // Reset state when traceId changes to prevent showing stale data
   useEffect(() => {
@@ -74,6 +80,9 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
     : qualityScore >= 60
       ? 'Moderate quality lift by applying top suggestions.'
       : 'Significant reliability gain from corrections.'
+  const isIntelligenceReady = intelligenceStatus.data?.nvidia_api_key_configured === true
+  const isAnalyzeDisabled =
+    analyzeMutation.isPending || selfAnalyzeMutation.isPending || !isIntelligenceReady
 
   return (
     <div className="bg-dark-800 rounded-lg p-4 space-y-4">
@@ -85,14 +94,24 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
         <span className="text-xs text-muted-500">Nemotron-powered</span>
       </div>
 
+      {(!isIntelligenceReady || intelligenceStatus.isError || intelligenceStatus.isLoading) && (
+        <div className="bg-amber-900/30 border border-amber-800 rounded-lg px-3 py-2 text-xs text-amber-300">
+          {intelligenceStatus.isLoading
+            ? 'Checking NVIDIA intelligence configuration...'
+            : !isIntelligenceReady
+              ? 'NVIDIA API key not configured. Set NVIDIA_API_KEY in your server env to enable analysis.'
+              : 'Could not verify intelligence readiness.'}
+        </div>
+      )}
+
       <div className="flex gap-2">
         <button
           onClick={() => analyzeMutation.mutate()}
-          disabled={analyzeMutation.isPending}
+          disabled={isAnalyzeDisabled}
           aria-label="Analyze trace with Nemotron"
           className={clsx(
             'flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg transition-colors',
-            analyzeMutation.isPending
+            isAnalyzeDisabled
               ? 'bg-dark-700 text-muted-400 cursor-wait'
               : 'bg-primary-600 text-white hover:bg-primary-700'
           )}
@@ -106,11 +125,11 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
         </button>
         <button
           onClick={() => selfAnalyzeMutation.mutate()}
-          disabled={selfAnalyzeMutation.isPending}
+          disabled={isAnalyzeDisabled}
           aria-label="Perform deep self-analysis on trace"
           className={clsx(
             'flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg transition-colors',
-            selfAnalyzeMutation.isPending
+            isAnalyzeDisabled
               ? 'bg-dark-700 text-muted-400 cursor-wait'
               : 'bg-dark-900 border border-dark-700 text-muted-200 hover:bg-dark-700'
           )}
@@ -151,10 +170,10 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
 
         <button
           onClick={() => applySuggestionMutation.mutate()}
-          disabled={applySuggestionMutation.isPending}
+          disabled={applySuggestionMutation.isPending || !isIntelligenceReady}
           className={clsx(
             'w-full flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg transition-colors',
-            applySuggestionMutation.isPending
+            applySuggestionMutation.isPending || !isIntelligenceReady
               ? 'bg-dark-700 text-muted-400 cursor-wait'
               : 'bg-nvidia-500 text-black hover:bg-nvidia-400'
           )}
