@@ -200,6 +200,20 @@ vizpath/
 - Node.js 20+
 - NVIDIA API key (for intelligence features)
 
+#### Dashboard Frontend Environment
+
+For local development, copy and edit the dashboard environment file:
+
+```bash
+cd dashboard
+cp .env.example .env
+```
+
+Supported variables:
+
+- `VITE_API_BASE_URL`: full HTTP origin and API base path (default `/api/v1`)
+- `VITE_WS_BASE_URL`: WebSocket base URL for live traces (default current origin, auto-resolved to `ws://`).
+
 ### Environment setup
 
 ```bash

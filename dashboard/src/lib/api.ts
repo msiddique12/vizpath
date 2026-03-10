@@ -1,6 +1,12 @@
 import { TraceListResponse, TraceDetailResponse, Span } from './types'
 
-const API_BASE = '/api/v1'
+const API_BASE = (() => {
+  const configured = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim()
+  if (!configured) {
+    return '/api/v1'
+  }
+  return configured.endsWith('/') ? configured.slice(0, -1) : configured
+})()
 
 async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${endpoint}`, {
