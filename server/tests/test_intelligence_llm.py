@@ -138,6 +138,22 @@ class TestLabelTrace:
         assert result is None
 
     @pytest.mark.asyncio
+    async def test_label_trace_coerces_bool_and_percentage_confidence(self, labeler):
+        response_json = json.dumps({
+            "success": 1,
+            "confidence": 72,
+            "reasoning": "Trace mostly successful.",
+        })
+        labeler.client.chat.completions.create = AsyncMock(
+            return_value=_mock_chat_response(response_json)
+        )
+
+        result = await labeler.label_trace(SAMPLE_TRACE)
+        assert result is not None
+        assert result["success"] is True
+        assert result["confidence"] == 0.72
+
+    @pytest.mark.asyncio
     async def test_label_trace_api_error(self, labeler):
         labeler.client.chat.completions.create = AsyncMock(
             side_effect=Exception("API error")
@@ -173,6 +189,28 @@ class TestAnalyzeTrace:
         assert result["quality_score"] == 0
         assert "Analysis failed" in result["error_analysis"]
 
+    @pytest.mark.asyncio
+    async def test_analyze_trace_clamps_scores_and_coerces_fields(self, labeler):
+        response_json = json.dumps({
+            "quality_score": 150,
+            "efficiency_score": -20,
+            "labels": ["  good ", None, 42],
+            "suggestions": [None, "Cache repeated queries"],
+            "summary": "  Strong tracing run  ",
+            "error_analysis": 123,
+        })
+        labeler.client.chat.completions.create = AsyncMock(
+            return_value=_mock_chat_response(response_json)
+        )
+
+        result = await labeler.analyze_trace(SAMPLE_TRACE)
+        assert result["quality_score"] == 100
+        assert result["efficiency_score"] == 0
+        assert result["analysis"]["labels"] == ["good", "42"]
+        assert result["analysis"]["suggestions"] == ["Cache repeated queries"]
+        assert result["analysis"]["summary"] == "Strong tracing run"
+
+
 
 class TestSelfAnalyze:
     @pytest.mark.asyncio
@@ -203,3 +241,30 @@ class TestSelfAnalyze:
         result = await labeler.self_analyze(SAMPLE_TRACE)
         assert result["overall_score"] == 0
         assert "Analysis failed" in result["summary"]
+
+    @pytest.mark.asyncio
+    async def test_self_analyze_uses_fallback_and_coerces(self, labeler):
+        response_json = json.dumps({
+            "quality": 90,
+            "tool_usage": 88,
+            "reasoning_quality": "95",
+            "overall_score": 91.2,
+            "strengths": [None, "Good tool orchestration", 7],
+            "weaknesses": ["Over-long prompts", 1],
+            "improvements": "cleanup",
+            "summary": 123,
+            "redundant_steps": "step1",
+        })
+        labeler.client.chat.completions.create = AsyncMock(
+            return_value=_mock_chat_response(response_json)
+        )
+
+        result = await labeler.self_analyze(SAMPLE_TRACE)
+        assert result["analysis"]["effectiveness"] == 90
+        assert result["analysis"]["tool_usage"] == 88
+        assert result["analysis"]["reasoning_quality"] == 95
+        assert result["analysis"]["improvements"] == []
+        assert result["analysis"]["strengths"] == ["Good tool orchestration", "7"]
+        assert result["analysis"]["weaknesses"] == ["Over-long prompts", "1"]
+        assert result["analysis"]["summary"] == "123"
+        assert result["redundant_steps"] == []

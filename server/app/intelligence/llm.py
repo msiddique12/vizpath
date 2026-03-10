@@ -6,6 +6,7 @@ Adapted from engine/intelligence/llm.py to work with vizpath Trace+Span model.
 import asyncio
 import json
 import logging
+import math
 import re
 from typing import Any
 
@@ -75,6 +76,77 @@ def _extract_json(text: str) -> dict:
             pass
 
     raise ValueError(f"Could not extract JSON from text: {text[:200]}")
+
+
+def _coerce_numeric(
+    value: Any,
+    *,
+    min_value: float,
+    max_value: float,
+    default: float,
+) -> float:
+    """Coerce numeric values to a bounded float."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(number):
+        return default
+    return max(min(number, max_value), min_value)
+
+
+def _coerce_confidence(value: Any) -> float:
+    """Normalize confidence to [0, 1]."""
+    confidence = _coerce_numeric(value, min_value=0.0, max_value=100.0, default=0.0)
+    if confidence > 1.0:
+        confidence /= 100.0
+    return round(confidence, 4)
+
+
+def _coerce_percentage(value: Any, default: float = 0.0) -> int:
+    """Normalize percentage-like scores to integers in [0, 100]."""
+    return int(round(_coerce_numeric(value, min_value=0.0, max_value=100.0, default=default)))
+
+
+def _coerce_bool(value: Any) -> bool:
+    """Coerce truthy/falsy values to bool."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not math.isnan(value):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "y"}:
+            return True
+        if normalized in {"false", "0", "no", "n"}:
+            return False
+    raise ValueError("Could not coerce boolean value")
+
+
+def _coerce_str(value: Any, default: str = "") -> str:
+    """Normalize values into strings."""
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value.strip()
+    return str(value).strip() or default
+
+
+def _coerce_str_list(value: Any) -> list[str]:
+    """Normalize a value into a list of strings."""
+    if not isinstance(value, list):
+        return []
+    values: list[str] = []
+    for item in value:
+        if item is None:
+            continue
+        if isinstance(item, str):
+            normalized = item.strip()
+        else:
+            normalized = str(item).strip()
+        if normalized:
+            values.append(normalized)
+    return values
 
 
 class LLMLabeler:
@@ -149,19 +221,15 @@ Respond ONLY with JSON:
             if not content:
                 return None
 
-            result = _extract_json(content)
+            response_data = _extract_json(content)
+            if not isinstance(response_data, dict):
+                raise ValueError("Invalid response payload")
 
-            # Validate structure
-            if not isinstance(result.get("success"), bool):
-                raise ValueError("Invalid 'success' field")
-            if not isinstance(result.get("confidence"), (int, float)):
-                raise ValueError("Invalid 'confidence' field")
-            if not isinstance(result.get("reasoning"), str):
-                raise ValueError("Invalid 'reasoning' field")
-
-            # Normalize confidence to [0, 1]
-            if result["confidence"] > 1.0:
-                result["confidence"] /= 100.0
+            result = {
+                "success": _coerce_bool(response_data.get("success")),
+                "confidence": _coerce_confidence(response_data.get("confidence")),
+                "reasoning": _coerce_str(response_data.get("reasoning")),
+            }
 
             # Cache result
             if self.redis:
@@ -259,15 +327,35 @@ Labels should be relevant categories like: "efficient", "slow", "error_prone", "
                 max_tokens=2000,
             )
             content = response.choices[0].message.content or ""
-            analysis = _extract_json(content)
+            response_data = _extract_json(content)
+            if not isinstance(response_data, dict):
+                raise ValueError("Invalid response payload")
+
+            quality_score = _coerce_percentage(response_data.get("quality_score", 0))
+            efficiency_score = _coerce_percentage(response_data.get("efficiency_score", 0))
+            error_analysis = _coerce_str(
+                response_data.get("error_analysis", response_data.get("summary", "")),
+                default="",
+            )
+            suggestions = _coerce_str_list(response_data.get("suggestions"))
+            labels = _coerce_str_list(response_data.get("labels"))
+
+            normalized_analysis = {
+                "quality_score": quality_score,
+                "labels": labels,
+                "suggestions": suggestions,
+                "summary": _coerce_str(response_data.get("summary", ""), default=""),
+            }
+
             result = {
                 "trace_id": trace_id,
-                "quality_score": analysis.get("quality_score", 0),
-                "efficiency_score": analysis.get("efficiency_score", 0),
-                "error_analysis": analysis.get("error_analysis", analysis.get("summary", "")),
-                "suggestions": analysis.get("suggestions", []),
-                "labels": analysis.get("labels", []),
-                "summary": analysis.get("summary", ""),
+                "analysis": normalized_analysis,
+                "quality_score": quality_score,
+                "efficiency_score": efficiency_score,
+                "error_analysis": error_analysis,
+                "suggestions": suggestions,
+                "labels": labels,
+                "summary": _coerce_str(response_data.get("summary", ""), default=""),
                 "cached": False,
             }
 
@@ -365,22 +453,65 @@ Respond with JSON only:
                 max_tokens=2000,
             )
             content = response.choices[0].message.content or ""
-            analysis = _extract_json(content)
+            response_data = _extract_json(content)
+            if not isinstance(response_data, dict):
+                raise ValueError("Invalid response payload")
+
+            effectiveness = _coerce_percentage(
+                response_data.get("effectiveness", response_data.get("quality", 0))
+            )
+            reasoning_quality = _coerce_percentage(
+                response_data.get("reasoning_quality", response_data.get("completeness", 0))
+            )
+            tool_usage = _coerce_percentage(response_data.get("tool_usage", 0))
+            overall_score = _coerce_percentage(response_data.get("overall_score", 0))
+            strengths = _coerce_str_list(response_data.get("strengths"))
+            weaknesses = _coerce_str_list(response_data.get("weaknesses"))
+            improvements = _coerce_str_list(response_data.get("improvements"))
+            suggestions = _coerce_str_list(response_data.get("suggestions"))
+            if not suggestions:
+                suggestions = improvements
+
+            summary = _coerce_str(response_data.get("summary", ""), default="")
+            quality_score = _coerce_percentage(
+                response_data.get("quality", effectiveness), default=effectiveness
+            )
+            efficiency_score = _coerce_percentage(
+                response_data.get("efficiency", tool_usage), default=tool_usage
+            )
+            completeness_score = _coerce_percentage(
+                response_data.get("completeness", reasoning_quality), default=reasoning_quality
+            )
+
+            normalized_analysis = {
+                "effectiveness": effectiveness,
+                "reasoning_quality": reasoning_quality,
+                "tool_usage": tool_usage,
+                "overall_score": overall_score,
+                "strengths": strengths,
+                "weaknesses": weaknesses,
+                "improvements": improvements,
+                "summary": summary,
+            }
+
             result = {
                 "trace_id": trace_id,
-                "quality": analysis.get("quality", analysis.get("effectiveness", 0)),
-                "efficiency": analysis.get("efficiency", analysis.get("tool_usage", 0)),
-                "completeness": analysis.get("completeness", analysis.get("reasoning_quality", 0)),
-                "overall_score": analysis.get("overall_score", 0),
-                "redundant_steps": analysis.get("redundant_steps", []),
-                "suggestions": analysis.get("suggestions", analysis.get("improvements", [])),
-                "summary": analysis.get("summary", ""),
-                "effectiveness": analysis.get("effectiveness", analysis.get("quality", 0)),
-                "reasoning_quality": analysis.get("reasoning_quality", analysis.get("completeness", 0)),
-                "tool_usage": analysis.get("tool_usage", analysis.get("efficiency", 0)),
-                "strengths": analysis.get("strengths", []),
-                "weaknesses": analysis.get("weaknesses", []),
-                "improvements": analysis.get("improvements", analysis.get("suggestions", [])),
+                "analysis": normalized_analysis,
+                "quality": quality_score,
+                "efficiency": efficiency_score,
+                "completeness": completeness_score,
+                "overall_score": overall_score,
+                "redundant_steps": _coerce_str_list(
+                    response_data.get("redundant_steps")
+                ),
+                "suggestions": suggestions,
+                "summary": summary,
+                "effectiveness": effectiveness,
+                "reasoning_quality": reasoning_quality,
+                "tool_usage": tool_usage,
+                "strengths": strengths,
+                "weaknesses": weaknesses,
+                "improvements": improvements,
                 "cached": False,
             }
 
