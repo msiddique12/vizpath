@@ -1,14 +1,15 @@
 """Tests for the Haystack adapter."""
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock
 
 from vizpath.adapters.haystack import (
     HaystackAdapter,
     TracedPipeline,
     VizpathHaystackTracer,
-    _HaystackSpanContext,
     _component_span_type,
+    _HaystackSpanContext,
 )
 from vizpath.span import SpanType
 
@@ -84,7 +85,7 @@ class TestVizpathHaystackTracer:
         """Trace should stay open while other spans are still active."""
         hs_tracer = VizpathHaystackTracer()
         s1 = hs_tracer.trace_component("retriever")
-        s2 = hs_tracer.trace_component("llm")
+        hs_tracer.trace_component("llm")
         hs_tracer.end_component(s1)
         assert hs_tracer._trace is not None
 

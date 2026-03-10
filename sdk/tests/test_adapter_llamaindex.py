@@ -1,6 +1,6 @@
 """Tests for the LlamaIndex adapter."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from vizpath.adapters.llamaindex import VizpathLlamaIndexCallback
 

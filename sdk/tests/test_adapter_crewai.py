@@ -1,6 +1,6 @@
 """Tests for the CrewAI adapter."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -196,8 +196,6 @@ class TestTracedCrew:
     @pytest.mark.asyncio
     async def test_kickoff_async_calls_crew_kickoff_async(self):
         """kickoff_async() should await the underlying crew's kickoff_async."""
-        import asyncio
-
         async def fake_kickoff_async(inputs=None, **kwargs):
             return "async result"
 
