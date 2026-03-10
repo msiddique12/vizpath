@@ -158,3 +158,39 @@ class TestClientRetry:
             assert http_client.post.call_count == 2
 
         client.close()
+
+
+class TestClientFlush:
+    """Test explicit flushing behavior."""
+
+    def test_flush_processes_queued_spans(self) -> None:
+        """Calling flush should attempt to send all queued spans."""
+        config = Config(
+            api_key="vp_test_key",
+            base_url="http://localhost:8000/api/v1",
+            buffer_size=10,
+        )
+        client = Client(config)
+        span = MagicMock()
+        span.model_dump.return_value = {"name": "span"}
+
+        # Keep networking out of unit tests
+        client._client = MagicMock()
+        client._client.post.return_value = httpx.Response(200)
+
+        client.send(span)
+        client.send(span)
+        client.flush()
+
+        assert client._client.post.call_count == 1
+        payload = client._client.post.call_args_list[0].kwargs["json"]
+        assert len(payload) == 2
+
+        client.close()
+
+    def test_close_is_idempotent(self) -> None:
+        """Closing the client twice should be a no-op."""
+        client = Client(Config(enabled=False))
+        client.close()
+        client.close()
+        assert client._shutdown.is_set()

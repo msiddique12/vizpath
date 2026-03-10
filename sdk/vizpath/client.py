@@ -74,7 +74,8 @@ class Client:
         if not self._config.enabled:
             return
 
-        self._buffer.put(span)
+        with self._lock:
+            self._buffer.put(span)
 
         if self._buffer.qsize() >= self._config.buffer_size:
             self._flush()
@@ -85,16 +86,21 @@ class Client:
             return
 
         spans: list[SpanData] = []
-        while True:
-            try:
-                spans.append(self._buffer.get_nowait())
-            except Empty:
-                break
+        with self._lock:
+            while True:
+                try:
+                    spans.append(self._buffer.get_nowait())
+                except Empty:
+                    break
 
         if not spans:
             return
 
         self._send_with_retry(spans)
+
+    def flush(self) -> None:
+        """Flush any queued spans immediately."""
+        self._flush()
 
     def _send_with_retry(self, spans: list[SpanData]) -> None:
         """Send spans with exponential backoff retry."""
@@ -158,12 +164,15 @@ class Client:
 
     def close(self) -> None:
         """Shutdown the client and flush remaining spans."""
+        if self._shutdown.is_set():
+            return
+
         self._shutdown.set()
 
         if self._flush_thread and self._flush_thread.is_alive():
             self._flush_thread.join(timeout=2.0)
 
-        self._flush()
+        self.flush()
 
         if self._client:
             self._client.close()
