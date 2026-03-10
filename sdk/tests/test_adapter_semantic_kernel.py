@@ -114,6 +114,12 @@ class TestCaptureTokenUsage:
         _capture_token_usage(span, ctx)
         span.set_tokens.assert_called_once_with(42)
 
+    def test_zero_dict_usage(self):
+        span = MagicMock()
+        ctx = make_context(token_usage={"total_tokens": 0})
+        _capture_token_usage(span, ctx)
+        span.set_tokens.assert_called_once_with(0)
+
     def test_object_usage(self):
         span = MagicMock()
         usage = MagicMock()

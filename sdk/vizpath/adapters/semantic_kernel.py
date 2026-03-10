@@ -269,7 +269,7 @@ def _capture_token_usage(span: Any, context: Any) -> None:
             span.set_tokens(usage.total_tokens)
         elif isinstance(usage, dict):
             total = usage.get("total_tokens")
-            if total:
+            if total is not None:
                 span.set_tokens(int(total))
     except Exception:
         pass
