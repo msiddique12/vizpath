@@ -275,7 +275,8 @@ class GlobalTracer:
                         span.__exit__(type(e), e, e.__traceback__)
                         raise
                     finally:
-                        _current_span.reset(span_token)
+                        if span_token is not None:
+                            _current_span.reset(span_token)
 
                 return async_wrapper  # type: ignore
             else:
@@ -296,7 +297,8 @@ class GlobalTracer:
                         span.__exit__(type(e), e, e.__traceback__)
                         raise
                     finally:
-                        _current_span.reset(span_token)
+                        if span_token is not None:
+                            _current_span.reset(span_token)
 
                 return wrapper
         return decorator
