@@ -1,5 +1,7 @@
 """Custom exceptions for the vizpath SDK."""
 
+from typing import Optional
+
 
 class VizpathError(Exception):
     """Base exception for all vizpath errors."""
@@ -31,7 +33,7 @@ class RateLimitError(VizpathError):
     def __init__(
         self,
         message: str,
-        retry_after: float | None = None,
+        retry_after: Optional[float] = None,
     ) -> None:
         super().__init__(message)
         self.retry_after = retry_after
