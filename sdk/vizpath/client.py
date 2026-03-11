@@ -158,13 +158,20 @@ class Client:
 
     def _record_transport_failure(self) -> None:
         """Track consecutive transport failures and open a backoff window."""
+        if self._is_circuit_open():
+            return
+
         self._consecutive_failures += 1
-        if self._consecutive_failures >= self._config.circuit_breaker_failures:
-            self._circuit_open_until = time.time() + self._config.circuit_breaker_window_seconds
-            logger.warning(
-                "Transport failures exceeded threshold, entering cooldown for %s seconds",
-                self._config.circuit_breaker_window_seconds,
-            )
+        if self._consecutive_failures < self._config.circuit_breaker_failures:
+            return
+
+        # Keep the counter capped at threshold while backoff is open.
+        self._consecutive_failures = self._config.circuit_breaker_failures
+        self._circuit_open_until = time.time() + self._config.circuit_breaker_window_seconds
+        logger.warning(
+            "Transport failures exceeded threshold, entering cooldown for %s seconds",
+            self._config.circuit_breaker_window_seconds,
+        )
 
     def _record_transport_success(self) -> None:
         """Reset transport failure state after a successful send."""
