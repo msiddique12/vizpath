@@ -24,8 +24,12 @@ class Config:
         default_factory=lambda: os.environ.get("VIZPATH_CIRCUIT_BREAKER_ENABLED", "true").lower()
         == "true"
     )
-    circuit_breaker_failures: int = 5
-    circuit_breaker_window_seconds: float = 60.0
+    circuit_breaker_failures: int = field(
+        default_factory=lambda: int(os.environ.get("VIZPATH_CIRCUIT_BREAKER_FAILURES", "5"))
+    )
+    circuit_breaker_window_seconds: float = field(
+        default_factory=lambda: float(os.environ.get("VIZPATH_CIRCUIT_BREAKER_WINDOW_SECONDS", "60"))
+    )
 
     def __post_init__(self) -> None:
         if self.buffer_size < 1:

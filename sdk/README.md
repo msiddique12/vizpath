@@ -62,6 +62,9 @@ result = traced_graph.invoke({"input": "research quantum computing"})
 - `VIZPATH_API_KEY` - Your API key
 - `VIZPATH_API_URL` - Server URL (default: `http://localhost:8000/api/v1`)
 - `VIZPATH_ENABLED` - Enable/disable tracing (default: `true`)
+- `VIZPATH_CIRCUIT_BREAKER_ENABLED` - Pause retries briefly after repeated transport failures (default: `true`)
+- `VIZPATH_CIRCUIT_BREAKER_FAILURES` - Consecutive transport failures before cooldown (default: `5`)
+- `VIZPATH_CIRCUIT_BREAKER_WINDOW_SECONDS` - Cooldown duration in seconds (default: `60`)
 
 ### Programmatic Configuration
 
@@ -73,6 +76,9 @@ config = Config(
     base_url="https://your-server.com/api/v1",
     buffer_size=100,      # Spans to buffer before flush
     flush_interval=10.0,  # Seconds between flushes
+    circuit_breaker_enabled=True,  # Enable cooldown protection on transport failures
+    circuit_breaker_failures=7,    # Open circuit after 7 consecutive transport errors
+    circuit_breaker_window_seconds=30.0, # Cooldown window in seconds
 )
 
 tracer = Tracer(config=config)
