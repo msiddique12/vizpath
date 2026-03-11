@@ -41,6 +41,8 @@ class Client:
         self._shutdown = Event()
         self._client: httpx.Client | None = None
         self._flush_thread: Thread | None = None
+        self._consecutive_failures = 0
+        self._circuit_open_until: float = 0.0
 
         if config.enabled:
             self._initialize()
@@ -84,6 +86,8 @@ class Client:
         """Flush all buffered spans to the server."""
         if not self._client:
             return
+        if self._is_circuit_open():
+            return
 
         spans: list[SpanData] = []
         with self._lock:
@@ -106,15 +110,18 @@ class Client:
         """Send spans with exponential backoff retry."""
         payload = [s.model_dump(mode="json") for s in spans]
         last_error: Exception | None = None
+        saw_transport_error = False
 
         for attempt in range(self._config.max_retries):
             try:
                 response = self._client.post("/traces/spans/batch", json=payload)
                 self._handle_response(response)
                 logger.debug(f"Flushed {len(spans)} spans")
+                self._record_transport_success()
                 return
             except (httpx.ConnectError, httpx.TimeoutException) as e:
                 last_error = e
+                saw_transport_error = True
                 if attempt < self._config.max_retries - 1:
                     wait_time = (2 ** attempt) * 0.1  # 0.1s, 0.2s, 0.4s...
                     logger.debug(f"Retry {attempt + 1}/{self._config.max_retries} in {wait_time}s")
@@ -133,9 +140,37 @@ class Client:
                 return  # Don't retry on unknown errors
 
         # All retries failed, re-buffer spans
+        if saw_transport_error:
+            self._record_transport_failure()
         logger.warning(f"All retries failed, re-buffering {len(spans)} spans: {last_error}")
         for span in spans:
             self._buffer.put(span)
+
+    def _is_circuit_open(self) -> bool:
+        """Return True if the client is in a temporary transport outage backoff."""
+        if not self._config.circuit_breaker_enabled:
+            return False
+
+        if self._consecutive_failures < self._config.circuit_breaker_failures:
+            return False
+
+        return time.time() < self._circuit_open_until
+
+    def _record_transport_failure(self) -> None:
+        """Track consecutive transport failures and open a backoff window."""
+        self._consecutive_failures += 1
+        if self._consecutive_failures >= self._config.circuit_breaker_failures:
+            self._circuit_open_until = time.time() + self._config.circuit_breaker_window_seconds
+            logger.warning(
+                "Transport failures exceeded threshold, entering cooldown for %s seconds",
+                self._config.circuit_breaker_window_seconds,
+            )
+
+    def _record_transport_success(self) -> None:
+        """Reset transport failure state after a successful send."""
+        if self._consecutive_failures > 0:
+            self._consecutive_failures = 0
+            self._circuit_open_until = 0.0
 
     def _handle_response(self, response: httpx.Response) -> None:
         """Handle HTTP response and raise appropriate exceptions."""

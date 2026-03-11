@@ -93,6 +93,47 @@ class TestClientRetry:
 
         client.close()
 
+
+class TestClientCircuitBreaker:
+    """Test transport failure circuit-breaker behavior."""
+
+    def test_circuit_breaker_blocks_flushes_after_repeated_transport_failures(self) -> None:
+        """Repeated connection failures should open the circuit and skip flushes."""
+        config = Config(
+            api_key="vp_test_key",
+            base_url="http://localhost:8000/api/v1",
+            max_retries=1,
+            circuit_breaker_failures=2,
+            circuit_breaker_window_seconds=120,
+        )
+        client = Client(config)
+        span = MagicMock()
+        span.model_dump.return_value = {"name": "span"}
+        client._client = MagicMock()
+        client._client.post.side_effect = httpx.ConnectError("connection failed")
+
+        client.send(span)
+        client._send_with_retry([span])
+        assert not client._is_circuit_open()
+        assert client._client.post.call_count == 1
+
+        client._send_with_retry([span])
+        assert client._is_circuit_open()
+        assert client._client.post.call_count == 2
+
+        client.send(span)
+        client.flush()
+        assert client._client.post.call_count == 2
+
+        client._client.post.side_effect = [httpx.Response(200)]
+        client._consecutive_failures = 0
+        client._circuit_open_until = 0.0
+        client._is_circuit_open()
+        client.flush()
+        assert client._client.post.call_count >= 3
+
+        client.close()
+
     def test_rate_limit_with_invalid_retry_after_falls_back_to_backoff(self) -> None:
         """Invalid Retry-After should use exponential backoff."""
         config = Config(

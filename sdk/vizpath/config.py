@@ -20,9 +20,19 @@ class Config:
     timeout: float = 30.0
     max_retries: int = 3
     enabled: bool = field(default_factory=lambda: os.environ.get("VIZPATH_ENABLED", "true").lower() == "true")
+    circuit_breaker_enabled: bool = field(
+        default_factory=lambda: os.environ.get("VIZPATH_CIRCUIT_BREAKER_ENABLED", "true").lower()
+        == "true"
+    )
+    circuit_breaker_failures: int = 5
+    circuit_breaker_window_seconds: float = 60.0
 
     def __post_init__(self) -> None:
         if self.buffer_size < 1:
             raise ValueError("buffer_size must be at least 1")
         if self.flush_interval < 0.1:
             raise ValueError("flush_interval must be at least 0.1 seconds")
+        if self.circuit_breaker_failures < 1:
+            raise ValueError("circuit_breaker_failures must be at least 1")
+        if self.circuit_breaker_window_seconds < 1:
+            raise ValueError("circuit_breaker_window_seconds must be at least 1 second")
