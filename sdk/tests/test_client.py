@@ -93,6 +93,57 @@ class TestClientRetry:
 
         client.close()
 
+    def test_stats_track_overflow_and_flush(self) -> None:
+        """Stats should track dropped and flushed spans."""
+        config = Config(
+            api_key="vp_test_key",
+            base_url="http://localhost:8000/api/v1",
+            max_buffer_items=2,
+            buffer_size=10,
+            drop_oldest_when_full=True,
+        )
+        client = Client(config)
+        client._client = MagicMock()
+        client._client.post.return_value = httpx.Response(200)
+
+        client.send(MagicMock(model_dump=MagicMock(return_value={"name": "first"})))
+        client.send(MagicMock(model_dump=MagicMock(return_value={"name": "second"})))
+        client.send(MagicMock(model_dump=MagicMock(return_value={"name": "third"})))
+        assert client.stats()["dropped_spans"] == 1
+
+        client.flush()
+        assert client.stats()["flushed_spans"] == 2
+        assert client.stats()["buffered"] == 0
+        client.close()
+
+    def test_stats_track_flush_failures(self) -> None:
+        """Flush failures should be counted after retry exhaustion."""
+        config = Config(
+            api_key="vp_test_key",
+            base_url="http://localhost:8000/api/v1",
+            max_retries=2,
+        )
+        client = Client(config)
+        span = MagicMock()
+        span.model_dump.return_value = {"name": "span"}
+
+        with (
+            patch.object(client, "_client") as http_client,
+            patch("vizpath.client.time.sleep") as sleep,
+        ):
+            http_client.post.side_effect = [
+                httpx.Response(500),
+                httpx.Response(500),
+            ]
+
+            client._send_with_retry([span])
+
+            assert client.stats()["flush_failures"] == 1
+            assert client.stats()["buffered"] == 1
+            assert sleep.call_count == 1
+
+        client.close()
+
     def test_buffer_full_drops_newest_by_default(self) -> None:
         """When buffer reaches cap and drop_oldest is disabled, keep existing spans."""
         config = Config(

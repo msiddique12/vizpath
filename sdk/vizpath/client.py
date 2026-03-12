@@ -7,7 +7,7 @@ import logging
 import time
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from queue import Empty, Queue
+from queue import Empty, Full, Queue
 from threading import Event, Lock, Thread
 from typing import Any
 
@@ -44,6 +44,9 @@ class Client:
         self._flush_thread: Thread | None = None
         self._consecutive_failures = 0
         self._circuit_open_until: float = 0.0
+        self._dropped_spans = 0
+        self._flushed_spans = 0
+        self._flush_failures = 0
 
         if config.enabled:
             self._initialize()
@@ -81,18 +84,20 @@ class Client:
             if self._buffer.full():
                 if self._config.drop_oldest_when_full:
                     try:
-                        dropped = self._buffer.get_nowait()
+                        self._buffer.get_nowait()
+                        self._dropped_spans += 1
                         logger.warning(
                             "Trace buffer full, dropping oldest span to make room for new span"
                         )
                     except Empty:
-                        dropped = None
-                    if dropped is not None:
+                        pass
+                    else:
                         self._buffer.put_nowait(span)
                         return
                 logger.warning(
                     "Trace buffer full, dropping newest span"
                 )
+                self._dropped_spans += 1
                 return
             self._buffer.put_nowait(span)
 
@@ -133,6 +138,7 @@ class Client:
             try:
                 response = self._client.post("/traces/spans/batch", json=payload)
                 self._handle_response(response)
+                self._flushed_spans += len(spans)
                 logger.debug(f"Flushed {len(spans)} spans")
                 self._record_transport_success()
                 return
@@ -159,9 +165,13 @@ class Client:
         # All retries failed, re-buffer spans
         if saw_transport_error:
             self._record_transport_failure()
+            self._flush_failures += 1
         logger.warning(f"All retries failed, re-buffering {len(spans)} spans: {last_error}")
         for span in spans:
-            self._buffer.put(span)
+            try:
+                self._buffer.put_nowait(span)
+            except Full:
+                self._dropped_spans += 1
 
     def _is_circuit_open(self) -> bool:
         """Return True if the client is in a temporary transport outage backoff."""
@@ -261,6 +271,15 @@ class Client:
         if self._client:
             self._client.close()
             self._client = None
+
+    def stats(self) -> dict[str, int]:
+        """Return client runtime metrics."""
+        return {
+            "buffered": self._buffer.qsize(),
+            "dropped_spans": self._dropped_spans,
+            "flushed_spans": self._flushed_spans,
+            "flush_failures": self._flush_failures,
+        }
 
     def __enter__(self) -> Client:
         return self
