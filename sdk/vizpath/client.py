@@ -120,7 +120,7 @@ class Client:
                 logger.debug(f"Flushed {len(spans)} spans")
                 self._record_transport_success()
                 return
-            except (httpx.ConnectError, httpx.TimeoutException) as e:
+            except (httpx.ConnectError, httpx.TimeoutException, ConnectionError) as e:
                 last_error = e
                 saw_transport_error = True
                 if attempt < self._config.max_retries - 1:
@@ -226,7 +226,7 @@ class Client:
             return [self._sanitize_payload(item) for item in value]
 
         if isinstance(value, tuple):
-            return [self._sanitize_payload(item) for item in value]
+            return tuple(self._sanitize_payload(item) for item in value)
 
         return value
 

@@ -93,6 +93,34 @@ class TestClientRetry:
 
         client.close()
 
+    def test_server_error_is_retried_and_rebuffered(self) -> None:
+        """5xx responses should be retried and re-buffered if retries are exhausted."""
+        config = Config(
+            api_key="vp_test_key",
+            base_url="http://localhost:8000/api/v1",
+            max_retries=2,
+        )
+        client = Client(config)
+        span = MagicMock()
+        span.model_dump.return_value = {"name": "span"}
+
+        with (
+            patch.object(client, "_client") as http_client,
+            patch("vizpath.client.time.sleep") as sleep,
+        ):
+            http_client.post.side_effect = [
+                httpx.Response(500),
+                httpx.Response(500),
+            ]
+
+            client._send_with_retry([span])
+
+            assert sleep.call_count == 1
+            assert http_client.post.call_count == 2
+            assert client._buffer.qsize() == 1
+
+        client.close()
+
 
 class TestClientCircuitBreaker:
     """Test transport failure circuit-breaker behavior."""
@@ -200,6 +228,31 @@ class TestClientPayloadRedaction:
         payload = client._client.post.call_args_list[0].kwargs["json"][0]
         assert payload["password"] == "super-secret"
         assert payload["input"]["password"] == "nested"
+        client.close()
+
+    def test_redaction_preserves_tuple_shapes(self) -> None:
+        """Sensitive tuples should keep tuple type after redaction."""
+        config = Config(
+            api_key="vp_test_key",
+            base_url="http://localhost:8000/api/v1",
+            redaction_fields=["secret"],
+        )
+        client = Client(config)
+        client._client = MagicMock()
+        client._client.post.return_value = httpx.Response(200)
+
+        span = MagicMock()
+        span.model_dump.return_value = {
+            "input": ("secret", {"secret": "value"}),
+        }
+
+        client.send(span)
+        client.flush()
+
+        payload = client._client.post.call_args_list[0].kwargs["json"][0]
+        assert isinstance(payload["input"], tuple)
+        assert payload["input"][0] == "secret"
+        assert payload["input"][1]["secret"] == "[REDACTED]"
         client.close()
 
     def test_rate_limit_with_invalid_retry_after_falls_back_to_backoff(self) -> None:
