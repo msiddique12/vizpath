@@ -93,6 +93,65 @@ class TestClientRetry:
 
         client.close()
 
+    def test_buffer_full_drops_newest_by_default(self) -> None:
+        """When buffer reaches cap and drop_oldest is disabled, keep existing spans."""
+        config = Config(
+            api_key="vp_test_key",
+            base_url="http://localhost:8000/api/v1",
+            max_buffer_items=2,
+            buffer_size=10,
+        )
+        client = Client(config)
+        client._client = MagicMock()
+        client._client.post.return_value = httpx.Response(200)
+
+        first = MagicMock()
+        first.model_dump.return_value = {"name": "first"}
+        second = MagicMock()
+        second.model_dump.return_value = {"name": "second"}
+        third = MagicMock()
+        third.model_dump.return_value = {"name": "third"}
+
+        client.send(first)
+        client.send(second)
+        client.send(third)
+        client.flush()
+
+        payload = client._client.post.call_args_list[0].kwargs["json"]
+        assert len(payload) == 2
+        assert [item["name"] for item in payload] == ["first", "second"]
+        client.close()
+
+    def test_buffer_full_drops_oldest_when_configured(self) -> None:
+        """When dropping oldest is enabled, keep newest spans once full."""
+        config = Config(
+            api_key="vp_test_key",
+            base_url="http://localhost:8000/api/v1",
+            max_buffer_items=2,
+            buffer_size=10,
+            drop_oldest_when_full=True,
+        )
+        client = Client(config)
+        client._client = MagicMock()
+        client._client.post.return_value = httpx.Response(200)
+
+        first = MagicMock()
+        first.model_dump.return_value = {"name": "first"}
+        second = MagicMock()
+        second.model_dump.return_value = {"name": "second"}
+        third = MagicMock()
+        third.model_dump.return_value = {"name": "third"}
+
+        client.send(first)
+        client.send(second)
+        client.send(third)
+        client.flush()
+
+        payload = client._client.post.call_args_list[0].kwargs["json"]
+        assert len(payload) == 2
+        assert [item["name"] for item in payload] == ["second", "third"]
+        client.close()
+
     def test_server_error_is_retried_and_rebuffered(self) -> None:
         """5xx responses should be retried and re-buffered if retries are exhausted."""
         config = Config(

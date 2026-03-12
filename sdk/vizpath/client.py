@@ -37,7 +37,7 @@ class Client:
 
     def __init__(self, config: Config) -> None:
         self._config = config
-        self._buffer: Queue[SpanData] = Queue()
+        self._buffer: Queue[SpanData] = Queue(maxsize=self._config.max_buffer_items)
         self._lock = Lock()
         self._shutdown = Event()
         self._client: httpx.Client | None = None
@@ -78,7 +78,23 @@ class Client:
             return
 
         with self._lock:
-            self._buffer.put(span)
+            if self._buffer.full():
+                if self._config.drop_oldest_when_full:
+                    try:
+                        dropped = self._buffer.get_nowait()
+                        logger.warning(
+                            "Trace buffer full, dropping oldest span to make room for new span"
+                        )
+                    except Empty:
+                        dropped = None
+                    if dropped is not None:
+                        self._buffer.put_nowait(span)
+                        return
+                logger.warning(
+                    "Trace buffer full, dropping newest span"
+                )
+                return
+            self._buffer.put_nowait(span)
 
         if self._buffer.qsize() >= self._config.buffer_size:
             self._flush()

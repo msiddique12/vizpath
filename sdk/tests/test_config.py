@@ -16,7 +16,9 @@ class TestConfig:
             assert config.api_key is None
             assert config.base_url == "http://localhost:8000/api/v1"
             assert config.buffer_size == 50
+            assert config.max_buffer_items == 10000
             assert config.flush_interval == 5.0
+            assert config.drop_oldest_when_full is False
             assert config.timeout == 30.0
             assert config.max_retries == 3
             assert config.enabled is True
@@ -47,6 +49,8 @@ class TestConfig:
             "VIZPATH_REDACTION_ENABLED": "false",
             "VIZPATH_REDACTION_FIELDS": "token,Client-Secret",
             "VIZPATH_REDACTION_REPLACEMENT": "***",
+            "VIZPATH_DROP_OLDEST_WHEN_BUFFER_FULL": "true",
+            "VIZPATH_MAX_BUFFER_ITEMS": "250",
         }
         with patch.dict(os.environ, env, clear=True):
             config = Config()
@@ -57,6 +61,8 @@ class TestConfig:
             assert config.circuit_breaker_enabled is False
             assert config.circuit_breaker_failures == 7
             assert config.circuit_breaker_window_seconds == 120.0
+            assert config.max_buffer_items == 250
+            assert config.drop_oldest_when_full is True
             assert config.redaction_enabled is False
             assert config.redaction_fields == ["token", "client-secret"]
             assert config.redaction_replacement == "***"
@@ -70,6 +76,8 @@ class TestConfig:
             circuit_breaker_enabled=False,
             circuit_breaker_failures=3,
             circuit_breaker_window_seconds=30,
+            max_buffer_items=2000,
+            drop_oldest_when_full=True,
             redaction_fields=["TOKEN", "Client-Secret"],
         )
 
@@ -80,6 +88,8 @@ class TestConfig:
         assert config.circuit_breaker_enabled is False
         assert config.circuit_breaker_failures == 3
         assert config.circuit_breaker_window_seconds == 30
+        assert config.max_buffer_items == 2000
+        assert config.drop_oldest_when_full is True
         assert config.redaction_enabled is True
         assert config.redaction_replacement == "[REDACTED]"
         assert config.redaction_fields == ["token", "client-secret"]
@@ -99,6 +109,10 @@ class TestConfig:
     def test_invalid_circuit_breaker_window(self):
         with pytest.raises(ValueError, match="circuit_breaker_window_seconds must be at least 1"):
             Config(circuit_breaker_window_seconds=0)
+
+    def test_invalid_max_buffer_items(self):
+        with pytest.raises(ValueError, match="max_buffer_items must be at least 1"):
+            Config(max_buffer_items=0)
 
     def test_invalid_redaction_replacement(self):
         with pytest.raises(ValueError, match="redaction_replacement cannot be empty"):

@@ -54,7 +54,14 @@ class Config:
     )
     project_id: str | None = field(default_factory=lambda: os.environ.get("VIZPATH_PROJECT_ID"))
     buffer_size: int = 50
+    max_buffer_items: int = field(
+        default_factory=lambda: int(os.environ.get("VIZPATH_MAX_BUFFER_ITEMS", "10000"))
+    )
     flush_interval: float = 5.0
+    drop_oldest_when_full: bool = field(
+        default_factory=lambda: os.environ.get("VIZPATH_DROP_OLDEST_WHEN_BUFFER_FULL", "false").lower()
+        == "true"
+    )
     timeout: float = 30.0
     max_retries: int = 3
     enabled: bool = field(default_factory=lambda: os.environ.get("VIZPATH_ENABLED", "true").lower() == "true")
@@ -93,6 +100,8 @@ class Config:
             raise ValueError("circuit_breaker_failures must be at least 1")
         if self.circuit_breaker_window_seconds < 1:
             raise ValueError("circuit_breaker_window_seconds must be at least 1 second")
+        if self.max_buffer_items < 1:
+            raise ValueError("max_buffer_items must be at least 1")
         if self.max_retries < 1:
             raise ValueError("max_retries must be at least 1")
         if not self.redaction_replacement:

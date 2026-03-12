@@ -65,6 +65,8 @@ result = traced_graph.invoke({"input": "research quantum computing"})
 - `VIZPATH_CIRCUIT_BREAKER_ENABLED` - Pause retries briefly after repeated transport failures (default: `true`)
 - `VIZPATH_CIRCUIT_BREAKER_FAILURES` - Consecutive transport failures before cooldown (default: `5`)
 - `VIZPATH_CIRCUIT_BREAKER_WINDOW_SECONDS` - Cooldown duration in seconds (default: `60`)
+- `VIZPATH_MAX_BUFFER_ITEMS` - Maximum spans retained in memory before dropping (default: `10000`)
+- `VIZPATH_DROP_OLDEST_WHEN_BUFFER_FULL` - When full, drop oldest spans to keep newest (default: `false`)
 - `VIZPATH_REDACTION_ENABLED` - Redact sensitive values in span payloads before sending (default: `true`)
 - `VIZPATH_REDACTION_FIELDS` - Comma-separated keys to redact (default: `authorization,api_key,apikey,password,access_token,refresh_token,secret,private_key`)
 - `VIZPATH_REDACTION_REPLACEMENT` - Replacement text for redacted fields (default: `[REDACTED]`)
@@ -82,6 +84,8 @@ config = Config(
     circuit_breaker_enabled=True,  # Enable cooldown protection on transport failures
     circuit_breaker_failures=7,    # Open circuit after 7 consecutive transport errors
     circuit_breaker_window_seconds=30.0, # Cooldown window in seconds
+    max_buffer_items=5000,  # Max spans buffered in memory
+    drop_oldest_when_full=True,  # Keep newest spans when buffer is full
     redaction_enabled=True,       # Redact sensitive values before upload
     redaction_fields=["authorization", "api_key", "password"],  # Additional keys to scrub
     redaction_replacement="[REDACTED]",  # Safe placeholder value
