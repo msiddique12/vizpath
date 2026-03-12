@@ -66,3 +66,33 @@ async def security_headers_middleware(request: Request, call_next):
         response.headers["Content-Security-Policy"] = MINIMAL_CSP
 
     return response
+
+
+async def request_size_limit_middleware(request: Request, call_next):
+    """Reject requests with payloads that exceed the configured size limit."""
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        content_length = request.headers.get("Content-Length")
+        if content_length is not None:
+            try:
+                if int(content_length) > settings.max_request_body_bytes:
+                    request_id = getattr(request.state, "request_id", None)
+                    return build_error_response(
+                        status_code=413,
+                        detail="Request body exceeds configured limit",
+                        request_id=request_id,
+                        code="payload_too_large",
+                    )
+            except ValueError:
+                pass
+
+        body = await request.body()
+        if len(body) > settings.max_request_body_bytes:
+            request_id = getattr(request.state, "request_id", None)
+            return build_error_response(
+                status_code=413,
+                detail="Request body exceeds configured limit",
+                request_id=request_id,
+                code="payload_too_large",
+            )
+
+    return await call_next(request)

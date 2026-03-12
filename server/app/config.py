@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     rate_limit_burst_multiplier: float = Field(
         default=1.0, alias="RATE_LIMIT_BURST_MULTIPLIER"
     )
+    max_request_body_bytes: int = Field(default=1_048_576, alias="MAX_REQUEST_BODY_BYTES")
 
     trace_retention_days: int = Field(default=7, alias="TRACE_RETENTION_DAYS")
 
@@ -90,6 +91,7 @@ class Settings(BaseSettings):
         "rate_limit_rpm",
         "rate_limit_ip_rpm",
         "rate_limit_user_rpm",
+        "max_request_body_bytes",
     )
     @classmethod
     def validate_positive_ints(cls, v: int, info: ValidationInfo) -> int:

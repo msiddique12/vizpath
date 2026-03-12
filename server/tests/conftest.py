@@ -6,6 +6,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+import app.rate_limit as rate_limit
+from app.config import settings
 from app.database import Base, get_db
 from app.main import app
 
@@ -40,3 +42,14 @@ def test_db():
 def client(test_db):
     """Create a test client with database override."""
     return TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _disable_rate_limiting_for_test_suite(monkeypatch):
+    """Keep most tests deterministic by disabling rate limits by default."""
+    monkeypatch.setattr(settings, "rate_limit_enabled", False)
+    monkeypatch.setattr(
+        rate_limit,
+        "_limiter",
+        rate_limit.RateLimiter(rate_limit.InMemoryRateLimitBackend()),
+    )

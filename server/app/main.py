@@ -19,6 +19,7 @@ from app.security import (
     build_error_response,
     redact_headers,
     request_id_middleware,
+    request_size_limit_middleware,
     security_headers_middleware,
 )
 
@@ -66,6 +67,7 @@ app.add_middleware(
 )
 app.middleware("http")(request_id_middleware)
 app.middleware("http")(rate_limit_middleware)
+app.middleware("http")(request_size_limit_middleware)
 app.middleware("http")(security_headers_middleware)
 
 app.include_router(traces.router, prefix="/api/v1")

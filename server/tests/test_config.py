@@ -40,3 +40,9 @@ def test_redis_url_requires_supported_scheme():
     with pytest.raises(ValidationError) as exc:
         Settings(**BASE_SETTINGS, REDIS_URL="http://localhost:6379")
     assert "REDIS_URL must use redis or rediss scheme" in str(exc.value)
+
+
+def test_max_request_body_bytes_must_be_non_negative():
+    with pytest.raises(ValidationError) as exc:
+        Settings(**BASE_SETTINGS, MAX_REQUEST_BODY_BYTES=-1)
+    assert "max_request_body_bytes must be 0 or greater" in str(exc.value)
