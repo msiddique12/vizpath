@@ -92,8 +92,8 @@ def main():
         print("  or pass --api-key 'your-api-key'")
         sys.exit(1)
 
-    print(f"\nResearch Agent")
-    print(f"==============")
+    print("\nResearch Agent")
+    print("==============")
     print(f"Topic: {args.topic}")
     print(f"Model: {args.model}")
     print()

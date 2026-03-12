@@ -1,7 +1,5 @@
 """Research agent tools with vizpath tracing."""
 
-import json
-import httpx
 from typing import Any
 from vizpath import tracer
 

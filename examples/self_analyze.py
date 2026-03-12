@@ -171,7 +171,7 @@ def main():
         print_analysis(analysis)
 
     # Run self-analysis
-    print(f"\nRunning deep self-analysis...")
+    print("\nRunning deep self-analysis...")
     try:
         self_analysis = self_analyze_trace(base_url, trace_id)
     except httpx.HTTPStatusError as e:
