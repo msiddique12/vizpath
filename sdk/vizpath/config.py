@@ -6,6 +6,44 @@ import os
 from dataclasses import dataclass, field
 
 
+def _parse_bool_env(value: str | None, default: bool) -> bool:
+    """Parse a boolean env value with strict true/false handling."""
+    if value is None:
+        return default
+    return value.strip().lower() == "true"
+
+
+def _parse_csv_list(value: str, default: list[str]) -> list[str]:
+    """Parse comma-separated values into a normalized list."""
+    values = [item.strip() for item in value.split(",")]
+    parsed = [value for value in values if value]
+    normalized = [value.lower() for value in parsed]
+
+    if not normalized:
+        return default
+
+    # Deduplicate while preserving order for deterministic snapshots.
+    deduped: list[str] = []
+    seen = set[str]()
+    for item in normalized:
+        if item not in seen:
+            seen.add(item)
+            deduped.append(item)
+    return deduped
+
+
+_DEFAULT_REDACTION_FIELDS = [
+    "authorization",
+    "api_key",
+    "apikey",
+    "password",
+    "access_token",
+    "refresh_token",
+    "secret",
+    "private_key",
+]
+
+
 @dataclass
 class Config:
     """SDK configuration with sensible defaults."""
@@ -30,6 +68,21 @@ class Config:
     circuit_breaker_window_seconds: float = field(
         default_factory=lambda: float(os.environ.get("VIZPATH_CIRCUIT_BREAKER_WINDOW_SECONDS", "60"))
     )
+    redaction_enabled: bool = field(
+        default_factory=lambda: _parse_bool_env(os.environ.get("VIZPATH_REDACTION_ENABLED"), True)
+    )
+    redaction_fields: list[str] = field(
+        default_factory=lambda: _parse_csv_list(
+            os.environ.get(
+                "VIZPATH_REDACTION_FIELDS",
+                ",".join(_DEFAULT_REDACTION_FIELDS),
+            ),
+            _DEFAULT_REDACTION_FIELDS,
+        )
+    )
+    redaction_replacement: str = field(
+        default_factory=lambda: os.environ.get("VIZPATH_REDACTION_REPLACEMENT", "[REDACTED]")
+    )
 
     def __post_init__(self) -> None:
         if self.buffer_size < 1:
@@ -40,3 +93,10 @@ class Config:
             raise ValueError("circuit_breaker_failures must be at least 1")
         if self.circuit_breaker_window_seconds < 1:
             raise ValueError("circuit_breaker_window_seconds must be at least 1 second")
+        if self.max_retries < 1:
+            raise ValueError("max_retries must be at least 1")
+        if not self.redaction_replacement:
+            raise ValueError("redaction_replacement cannot be empty")
+        if self.redaction_fields:
+            # Keep normalized for predictable matching behavior.
+            self.redaction_fields = _parse_csv_list(",".join(self.redaction_fields), self.redaction_fields)

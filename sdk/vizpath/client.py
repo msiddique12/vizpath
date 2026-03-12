@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from queue import Empty, Queue
 from threading import Event, Lock, Thread
+from typing import Any
 
 import httpx
 
@@ -108,7 +109,7 @@ class Client:
 
     def _send_with_retry(self, spans: list[SpanData]) -> None:
         """Send spans with exponential backoff retry."""
-        payload = [s.model_dump(mode="json") for s in spans]
+        payload = [self._sanitize_payload(s.model_dump(mode="json")) for s in spans]
         last_error: Exception | None = None
         saw_transport_error = False
 
@@ -203,6 +204,31 @@ class Client:
             raise ConnectionError(f"Server error: {response.status_code}")
         if not response.is_success:
             raise VizpathError(f"Request failed: {response.status_code} {response.text}")
+
+    def _sanitize_payload(self, value: Any) -> Any:
+        """Redact configured sensitive values from payload recursively."""
+        if not self._config.redaction_enabled:
+            return value
+
+        sensitive = {field.lower() for field in self._config.redaction_fields}
+        replacement = self._config.redaction_replacement
+
+        if isinstance(value, dict):
+            redacted: dict[str, Any] = {}
+            for key, nested in value.items():
+                if isinstance(key, str) and key.lower() in sensitive:
+                    redacted[key] = replacement
+                else:
+                    redacted[key] = self._sanitize_payload(nested)
+            return redacted
+
+        if isinstance(value, list):
+            return [self._sanitize_payload(item) for item in value]
+
+        if isinstance(value, tuple):
+            return [self._sanitize_payload(item) for item in value]
+
+        return value
 
     def close(self) -> None:
         """Shutdown the client and flush remaining spans."""

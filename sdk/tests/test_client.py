@@ -134,6 +134,74 @@ class TestClientCircuitBreaker:
 
         client.close()
 
+
+class TestClientPayloadRedaction:
+    """Test payload redaction behavior for sensitive fields."""
+
+    def test_redacts_sensitive_fields_from_nested_payload(self) -> None:
+        """Sensitive keys should be replaced before sending spans."""
+        config = Config(
+            api_key="vp_test_key",
+            base_url="http://localhost:8000/api/v1",
+            redaction_fields=["password", "api_key", "TOKEN", "authorization"],
+        )
+        client = Client(config)
+        client._client = MagicMock()
+        client._client.post.return_value = httpx.Response(200)
+
+        span = MagicMock()
+        span.model_dump.return_value = {
+            "name": "login",
+            "input": {
+                "username": "alice",
+                "password": "super-secret",
+                "nested": {"Api_Key": "should_mask"},
+            },
+            "trace_metadata": {
+                "model": "gpt-4",
+                "metadata": {
+                    "request_headers": {"AuthORIZATION": "Bearer x"},
+                },
+            },
+            "events": [
+                {"name": "attempt", "attributes": {"token": "abc-123"}},
+            ],
+        }
+
+        client.send(span)
+        client.flush()
+
+        payload = client._client.post.call_args_list[0].kwargs["json"][0]
+        assert payload["input"]["password"] == "[REDACTED]"
+        assert payload["input"]["nested"]["Api_Key"] == "[REDACTED]"
+        assert payload["events"][0]["attributes"]["token"] == "[REDACTED]"
+        assert payload["trace_metadata"]["metadata"]["request_headers"]["AuthORIZATION"] == "[REDACTED]"
+        assert payload["input"]["username"] == "alice"
+        client.close()
+
+    def test_disables_redaction_when_disabled(self) -> None:
+        """With redaction disabled, sensitive values should be transmitted unchanged."""
+        config = Config(
+            api_key="vp_test_key",
+            base_url="http://localhost:8000/api/v1",
+            redaction_enabled=False,
+            redaction_fields=["password"],
+        )
+        client = Client(config)
+        client._client = MagicMock()
+        client._client.post.return_value = httpx.Response(200)
+
+        span = MagicMock()
+        span.model_dump.return_value = {"password": "super-secret", "input": {"password": "nested"}}
+
+        client.send(span)
+        client.flush()
+
+        payload = client._client.post.call_args_list[0].kwargs["json"][0]
+        assert payload["password"] == "super-secret"
+        assert payload["input"]["password"] == "nested"
+        client.close()
+
     def test_rate_limit_with_invalid_retry_after_falls_back_to_backoff(self) -> None:
         """Invalid Retry-After should use exponential backoff."""
         config = Config(
