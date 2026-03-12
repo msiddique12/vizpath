@@ -1,7 +1,6 @@
 """Tests for the Semantic Kernel adapter."""
 
 import asyncio
-from typing import Optional
 from unittest.mock import MagicMock
 
 import pytest
@@ -26,9 +25,9 @@ from vizpath.span import SpanType
 def make_context(
     plugin: str = "MyPlugin",
     name: str = "my_function",
-    args: Optional[dict] = None,
-    result_value: Optional[str] = "output",
-    token_usage: Optional[dict] = None,
+    args: dict | None = None,
+    result_value: str | None = "output",
+    token_usage: dict | None = None,
 ) -> MagicMock:
     ctx = MagicMock()
     ctx.function.plugin_name = plugin

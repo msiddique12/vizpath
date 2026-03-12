@@ -23,8 +23,9 @@ import contextvars
 import functools
 import threading
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
 
 from vizpath.client import Client
 from vizpath.config import Config
