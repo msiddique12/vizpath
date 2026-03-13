@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowLeft, Loader2, GitBranch, List, Grid2x2, X, Link2, Check, ClipboardCopy } from 'lucide-react'
+import { ArrowLeft, Loader2, GitBranch, List, Grid2x2, X, Link2, Check, ClipboardCopy, FileJson } from 'lucide-react'
 import clsx from 'clsx'
 import { getTrace } from '@/lib/api'
 import { exportTrace, ExportFormat } from '@/lib/export'
@@ -19,6 +19,7 @@ export default function TraceDetailPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [copiedLink, setCopiedLink] = useState(false)
   const [copiedTraceId, setCopiedTraceId] = useState(false)
+  const [copiedTraceJson, setCopiedTraceJson] = useState(false)
   const initialView = (searchParams.get('view') as ViewMode) || 'timeline'
   const [viewMode, setViewMode] = useState<ViewMode>(
     initialView === 'timeline' || initialView === 'dag' || initialView === 'heatmap'
@@ -82,6 +83,17 @@ export default function TraceDetailPage() {
     exportTrace({ trace, spans }, format)
   }
 
+  const handleCopyTracePayload = async () => {
+    try {
+      const payload = JSON.stringify({ trace, spans }, null, 2)
+      await navigator.clipboard.writeText(payload)
+      setCopiedTraceJson(true)
+      setTimeout(() => setCopiedTraceJson(false), 1500)
+    } catch {
+      setCopiedTraceJson(false)
+    }
+  }
+
   return (
     <div>
       <div className="mb-6">
@@ -129,6 +141,14 @@ export default function TraceDetailPage() {
             >
               {copiedLink ? <Check className="h-4 w-4 text-green-400" /> : <Link2 className="h-4 w-4" />}
               {copiedLink ? 'Copied' : 'Copy link'}
+            </button>
+            <button
+              type="button"
+              onClick={handleCopyTracePayload}
+              className="inline-flex items-center gap-1.5 px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm text-muted-200 hover:bg-dark-700"
+            >
+              {copiedTraceJson ? <Check className="h-4 w-4 text-green-400" /> : <FileJson className="h-4 w-4" />}
+              {copiedTraceJson ? 'Copied payload' : 'Copy payload'}
             </button>
             <ExportMenu onExport={handleExport} />
           </div>
