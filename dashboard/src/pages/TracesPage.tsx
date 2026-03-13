@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { MouseEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { formatDistanceToNow } from 'date-fns'
@@ -8,8 +8,10 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  ClipboardCopy,
   Loader2,
   Search,
+  Link2,
   Wifi,
   WifiOff,
   X,
@@ -24,6 +26,18 @@ const PAGE_SIZE = 50
 type SortBy = 'created_at' | 'duration_ms' | 'total_tokens' | 'total_cost' | 'span_count' | 'error_count' | 'name'
 type SortOrder = 'asc' | 'desc'
 type StatusFilter = '' | 'running' | 'success' | 'error'
+
+function formatCost(value: number): string {
+  return `$${value.toFixed(4)}`
+}
+
+function formatDuration(value: number | null): string {
+  if (!value) {
+    return '-'
+  }
+
+  return value < 1000 ? `${value.toFixed(0)}ms` : `${(value / 1000).toFixed(2)}s`
+}
 
 function StatusBadge({ status }: { status: SpanStatus }) {
   const config = {
@@ -42,12 +56,32 @@ function StatusBadge({ status }: { status: SpanStatus }) {
 }
 
 function TraceRow({ trace }: { trace: Trace }) {
+  const [copiedTraceId, setCopiedTraceId] = useState(false)
+  const [copiedTraceLink, setCopiedTraceLink] = useState(false)
+  const traceUrl = `${window.location.origin}${window.location.pathname}/${trace.id}`
+
+  const handleCopy = async (
+    event: MouseEvent<HTMLButtonElement>,
+    value: string,
+    setCopied: (value: boolean) => void
+  ) => {
+    event.preventDefault()
+    event.stopPropagation()
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1200)
+    } catch {
+      // Clipboard failures are non-blocking for the primary navigation action.
+    }
+  }
+
   return (
     <Link
       to={`/traces/${trace.id}`}
       className="block hover:bg-dark-800 transition-colors"
     >
-      <div className="px-6 py-4 flex items-center justify-between">
+      <div className="px-6 py-4 flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-3">
             <p className="text-sm font-medium text-muted-100 truncate">{trace.name}</p>
@@ -56,20 +90,41 @@ function TraceRow({ trace }: { trace: Trace }) {
           <p className="mt-1 text-sm text-muted-400">
             {trace.span_count} spans
             {trace.total_tokens && ` · ${trace.total_tokens.toLocaleString()} tokens`}
-            {trace.total_cost && ` · $${trace.total_cost.toFixed(4)}`}
+            {trace.total_cost && ` · ${formatCost(trace.total_cost)}`}
           </p>
         </div>
-        <div className="ml-6 flex items-center gap-6">
+        <div className="ml-6 flex items-start gap-6">
+          <div className="text-right text-sm text-muted-400">
+            <button
+              type="button"
+              onClick={(event) => handleCopy(event, trace.id, setCopiedTraceId)}
+              className="inline-flex items-center gap-1.5 text-xs text-muted-300 hover:text-muted-100"
+              title="Copy trace ID"
+              aria-label="Copy trace ID"
+            >
+              <ClipboardCopy className="h-3.5 w-3.5" />
+              {copiedTraceId ? 'Copied' : `ID ${trace.id.slice(0, 8)}`}
+            </button>
+            <p className="text-xs text-muted-500">Trace ID</p>
+          </div>
           {trace.duration_ms && (
             <div className="text-right">
               <p className="text-sm font-medium text-muted-100">
-                {trace.duration_ms < 1000
-                  ? `${trace.duration_ms.toFixed(0)}ms`
-                  : `${(trace.duration_ms / 1000).toFixed(2)}s`}
+                {formatDuration(trace.duration_ms)}
               </p>
               <p className="text-xs text-muted-400">Duration</p>
             </div>
           )}
+          <button
+            type="button"
+            onClick={(event) => handleCopy(event, traceUrl, setCopiedTraceLink)}
+            className="inline-flex items-center gap-1.5 text-xs text-muted-300 hover:text-muted-100"
+            title="Copy trace link"
+            aria-label="Copy trace link"
+          >
+            <Link2 className="h-3.5 w-3.5" />
+            {copiedTraceLink ? 'Copied' : 'Copy link'}
+          </button>
           <div className="text-right text-sm text-muted-400">
             <Clock className="h-4 w-4 inline mr-1" />
             {formatDistanceToNow(new Date(trace.start_time), { addSuffix: true })}
@@ -187,6 +242,8 @@ export default function TracesPage() {
   const totalPages = data?.total ? Math.ceil(data.total / PAGE_SIZE) : 1
   const hasNextPage = page < totalPages
   const hasPrevPage = page > 1
+  const hasActiveFilters =
+    Boolean(search) || Boolean(statusFilter) || Boolean(hasErrors) || Boolean(minTokens) || Boolean(minCost)
   const activeFilterChips = [
     search ? { key: 'search', label: `Search: ${search}`, clear: () => setSearch('') } : null,
     statusFilter
@@ -475,12 +532,47 @@ export default function TracesPage() {
             ))}
           </div>
         )}
+
+        {hasActiveFilters && (
+          <div className="flex justify-end">
+            <button
+              onClick={() => {
+                setStatusFilter('')
+                setSearch('')
+                setMinTokens('')
+                setMinCost('')
+                setHasErrors('')
+              }}
+              className="px-3 py-1.5 text-xs bg-dark-800 border border-primary-500 text-primary-300 rounded-lg hover:bg-dark-700"
+            >
+              Clear all filters
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="bg-dark-900 rounded-lg border border-dark-700 divide-y divide-dark-700">
         {data?.traces.length === 0 ? (
           <div className="px-6 py-12 text-center">
-            <p className="text-muted-400">No traces yet. Start tracing your agents to see them here.</p>
+            {hasActiveFilters ? (
+              <div className="space-y-3">
+                <p className="text-muted-400">No traces match your filters.</p>
+                <button
+                  onClick={() => {
+                    setStatusFilter('')
+                    setSearch('')
+                    setMinTokens('')
+                    setMinCost('')
+                    setHasErrors('')
+                  }}
+                  className="px-3 py-1.5 text-xs bg-dark-800 border border-dark-700 rounded-lg text-muted-200 hover:bg-dark-700"
+                >
+                  Clear all filters
+                </button>
+              </div>
+            ) : (
+              <p className="text-muted-400">No traces yet. Start tracing your agents to see them here.</p>
+            )}
           </div>
         ) : (
           data?.traces.map((trace) => <TraceRow key={trace.id} trace={trace} />)

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowLeft, Loader2, GitBranch, List, Grid2x2, X, Link2, Check } from 'lucide-react'
+import { ArrowLeft, Loader2, GitBranch, List, Grid2x2, X, Link2, Check, ClipboardCopy } from 'lucide-react'
 import clsx from 'clsx'
 import { getTrace } from '@/lib/api'
 import { exportTrace, ExportFormat } from '@/lib/export'
@@ -18,6 +18,7 @@ export default function TraceDetailPage() {
   const { traceId } = useParams<{ traceId: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
   const [copiedLink, setCopiedLink] = useState(false)
+  const [copiedTraceId, setCopiedTraceId] = useState(false)
   const initialView = (searchParams.get('view') as ViewMode) || 'timeline'
   const [viewMode, setViewMode] = useState<ViewMode>(
     initialView === 'timeline' || initialView === 'dag' || initialView === 'heatmap'
@@ -100,11 +101,27 @@ export default function TraceDetailPage() {
               {trace.total_tokens && ` · ${trace.total_tokens.toLocaleString()} tokens`}
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={async () => {
-                await navigator.clipboard.writeText(window.location.href)
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(trace.id)
+                setCopiedTraceId(true)
+                setTimeout(() => setCopiedTraceId(false), 1200)
+              } catch {
+                setCopiedTraceId(false)
+              }
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm text-muted-200 hover:bg-dark-700"
+          >
+            {copiedTraceId ? <Check className="h-4 w-4 text-green-400" /> : <ClipboardCopy className="h-4 w-4" />}
+            {copiedTraceId ? 'Copied ID' : 'Copy trace ID'}
+          </button>
+          <button
+            type="button"
+            onClick={async () => {
+              await navigator.clipboard.writeText(window.location.href)
                 setCopiedLink(true)
                 setTimeout(() => setCopiedLink(false), 1200)
               }}
