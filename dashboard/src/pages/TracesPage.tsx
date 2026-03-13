@@ -1,6 +1,6 @@
 import { MouseEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { formatDistanceToNow } from 'date-fns'
 import {
   AlertCircle,
@@ -22,10 +22,105 @@ import { Trace, SpanStatus } from '@/lib/types'
 import { useWebSocket } from '@/hooks/useWebSocket'
 
 const PAGE_SIZE = 50
+const FILTER_STORAGE_KEY = 'traces_filters_v1'
 
 type SortBy = 'created_at' | 'duration_ms' | 'total_tokens' | 'total_cost' | 'span_count' | 'error_count' | 'name'
 type SortOrder = 'asc' | 'desc'
 type StatusFilter = '' | 'running' | 'success' | 'error'
+type HasErrorsFilter = '' | 'true' | 'false'
+
+const sortByValues: SortBy[] = ['created_at', 'duration_ms', 'total_tokens', 'total_cost', 'span_count', 'error_count', 'name']
+const statusFilterValues: StatusFilter[] = ['', 'running', 'success', 'error']
+const hasErrorsFilterValues: HasErrorsFilter[] = ['', 'true', 'false']
+
+function parseSortBy(value: string | null): SortBy | undefined {
+  return sortByValues.includes(value as SortBy) ? (value as SortBy) : undefined
+}
+
+function parseStatusFilter(value: string | null): StatusFilter {
+  return statusFilterValues.includes(value as StatusFilter) ? (value as StatusFilter) : ''
+}
+
+function parseHasErrorsFilter(value: string | null): HasErrorsFilter {
+  return hasErrorsFilterValues.includes(value as HasErrorsFilter) ? (value as HasErrorsFilter) : ''
+}
+
+function parseNumericFilter(value: string | null): string {
+  if (!value) {
+    return ''
+  }
+
+  const parsed = Number(value)
+  return Number.isNaN(parsed) || parsed < 0 ? '' : String(parsed)
+}
+
+function getSavedFilters() {
+  try {
+    const savedRaw = localStorage.getItem(FILTER_STORAGE_KEY)
+    if (!savedRaw) return null
+    const parsed = JSON.parse(savedRaw)
+    return {
+      search: typeof parsed.search === 'string' ? parsed.search : '',
+      statusFilter: parseStatusFilter(parsed.statusFilter ?? ''),
+      minTokens: parseNumericFilter(parsed.minTokens ?? ''),
+      minCost: parseNumericFilter(parsed.minCost ?? ''),
+      hasErrors: parseHasErrorsFilter(parsed.hasErrors ?? ''),
+      sortBy: parseSortBy(parsed.sortBy ?? '') ?? 'created_at',
+      sortOrder: parsed.sortOrder === 'asc' || parsed.sortOrder === 'desc' ? parsed.sortOrder : 'desc',
+    }
+  } catch {
+    return null
+  }
+}
+
+function getFiltersFromSearchParams(searchParams: URLSearchParams) {
+  return {
+    search: searchParams.get('q') ?? '',
+    statusFilter: parseStatusFilter(searchParams.get('status')),
+    minTokens: parseNumericFilter(searchParams.get('min_tokens')),
+    minCost: parseNumericFilter(searchParams.get('min_cost')),
+    hasErrors: parseHasErrorsFilter(searchParams.get('has_errors')),
+    sortBy: parseSortBy(searchParams.get('sort_by')) ?? undefined,
+    sortOrder:
+      searchParams.get('sort_order') === 'asc' || searchParams.get('sort_order') === 'desc'
+        ? (searchParams.get('sort_order') as SortOrder)
+        : undefined,
+  }
+}
+
+function buildSearchParamsFromFilters(filters: {
+  search: string
+  statusFilter: StatusFilter
+  minTokens: string
+  minCost: string
+  hasErrors: HasErrorsFilter
+  sortBy: SortBy
+  sortOrder: SortOrder
+}) {
+  const next = new URLSearchParams()
+  if (filters.search.trim()) {
+    next.set('q', filters.search.trim())
+  }
+  if (filters.statusFilter) {
+    next.set('status', filters.statusFilter)
+  }
+  if (filters.minTokens) {
+    next.set('min_tokens', String(Number(filters.minTokens)))
+  }
+  if (filters.minCost) {
+    next.set('min_cost', String(Number(filters.minCost)))
+  }
+  if (filters.hasErrors) {
+    next.set('has_errors', filters.hasErrors)
+  }
+  if (filters.sortBy !== 'created_at') {
+    next.set('sort_by', filters.sortBy)
+  }
+  if (filters.sortOrder !== 'desc') {
+    next.set('sort_order', filters.sortOrder)
+  }
+  return next
+}
 
 function formatCost(value: number): string {
   return `$${value.toFixed(4)}`
@@ -138,36 +233,33 @@ function TraceRow({ trace }: { trace: Trace }) {
 export default function TracesPage() {
   const queryClient = useQueryClient()
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('')
   const [minTokens, setMinTokens] = useState('')
   const [minCost, setMinCost] = useState('')
-  const [hasErrors, setHasErrors] = useState<'' | 'true' | 'false'>('')
+  const [hasErrors, setHasErrors] = useState<HasErrorsFilter>('')
   const [sortBy, setSortBy] = useState<SortBy>('created_at')
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
   const [summaryWindowDays, setSummaryWindowDays] = useState<7 | 30>(7)
 
   useEffect(() => {
-    const saved = localStorage.getItem('traces_filters_v1')
-    if (!saved) return
-    try {
-      const parsed = JSON.parse(saved)
-      setSearch(parsed.search ?? '')
-      setStatusFilter(parsed.statusFilter ?? '')
-      setMinTokens(parsed.minTokens ?? '')
-      setMinCost(parsed.minCost ?? '')
-      setHasErrors(parsed.hasErrors ?? '')
-      setSortBy(parsed.sortBy ?? 'created_at')
-      setSortOrder(parsed.sortOrder ?? 'desc')
-    } catch {
-      // Ignore invalid saved settings.
-    }
-  }, [])
+    const saved = getSavedFilters()
+    const parsed = getFiltersFromSearchParams(searchParams)
+
+    setSearch(searchParams.has('q') ? parsed.search : saved?.search || '')
+    setStatusFilter(searchParams.has('status') ? parsed.statusFilter : saved?.statusFilter || '')
+    setMinTokens(searchParams.has('min_tokens') ? parsed.minTokens : saved?.minTokens || '')
+    setMinCost(searchParams.has('min_cost') ? parsed.minCost : saved?.minCost || '')
+    setHasErrors(searchParams.has('has_errors') ? parsed.hasErrors : saved?.hasErrors || '')
+    setSortBy(parsed.sortBy || saved?.sortBy || 'created_at')
+    setSortOrder(parsed.sortOrder || saved?.sortOrder || 'desc')
+  }, [searchParams])
 
   useEffect(() => {
     localStorage.setItem(
-      'traces_filters_v1',
+      FILTER_STORAGE_KEY,
       JSON.stringify({
         search,
         statusFilter,
@@ -179,6 +271,23 @@ export default function TracesPage() {
       })
     )
   }, [hasErrors, minCost, minTokens, search, sortBy, sortOrder, statusFilter])
+
+  useEffect(() => {
+    const next = buildSearchParamsFromFilters({
+      search,
+      statusFilter,
+      minTokens,
+      minCost,
+      hasErrors,
+      sortBy,
+      sortOrder,
+    })
+
+    const current = new URLSearchParams(searchParams)
+    if (next.toString() !== current.toString()) {
+      setSearchParams(next, { replace: true })
+    }
+  }, [hasErrors, minCost, minTokens, search, searchParams, setSearchParams, sortBy, sortOrder, statusFilter])
 
   useEffect(() => {
     setPage(1)
