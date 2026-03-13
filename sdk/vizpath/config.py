@@ -90,6 +90,9 @@ class Config:
     redaction_replacement: str = field(
         default_factory=lambda: os.environ.get("VIZPATH_REDACTION_REPLACEMENT", "[REDACTED]")
     )
+    max_payload_bytes: int = field(
+        default_factory=lambda: int(os.environ.get("VIZPATH_MAX_PAYLOAD_BYTES", "1048576"))
+    )
 
     def __post_init__(self) -> None:
         if self.buffer_size < 1:
@@ -104,6 +107,8 @@ class Config:
             raise ValueError("max_buffer_items must be at least 1")
         if self.max_retries < 1:
             raise ValueError("max_retries must be at least 1")
+        if self.max_payload_bytes < 1:
+            raise ValueError("max_payload_bytes must be at least 1")
         if not self.redaction_replacement:
             raise ValueError("redaction_replacement cannot be empty")
         if self.redaction_fields:

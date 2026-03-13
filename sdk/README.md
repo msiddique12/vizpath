@@ -70,6 +70,7 @@ result = traced_graph.invoke({"input": "research quantum computing"})
 - `VIZPATH_REDACTION_ENABLED` - Redact sensitive values in span payloads before sending (default: `true`)
 - `VIZPATH_REDACTION_FIELDS` - Comma-separated keys to redact (default: `authorization,api_key,apikey,password,access_token,refresh_token,secret,private_key`)
 - `VIZPATH_REDACTION_REPLACEMENT` - Replacement text for redacted fields (default: `[REDACTED]`)
+- `VIZPATH_MAX_PAYLOAD_BYTES` - Maximum JSON payload size per batch request (default: `1048576`)
 
 ### Programmatic Configuration
 

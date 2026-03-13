@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import atexit
+import json
 import logging
 import time
 from datetime import datetime, timezone
@@ -130,7 +131,19 @@ class Client:
 
     def _send_with_retry(self, spans: list[SpanData]) -> None:
         """Send spans with exponential backoff retry."""
-        payload = [self._sanitize_payload(s.model_dump(mode="json")) for s in spans]
+        payload_batches = self._chunk_payloads(spans)
+
+        for index, (batch_payload, batch_spans) in enumerate(payload_batches):
+            if self._send_payload_with_retry(batch_payload, batch_spans):
+                continue
+
+            # Keep order by re-buffering current and remaining spans.
+            for _, remaining_spans in payload_batches[index + 1 :]:
+                self._rebuffer_spans(remaining_spans)
+            return
+
+    def _send_payload_with_retry(self, payload: list[dict], spans: list[SpanData]) -> bool:
+        """Send one payload batch with retry. Returns True only if the batch succeeded."""
         last_error: Exception | None = None
         saw_transport_error = False
 
@@ -141,7 +154,7 @@ class Client:
                 self._flushed_spans += len(spans)
                 logger.debug(f"Flushed {len(spans)} spans")
                 self._record_transport_success()
-                return
+                return True
             except (httpx.ConnectError, httpx.TimeoutException, ConnectionError) as e:
                 last_error = e
                 saw_transport_error = True
@@ -152,21 +165,60 @@ class Client:
             except RateLimitError as e:
                 last_error = e
                 if attempt < self._config.max_retries - 1:
-                    wait_time = e.retry_after if e.retry_after is not None else (2 ** attempt) * 1.0  # Longer wait for rate limits
+                    wait_time = e.retry_after if e.retry_after is not None else (2 ** attempt) * 1.0
+                    # Longer wait for rate limits.
                     logger.warning(f"Rate limited, retry in {wait_time}s")
                     time.sleep(wait_time)
             except VizpathError as e:
                 logger.error(f"API error: {e}")
-                return  # Don't retry on API errors
+                self._rebuffer_spans(spans)
+                return False
             except Exception as e:
                 logger.error(f"Unexpected error during flush: {e}")
-                return  # Don't retry on unknown errors
+                self._rebuffer_spans(spans)
+                return False
 
-        # All retries failed, re-buffer spans
         if saw_transport_error:
             self._record_transport_failure()
             self._flush_failures += 1
         logger.warning(f"All retries failed, re-buffering {len(spans)} spans: {last_error}")
+        self._rebuffer_spans(spans)
+        return False
+
+    def _chunk_payloads(self, spans: list[SpanData]) -> list[tuple[list[dict], list[SpanData]]]:
+        """Split spans into payload batches that satisfy the configured byte limit."""
+        if not spans:
+            return []
+
+        if self._config.max_payload_bytes <= 0:
+            payload = [self._sanitize_payload(span.model_dump(mode="json")) for span in spans]
+            return [(payload, spans)]
+
+        payload = [self._sanitize_payload(span.model_dump(mode="json")) for span in spans]
+        batches: list[tuple[list[dict], list[SpanData]]] = []
+        batch_payload: list[dict] = []
+        batch_spans: list[SpanData] = []
+
+        for span_payload, span in zip(payload, spans):
+            candidate = batch_payload + [span_payload]
+            candidate_bytes = len(json.dumps(candidate).encode("utf-8"))
+
+            if batch_payload and candidate_bytes > self._config.max_payload_bytes:
+                batches.append((batch_payload, batch_spans))
+                batch_payload = [span_payload]
+                batch_spans = [span]
+                continue
+
+            batch_payload = candidate
+            batch_spans.append(span)
+
+        if batch_payload:
+            batches.append((batch_payload, batch_spans))
+
+        return batches
+
+    def _rebuffer_spans(self, spans: list[SpanData]) -> None:
+        """Re-buffer spans when a send attempt fails."""
         for span in spans:
             try:
                 self._buffer.put_nowait(span)

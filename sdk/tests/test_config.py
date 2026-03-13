@@ -37,6 +37,7 @@ class TestConfig:
                 "private_key",
             ]
             assert config.redaction_replacement == "[REDACTED]"
+            assert config.max_payload_bytes == 1048576
 
     def test_from_environment(self):
         env = {
@@ -49,6 +50,7 @@ class TestConfig:
             "VIZPATH_REDACTION_ENABLED": "false",
             "VIZPATH_REDACTION_FIELDS": "token,Client-Secret",
             "VIZPATH_REDACTION_REPLACEMENT": "***",
+            "VIZPATH_MAX_PAYLOAD_BYTES": "2048",
             "VIZPATH_DROP_OLDEST_WHEN_BUFFER_FULL": "true",
             "VIZPATH_MAX_BUFFER_ITEMS": "250",
         }
@@ -66,6 +68,7 @@ class TestConfig:
             assert config.redaction_enabled is False
             assert config.redaction_fields == ["token", "client-secret"]
             assert config.redaction_replacement == "***"
+            assert config.max_payload_bytes == 2048
 
     def test_explicit_values(self):
         config = Config(
@@ -121,3 +124,7 @@ class TestConfig:
     def test_invalid_max_retries(self):
         with pytest.raises(ValueError, match="max_retries must be at least 1"):
             Config(max_retries=0)
+
+    def test_invalid_max_payload_bytes(self):
+        with pytest.raises(ValueError, match="max_payload_bytes must be at least 1"):
+            Config(max_payload_bytes=0)

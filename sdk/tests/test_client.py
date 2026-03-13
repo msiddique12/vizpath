@@ -231,6 +231,65 @@ class TestClientRetry:
 
         client.close()
 
+    def test_payload_chunking_splits_batches_according_to_max_payload_bytes(self) -> None:
+        """Large batches should be split by max_payload_bytes and sent in chunks."""
+        config = Config(
+            api_key="vp_test_key",
+            base_url="http://localhost:8000/api/v1",
+            max_payload_bytes=1,
+        )
+        client = Client(config)
+        client._client = MagicMock()
+        client._client.post.return_value = httpx.Response(200)
+
+        payload = {"input": {"x": "y" * 50}}
+
+        for idx in range(3):
+            span = MagicMock()
+            span.model_dump.return_value = {"name": f"span-{idx}", "payload": payload}
+            client.send(span)
+
+        client.flush()
+        assert client._client.post.call_count == 3
+        payloads = [call.kwargs["json"] for call in client._client.post.call_args_list]
+        assert all(len(entry) == 1 for entry in payloads)
+        assert [entry[0]["name"] for entry in payloads] == ["span-0", "span-1", "span-2"]
+        client.close()
+
+    def test_chunk_send_retries_and_rebuffers_current_and_remaining_spans(self) -> None:
+        """If one chunk fails, current and remaining spans should be re-buffered."""
+        config = Config(
+            api_key="vp_test_key",
+            base_url="http://localhost:8000/api/v1",
+            max_payload_bytes=1,
+            max_retries=1,
+        )
+        client = Client(config)
+        client._client = MagicMock()
+        client._client.post.side_effect = [
+            httpx.Response(200),
+            httpx.Response(500),
+            httpx.Response(200),
+        ]
+
+        payload = {"input": {"x": "y" * 50}}
+        spans = []
+        for idx in range(3):
+            span = MagicMock()
+            span.model_dump.return_value = {"name": f"span-{idx}", "payload": payload}
+            spans.append(span)
+            client.send(span)
+
+        client.flush()
+
+        assert client._client.post.call_count == 2
+        assert client._buffer.qsize() == 2
+        assert [item.model_dump.return_value["name"] for item in list(client._buffer.queue)] == [
+            "span-1",
+            "span-2",
+        ]
+        client.close()
+
 
 class TestClientCircuitBreaker:
     """Test transport failure circuit-breaker behavior."""
