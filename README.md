@@ -213,6 +213,7 @@ Supported variables:
 
 - `VITE_API_BASE_URL`: full HTTP origin and API base path (default `/api/v1`)
 - `VITE_WS_BASE_URL`: WebSocket base URL for live traces (default current origin, auto-resolved to `ws://`).
+- `VITE_VIZPATH_API_KEY`: optional API key appended as `api_key` to websocket connections when strict auth is enabled.
 
 ### Environment setup
 
