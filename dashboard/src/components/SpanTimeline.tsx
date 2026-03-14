@@ -128,15 +128,15 @@ function SpanRow({
         </div>
 
         <div className="flex-1 relative h-6">
-          <div
+            <div
             className={clsx(
               'absolute h-full rounded',
               SPAN_COLORS[span.span_type as SpanType] || SPAN_COLORS.custom,
               span.status === 'error' && 'ring-2 ring-red-500'
             )}
             style={{
-              left: `${leftPercent}%`,
-              width: `${widthPercent}%`,
+              left: `${Math.min(Math.max(leftPercent, 0), 100)}%`,
+              width: `${Math.min(Math.max(widthPercent, 0.5), 100)}%`,
               minWidth: '4px',
             }}
             title={`${span.name} - ${duration.toFixed(0)}ms`}
@@ -213,6 +213,10 @@ export default function SpanTimeline({
       min = Math.min(min, start)
       max = Math.max(max, end)
     })
+
+    if (min === max) {
+      max = min + 1
+    }
 
     return { min, max }
   }, [spans])
