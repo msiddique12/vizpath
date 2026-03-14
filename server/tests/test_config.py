@@ -12,6 +12,17 @@ def test_database_url_requires_scheme():
     assert "DATABASE_URL must include a URL scheme" in str(exc.value)
 
 
+def test_database_url_defaults_for_non_production():
+    settings = Settings(ENVIRONMENT="development")
+    assert settings.database_url == "sqlite:///./vizpath.db"
+
+
+def test_database_url_required_in_production():
+    with pytest.raises(ValidationError) as exc:
+        Settings(ENVIRONMENT="production")
+    assert "DATABASE_URL is required in production" in str(exc.value)
+
+
 def test_port_must_be_valid_range():
     with pytest.raises(ValidationError) as exc:
         Settings(**BASE_SETTINGS, PORT=0)

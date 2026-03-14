@@ -1,6 +1,6 @@
 """Application configuration loaded from environment variables."""
 
-
+import os
 from collections.abc import Sequence
 from urllib.parse import urlparse
 
@@ -11,7 +11,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Application settings loaded from environment or .env file."""
 
-    database_url: str = Field(..., alias="DATABASE_URL")
     db_pool_size: int = Field(default=5, alias="DB_POOL_SIZE")
     db_max_overflow: int = Field(default=10, alias="DB_MAX_OVERFLOW")
     auto_create_tables: bool = Field(default=True, alias="AUTO_CREATE_TABLES")
@@ -36,6 +35,7 @@ class Settings(BaseSettings):
     host: str = Field(default="0.0.0.0", alias="HOST")
     port: int = Field(default=8000, alias="PORT")
     environment: str = Field(default="development", alias="ENVIRONMENT")
+    database_url: str | None = Field(default=None, alias="DATABASE_URL")
     cors_allowed_origins: list[str] = Field(
         default=["http://localhost:3000", "http://localhost:5173"],
         alias="CORS_ALLOWED_ORIGINS",
@@ -61,9 +61,13 @@ class Settings(BaseSettings):
 
     @field_validator("database_url", mode="before")
     @classmethod
-    def validate_database_url(cls, v: str, info: ValidationInfo) -> str:
+    def validate_database_url(cls, v: str | None, info: ValidationInfo) -> str:
+        environment = info.data.get("environment", "development").lower()
         if not v:
-            raise ValueError("DATABASE_URL is required")
+            if environment == "production" and not os.getenv("SKIP_DATABASE_URL_REQUIRED"):
+                raise ValueError("DATABASE_URL is required in production")
+            return "sqlite:///./vizpath.db"
+
         parsed = urlparse(v)
         if not parsed.scheme:
             raise ValueError("DATABASE_URL must include a URL scheme")
