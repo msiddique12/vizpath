@@ -15,6 +15,7 @@ from app.models import Project
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["WebSocket"])
+MAX_MESSAGE_BYTES = 64 * 1024
 
 # Maps WebSocket to (connection, project_id) for project-scoped broadcasts
 active_connections: dict[WebSocket, str | None] = {}
@@ -78,7 +79,9 @@ async def traces_websocket(
     project = _verify_ws_api_key(api_key)
 
     # In production mode, require valid API key
-    if settings.is_production and project is None:
+    # Enforce API key in production or strict mode. Development defaults to optional auth.
+    require_auth = settings.is_production or settings.security_strict_mode
+    if require_auth and project is None:
         await websocket.close(code=4001, reason="Unauthorized: Invalid or missing API key")
         return
 
@@ -91,10 +94,15 @@ async def traces_websocket(
         while True:
             try:
                 data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                if len(data.encode("utf-8")) > MAX_MESSAGE_BYTES:
+                    await websocket.close(code=1009, reason="Message too large")
+                    break
                 if data == "ping":
                     await websocket.send_text("pong")
             except asyncio.TimeoutError:
                 await websocket.send_text(json.dumps({"type": "ping"}))
+            except Exception:
+                break
     except WebSocketDisconnect:
         pass
     except Exception as e:
