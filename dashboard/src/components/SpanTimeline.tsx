@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import clsx from 'clsx'
-import { ChevronRight, ChevronDown } from 'lucide-react'
+import { ChevronRight, ChevronDown, Eye, ClipboardCopy } from 'lucide-react'
 import { Span, SpanType } from '@/lib/types'
 
 const SPAN_COLORS: Record<SpanType, string> = {
@@ -46,12 +46,16 @@ function SpanRow({
   expanded,
   onToggle,
   focusSpanName,
+  onCopySpan,
+  onFocusSpan,
 }: {
   node: SpanNode
   timeRange: { min: number; max: number }
   expanded: boolean
   onToggle: () => void
   focusSpanName?: string
+  onCopySpan?: (span: Span) => void
+  onFocusSpan?: (span: Span) => void
 }) {
   const { span } = node
   const hasChildren = node.children.length > 0
@@ -91,6 +95,36 @@ function SpanRow({
             <span className="w-5" />
           )}
           <span className="text-sm text-muted-100 truncate">{span.name}</span>
+          {onCopySpan && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                onCopySpan(span)
+              }}
+              className="inline-flex items-center p-0.5 rounded hover:bg-dark-700 text-muted-400 hover:text-muted-100"
+              title="Copy span JSON"
+              aria-label={`Copy span JSON for ${span.name}`}
+            >
+              <ClipboardCopy className="h-3.5 w-3.5" />
+            </button>
+          )}
+          {onFocusSpan && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                onFocusSpan(span)
+              }}
+              className="inline-flex items-center p-0.5 rounded hover:bg-dark-700 text-muted-400 hover:text-muted-100"
+              title="Focus span in timeline"
+              aria-label={`Focus span ${span.name}`}
+            >
+              <Eye className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
 
         <div className="flex-1 relative h-6">
@@ -131,10 +165,14 @@ function SpanRowWrapper({
   node,
   timeRange,
   focusSpanName,
+  onCopySpan,
+  onFocusSpan,
 }: {
   node: SpanNode
   timeRange: { min: number; max: number }
   focusSpanName?: string
+  onCopySpan?: (span: Span) => void
+  onFocusSpan?: (span: Span) => void
 }) {
   const [expanded, setExpanded] = useState(true)
   return (
@@ -144,6 +182,8 @@ function SpanRowWrapper({
       expanded={expanded}
       onToggle={() => setExpanded(!expanded)}
       focusSpanName={focusSpanName}
+      onCopySpan={onCopySpan}
+      onFocusSpan={onFocusSpan}
     />
   )
 }
@@ -151,9 +191,13 @@ function SpanRowWrapper({
 export default function SpanTimeline({
   spans,
   focusSpanName,
+  onCopySpan,
+  onFocusSpan,
 }: {
   spans: Span[]
   focusSpanName?: string
+  onCopySpan?: (span: Span) => void
+  onFocusSpan?: (span: Span) => void
 }) {
   const tree = useMemo(() => buildSpanTree(spans), [spans])
 
@@ -190,6 +234,8 @@ export default function SpanTimeline({
           node={node}
           timeRange={timeRange}
           focusSpanName={focusSpanName}
+          onCopySpan={onCopySpan}
+          onFocusSpan={onFocusSpan}
         />
       ))}
       <div className="flex items-center gap-4 pt-4 border-t border-dark-700 text-xs">

@@ -5,6 +5,7 @@ import { ArrowLeft, Loader2, GitBranch, List, Grid2x2, X, Link2, Check, Clipboar
 import clsx from 'clsx'
 import { getTrace } from '@/lib/api'
 import { exportTrace, ExportFormat } from '@/lib/export'
+import { Span } from '@/lib/types'
 import SpanTimeline from '@/components/SpanTimeline'
 import DAGView from '@/components/DAGView'
 import HeatmapView from '@/components/HeatmapView'
@@ -20,6 +21,7 @@ export default function TraceDetailPage() {
   const [copiedLink, setCopiedLink] = useState(false)
   const [copiedTraceId, setCopiedTraceId] = useState(false)
   const [copiedTraceJson, setCopiedTraceJson] = useState(false)
+  const [copiedSpanId, setCopiedSpanId] = useState<string>('')
   const initialView = (searchParams.get('view') as ViewMode) || 'timeline'
   const [viewMode, setViewMode] = useState<ViewMode>(
     initialView === 'timeline' || initialView === 'dag' || initialView === 'heatmap'
@@ -91,6 +93,23 @@ export default function TraceDetailPage() {
       setTimeout(() => setCopiedTraceJson(false), 1500)
     } catch {
       setCopiedTraceJson(false)
+    }
+  }
+
+  const handleFocusSpan = (span: Span) => {
+    const next = new URLSearchParams(searchParams)
+    next.set('span_name', span.name)
+    next.set('view', 'timeline')
+    setSearchParams(next)
+  }
+
+  const handleCopySpanPayload = async (span: Span) => {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(span, null, 2))
+      setCopiedSpanId(span.id)
+      setTimeout(() => setCopiedSpanId(''), 1200)
+    } catch {
+      setCopiedSpanId('')
     }
   }
 
@@ -217,8 +236,18 @@ export default function TraceDetailPage() {
             </button>
           </div>
         )}
+        {copiedSpanId ? (
+          <p className="mb-3 text-xs text-green-400">Copied span payload to clipboard.</p>
+        ) : null}
 
-        {viewMode === 'timeline' && <SpanTimeline spans={spans} focusSpanName={focusSpanName} />}
+        {viewMode === 'timeline' && (
+          <SpanTimeline
+            spans={spans}
+            focusSpanName={focusSpanName}
+            onCopySpan={handleCopySpanPayload}
+            onFocusSpan={handleFocusSpan}
+          />
+        )}
         {viewMode === 'dag' && <DAGView spans={spans} />}
         {viewMode === 'heatmap' && <HeatmapView spans={spans} />}
       </div>
