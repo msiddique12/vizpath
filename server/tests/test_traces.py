@@ -121,6 +121,29 @@ class TestTraceIngestion:
         assert response.status_code == 201
         assert response.json()["ingested"] == 0
 
+    def test_ingest_cyclic_parent_references(self, client):
+        now = datetime.now(timezone.utc).isoformat()
+        payload = [
+            {
+                "span_id": "span-cycle-a",
+                "trace_id": "trace-cycle-1",
+                "parent_id": "span-cycle-b",
+                "name": "first-cycle-step",
+                "start_time": now,
+            },
+            {
+                "span_id": "span-cycle-b",
+                "trace_id": "trace-cycle-1",
+                "parent_id": "span-cycle-a",
+                "name": "second-cycle-step",
+                "start_time": now,
+            },
+        ]
+        response = client.post("/api/v1/traces/spans/batch", json=payload)
+
+        assert response.status_code == 201
+        assert response.json()["ingested"] == 2
+
     def test_ingest_with_attributes(self, client):
         payload = [
             {

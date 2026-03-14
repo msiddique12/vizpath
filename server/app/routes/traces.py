@@ -1,6 +1,7 @@
 """Trace ingestion and retrieval endpoints."""
 
 import logging
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -200,30 +201,50 @@ def get_or_create_trace(db: Session, trace_id: str, project_id: Any, span: SpanC
 
 
 def _topological_sort_spans(spans: list[SpanCreate]) -> list[SpanCreate]:
-    """Sort spans so parents come before children (topological order).
+    """Sort spans so parents come before children when possible.
 
-    This prevents foreign key violations when inserting spans with parent_id.
+    Falls back to input order for unresolved spans to preserve ingestion over strict
+    graph correctness when malformed parent relationships are provided.
     """
     # Build lookup and find root spans (no parent or parent not in batch)
     span_ids = {s.span_id for s in spans}
     span_by_id = {s.span_id: s for s in spans}
 
-    # Find children for each span
     children: dict[str | None, list[str]] = {None: []}
+    indegree: dict[str, int] = {}
+
     for s in spans:
         parent = s.parent_id if s.parent_id in span_ids else None
+        indegree[s.span_id] = 0
         if parent not in children:
             children[parent] = []
         children[parent].append(s.span_id)
+        if parent is not None:
+            indegree[s.span_id] += 1
 
-    # BFS from roots to build sorted order
+    queue = deque([span_id for span_id in span_ids if indegree[span_id] == 0])
     sorted_spans: list[SpanCreate] = []
-    queue = list(children.get(None, []))
+    sorted_span_ids: set[str] = set()
 
     while queue:
-        span_id = queue.pop(0)
+        span_id = queue.popleft()
         sorted_spans.append(span_by_id[span_id])
-        queue.extend(children.get(span_id, []))
+        sorted_span_ids.add(span_id)
+        for child_id in children.get(span_id, []):
+            indegree[child_id] -= 1
+            if indegree[child_id] == 0:
+                queue.append(child_id)
+
+    if len(sorted_spans) < len(spans):
+        unresolved = [sid for sid in span_ids if sid not in sorted_span_ids]
+        logger.warning(
+            "Topological sort could not fully resolve span order; fallback preserving input order for %s spans",
+            unresolved,
+        )
+        for span in spans:
+            if span.span_id in unresolved and span.span_id not in sorted_span_ids:
+                sorted_spans.append(span)
+                sorted_span_ids.add(span.span_id)
 
     return sorted_spans
 
