@@ -182,7 +182,10 @@ def get_label(
     )
 
 
-@router.delete("/labels/{trace_id}")
+@router.delete(
+    "/labels/{trace_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
 def delete_label(
     trace_id: str,
     project: Project = Depends(verify_api_key),
