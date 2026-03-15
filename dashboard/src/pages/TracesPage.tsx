@@ -55,8 +55,12 @@ function parseNumericFilter(value: string | null): string {
 }
 
 function getSavedFilters() {
+  if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
+    return null
+  }
+
   try {
-    const savedRaw = localStorage.getItem(FILTER_STORAGE_KEY)
+    const savedRaw = window.localStorage.getItem(FILTER_STORAGE_KEY)
     if (!savedRaw) return null
     const parsed = JSON.parse(savedRaw)
     return {
@@ -258,18 +262,26 @@ export default function TracesPage() {
   }, [searchParams])
 
   useEffect(() => {
-    localStorage.setItem(
-      FILTER_STORAGE_KEY,
-      JSON.stringify({
-        search,
-        statusFilter,
-        minTokens,
-        minCost,
-        hasErrors,
-        sortBy,
-        sortOrder,
-      })
-    )
+    if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
+      return
+    }
+
+    try {
+      window.localStorage.setItem(
+        FILTER_STORAGE_KEY,
+        JSON.stringify({
+          search,
+          statusFilter,
+          minTokens,
+          minCost,
+          hasErrors,
+          sortBy,
+          sortOrder,
+        })
+      )
+    } catch {
+      // Ignore storage failures (for example in restricted environments).
+    }
   }, [hasErrors, minCost, minTokens, search, sortBy, sortOrder, statusFilter])
 
   useEffect(() => {
@@ -322,7 +334,7 @@ export default function TracesPage() {
     }
   }, [hasErrors, minCost, minTokens, search, sortBy, sortOrder])
 
-  const { connected } = useWebSocket({
+  const { connected, lastDisconnect, reconnect } = useWebSocket({
     onMessage: (msg) => {
       if (msg.type === 'span_ingested') {
         queryClient.invalidateQueries({ queryKey: ['traces'] })
@@ -385,6 +397,13 @@ export default function TracesPage() {
       : null,
   ].filter(Boolean) as Array<{ key: string; label: string; clear: () => void }>
 
+  const isAuthFailure = lastDisconnect?.code === 4001
+  const connectionStatusText = isAuthFailure
+    ? 'Live updates are unavailable: authentication required for WebSocket streaming.'
+    : connected === false
+      ? 'Live updates disconnected. Retrying automatically when possible.'
+      : null
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -418,6 +437,34 @@ export default function TracesPage() {
           {connected ? 'Live' : 'Polling'}
         </div>
       </div>
+
+      {connectionStatusText && (
+        <div
+          role="status"
+          className={clsx(
+            'mb-4 rounded-lg border px-4 py-3 text-sm',
+            isAuthFailure
+              ? 'bg-amber-900/30 border-amber-700/60 text-amber-200'
+              : 'bg-blue-900/30 border-blue-700/60 text-blue-200'
+          )}
+        >
+          <p>{connectionStatusText}</p>
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={reconnect}
+              className="px-3 py-1 text-xs rounded-full bg-dark-800 border border-dark-700 text-muted-100 hover:bg-dark-700"
+            >
+              Retry connection
+            </button>
+            {isAuthFailure && (
+              <p className="text-xs text-amber-300/90">
+                Configure the dashboard API key before retrying.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       {summaryQuery.data && (
         <div className="mb-4 bg-dark-900 rounded-lg border border-dark-700 p-4">

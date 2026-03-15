@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 interface WebSocketMessage {
   type: string
@@ -6,19 +6,35 @@ interface WebSocketMessage {
   span_count?: number
 }
 
+type CloseReason = {
+  code: number
+  reason: string
+  canRetry: boolean
+}
+
 interface UseWebSocketOptions {
   onMessage?: (message: WebSocketMessage) => void
   onConnect?: () => void
-  onDisconnect?: () => void
+  onDisconnect?: (event: CloseReason | null) => void
 }
 
 export function useWebSocket(options: UseWebSocketOptions = {}) {
   const { onMessage, onConnect, onDisconnect } = options
   const wsRef = useRef<WebSocket | null>(null)
   const [connected, setConnected] = useState(false)
+  const [lastDisconnect, setLastDisconnect] = useState<CloseReason | null>(null)
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout>>()
   const reconnectAttemptRef = useRef(0)
   const shouldReconnectRef = useRef(true)
+  const onMessageRef = useRef<(message: WebSocketMessage) => void>()
+  const onConnectRef = useRef<(() => void) | undefined>()
+  const onDisconnectRef = useRef<((event: CloseReason | null) => void) | undefined>()
+
+  useEffect(() => {
+    onMessageRef.current = onMessage
+    onConnectRef.current = onConnect
+    onDisconnectRef.current = onDisconnect
+  }, [onConnect, onDisconnect, onMessage])
 
   const resolveWebSocketUrl = () => {
     const configuredBase = import.meta.env.VITE_WS_BASE_URL as string | undefined
@@ -53,7 +69,8 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       ws.onopen = () => {
         reconnectAttemptRef.current = 0
         setConnected(true)
-        onConnect?.()
+        setLastDisconnect(null)
+        onConnectRef.current?.()
       }
 
       ws.onmessage = (event) => {
@@ -63,7 +80,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
             ws.send('pong')
             return
           }
-          onMessage?.(data)
+          onMessageRef.current?.(data)
         } catch {
           // Ignore non-JSON messages
         }
@@ -72,13 +89,21 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       ws.onclose = (event) => {
         wsRef.current = null
         setConnected(false)
-        onDisconnect?.()
+        const isAuthFailure = event.code === 4001
+        const reason: CloseReason = {
+          code: event.code,
+          reason:
+            event.reason?.trim() || (isAuthFailure ? 'Unauthorized: invalid or missing API key' : 'Disconnected'),
+          canRetry: !isAuthFailure,
+        }
+        setLastDisconnect(reason)
+        onDisconnectRef.current?.(reason)
 
         if (!shouldReconnectRef.current) {
           return
         }
 
-        if (event.code === 4001) {
+        if (isAuthFailure) {
           return
         }
 
@@ -99,7 +124,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     } catch {
       reconnectTimeoutRef.current = setTimeout(connect, 3000)
     }
-  }, [onMessage, onConnect, onDisconnect])
+  }, [])
 
   const resetConnection = useCallback(() => {
     shouldReconnectRef.current = false
@@ -114,6 +139,11 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     }
   }, [])
 
+  const reconnect = useCallback(() => {
+    shouldReconnectRef.current = true
+    connect()
+  }, [connect])
+
   useEffect(() => {
     connect()
 
@@ -122,5 +152,5 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     }
   }, [connect, resetConnection])
 
-  return { connected }
+  return { connected, lastDisconnect, reconnect }
 }
