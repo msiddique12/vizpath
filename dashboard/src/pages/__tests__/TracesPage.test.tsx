@@ -66,7 +66,7 @@ describe('TracesPage websocket security UX', () => {
     globalThis.fetch = originalFetch
   })
 
-  it('surfaces auth failure message and offers retry action', async () => {
+  it('surfaces auth failure message and blocks manual websocket reconnect', async () => {
     const renderResult = _renderWithProviders(<TracesPage />, ['/traces'])
 
     await waitFor(() => expect(screen.getByText('Demo trace')).toBeInTheDocument())
@@ -78,15 +78,39 @@ describe('TracesPage websocket security UX', () => {
 
     const banner = await screen.findByRole('status')
     expect(banner).toHaveTextContent('Live updates are unavailable')
-    expect(screen.getByRole('button', { name: 'Retry connection' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retry connection' })).not.toBeInTheDocument()
+    expect(screen.getByText(/Set VITE_VIZPATH_API_KEY/)).toBeInTheDocument()
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1)
+    })
+
+    renderResult.unmount()
+  })
+
+  it('allows manual retry for retryable websocket disconnects', async () => {
+    _renderWithProviders(<TracesPage />, ['/traces'])
+
+    await waitFor(() => expect(screen.getByText('Demo trace')).toBeInTheDocument())
+    expect(MockWebSocket.instances).toHaveLength(1)
+
+    act(() => {
+      MockWebSocket.latest().triggerClose(1000, 'Normal close')
+    })
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('Live updates disconnected. Retrying automatically when possible.')
+      ).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Retry connection' })).toBeInTheDocument()
+    })
 
     act(() => {
       fireEvent.click(screen.getByRole('button', { name: 'Retry connection' }))
     })
+
     await waitFor(() => {
       expect(MockWebSocket.instances).toHaveLength(2)
     })
-
-    renderResult.unmount()
   })
 })

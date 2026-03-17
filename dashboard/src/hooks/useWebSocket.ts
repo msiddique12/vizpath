@@ -12,6 +12,9 @@ type CloseReason = {
   canRetry: boolean
 }
 
+const AUTH_FAILURE_CODE = 4001
+const AUTH_FAILURE_REASON = 'Authentication required to stream live updates.'
+
 interface UseWebSocketOptions {
   onMessage?: (message: WebSocketMessage) => void
   onConnect?: () => void
@@ -89,11 +92,11 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       ws.onclose = (event) => {
         wsRef.current = null
         setConnected(false)
-        const isAuthFailure = event.code === 4001
+        const isAuthFailure = event.code === AUTH_FAILURE_CODE
+        const rawReason = event.reason?.trim()
         const reason: CloseReason = {
           code: event.code,
-          reason:
-            event.reason?.trim() || (isAuthFailure ? 'Unauthorized: invalid or missing API key' : 'Disconnected'),
+          reason: rawReason || (isAuthFailure ? AUTH_FAILURE_REASON : 'Disconnected'),
           canRetry: !isAuthFailure,
         }
         setLastDisconnect(reason)

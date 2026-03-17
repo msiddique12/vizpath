@@ -399,10 +399,12 @@ export default function TracesPage() {
 
   const isAuthFailure = lastDisconnect?.code === 4001
   const connectionStatusText = isAuthFailure
-    ? 'Live updates are unavailable: authentication required for WebSocket streaming.'
+    ? 'Live updates are unavailable: authentication is required for WebSocket streaming.'
     : connected === false
       ? 'Live updates disconnected. Retrying automatically when possible.'
       : null
+  const authKeyConfigured = Boolean(import.meta.env.VITE_VIZPATH_API_KEY?.trim())
+  const canRetryConnection = !isAuthFailure
 
   if (isLoading) {
     return (
@@ -450,16 +452,25 @@ export default function TracesPage() {
         >
           <p>{connectionStatusText}</p>
           <div className="mt-2 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={reconnect}
-              className="px-3 py-1 text-xs rounded-full bg-dark-800 border border-dark-700 text-muted-100 hover:bg-dark-700"
-            >
-              Retry connection
-            </button>
             {isAuthFailure && (
               <p className="text-xs text-amber-300/90">
-                Configure the dashboard API key before retrying.
+                {authKeyConfigured
+                  ? 'Update the dashboard API key and reload to reconnect.'
+                  : 'Set VITE_VIZPATH_API_KEY and reload to reconnect with websocket access.'}
+              </p>
+            )}
+            {canRetryConnection && (
+              <button
+                type="button"
+                onClick={reconnect}
+                className="px-3 py-1 text-xs rounded-full bg-dark-800 border border-dark-700 text-muted-100 hover:bg-dark-700"
+              >
+                Retry connection
+              </button>
+            )}
+            {!canRetryConnection && (
+              <p className="text-xs text-amber-300/90">
+                Streaming views will continue via polling when websocket access is unavailable.
               </p>
             )}
           </div>
