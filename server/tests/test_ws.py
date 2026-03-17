@@ -3,7 +3,9 @@
 from unittest.mock import MagicMock
 
 import pytest
+from starlette.websockets import WebSocketDisconnect
 
+from app.config import settings
 from app.models import Project
 from app.routes.ws import (
     _verify_ws_api_key,
@@ -48,6 +50,39 @@ class TestWebSocketAuth:
         with patch("app.routes.ws.get_project_by_api_key", side_effect=RuntimeError("db error")):
             result = _verify_ws_api_key("some-key", db=test_db)
             assert result is None
+
+    def test_strict_mode_rejects_missing_key(self, client, monkeypatch):
+        """Production-like strict mode should reject websocket connections without an API key."""
+        original = settings.security_strict_mode
+        monkeypatch.setattr(settings, "security_strict_mode", True)
+
+        try:
+            with pytest.raises(WebSocketDisconnect) as exc_info:
+                with client.websocket_connect("/ws/traces"):
+                    pass
+
+            assert exc_info.value.code == 4001
+            assert exc_info.value.reason == "Unauthorized: Invalid or missing API key"
+        finally:
+            monkeypatch.setattr(settings, "security_strict_mode", original)
+
+    def test_strict_mode_allows_valid_key(self, client, test_db, monkeypatch):
+        """Strict mode still allows authenticated websocket connections."""
+        from app.auth import generate_api_key, hash_api_key
+
+        api_key = generate_api_key()
+        project = Project(name="strict-project", api_key_hash=hash_api_key(api_key))
+        test_db.add(project)
+        test_db.commit()
+
+        original = settings.security_strict_mode
+        monkeypatch.setattr(settings, "security_strict_mode", True)
+        try:
+            with client.websocket_connect(f"/ws/traces?api_key={api_key}") as socket:
+                socket.send_text("ping")
+                assert socket.receive_text() == "pong"
+        finally:
+            monkeypatch.setattr(settings, "security_strict_mode", original)
 
 
 class TestBroadcastMessage:

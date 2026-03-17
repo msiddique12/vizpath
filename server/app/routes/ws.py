@@ -4,12 +4,12 @@ import asyncio
 import json
 import logging
 
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 
 from app.auth import get_project_by_api_key
 from app.config import settings
-from app.database import SessionLocal
+from app.database import SessionLocal, get_db
 from app.models import Project
 
 logger = logging.getLogger(__name__)
@@ -68,6 +68,7 @@ def _verify_ws_api_key(api_key: str | None, db: Session | None = None) -> Projec
 async def traces_websocket(
     websocket: WebSocket,
     api_key: str | None = Query(None, alias="api_key"),
+    db: Session = Depends(get_db),
 ) -> None:
     """
     WebSocket endpoint for real-time trace updates.
@@ -76,7 +77,7 @@ async def traces_websocket(
     Requires valid API key passed as query parameter.
     """
     # Verify API key before accepting connection
-    project = _verify_ws_api_key(api_key)
+    project = _verify_ws_api_key(api_key, db=db)
 
     # In production mode, require valid API key
     # Enforce API key in production or strict mode. Development defaults to optional auth.
