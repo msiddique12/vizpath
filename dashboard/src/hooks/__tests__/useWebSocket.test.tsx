@@ -109,6 +109,34 @@ describe('useWebSocket', () => {
     renderResult.unmount()
   })
 
+  it('uses a safe fallback reason for auth failures when reason is absent', async () => {
+    const onDisconnect = vi.fn()
+    const { stateHolder, renderResult } = createHarness(onDisconnect)
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1)
+      expect(stateHolder.state.connected).toBe(true)
+    })
+
+    act(() => {
+      MockWebSocket.latest().triggerClose(4001, '')
+    })
+
+    expect(stateHolder.state.lastDisconnect).toEqual({
+      code: 4001,
+      reason: 'Authentication required to stream live updates.',
+      canRetry: false,
+    })
+    expect(stateHolder.state.connected).toBe(false)
+    expect(onDisconnect).toHaveBeenCalledWith({
+      code: 4001,
+      reason: 'Authentication required to stream live updates.',
+      canRetry: false,
+    })
+
+    renderResult.unmount()
+  })
+
   it('reconnects automatically for retryable close codes', async () => {
     const onDisconnect = vi.fn()
     const { stateHolder, renderResult } = createHarness(onDisconnect)
