@@ -19,6 +19,9 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Validate CI contract
+        run: python scripts/ci_guard.py
+
       - name: Install linters
         run: pip install ruff mypy
 

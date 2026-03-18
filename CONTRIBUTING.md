@@ -123,6 +123,7 @@ cd dashboard && npm test
 For CI parity:
 
 ```bash
+make ci-check
 make test-sdk
 make test-server
 make lint

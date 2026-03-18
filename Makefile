@@ -1,4 +1,4 @@
-.PHONY: help install install-dev lint format typecheck test test-sdk test-server build bootstrap bootstrap-env bootstrap-deps check-env doctor clean
+.PHONY: help install install-dev lint format typecheck test test-sdk test-server test-dashboard build bootstrap bootstrap-env bootstrap-deps check-env ci-check ci test-cov build-sdk build-dashboard clean
 
 # Default target
 help:
@@ -22,6 +22,9 @@ help:
 	@echo "  make test         Run all tests"
 	@echo "  make test-sdk     Run SDK tests only"
 	@echo "  make test-server  Run server tests only"
+	@echo "  make test-dashboard Run dashboard tests only"
+	@echo "  make ci-check     Run CI guard + lint + env checks"
+	@echo "  make ci           Run full CI parity checks"
 	@echo ""
 	@echo "Build:"
 	@echo "  make build        Build all packages"
@@ -48,6 +51,10 @@ check-env:
 	python scripts/check_env.py
 
 doctor: check-env lint
+
+ci-check:
+	python scripts/ci_guard.py
+	@make lint
 
 # Installation
 install:
@@ -91,7 +98,7 @@ typecheck-typescript:
 	cd dashboard && npx tsc --noEmit
 
 # Testing
-test: test-sdk test-server
+test: test-sdk test-server test-dashboard
 
 test-sdk:
 	cd sdk && uv run pytest tests/ -v
@@ -99,9 +106,19 @@ test-sdk:
 test-server:
 	cd server && uv run pytest tests/ -v
 
+test-dashboard:
+	cd dashboard && npm test
+
 test-cov:
 	cd sdk && uv run pytest tests/ -v --cov=vizpath --cov-report=html
 	cd server && uv run pytest tests/ -v --cov=app --cov-report=html
+
+ci:
+	@echo "Running CI parity checks..."
+	@make ci-check
+	@make test-sdk
+	@make test-server
+	@make test-dashboard
 
 # Building
 build: build-sdk build-dashboard
