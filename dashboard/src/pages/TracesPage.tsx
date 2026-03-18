@@ -467,7 +467,7 @@ export default function TracesPage() {
               <p className="text-xs text-amber-300/90">
                 {authKeyConfigured
                   ? 'Update the dashboard API key and reload to reconnect.'
-                  : 'Set VITE_VIZPATH_API_KEY and reload to reconnect with websocket access.'}
+                  : 'Use a websocket API key to reconnect with live updates.'}
               </p>
             )}
             {canRetryConnection && !isAuthFailure && (

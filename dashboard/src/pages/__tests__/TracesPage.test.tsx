@@ -79,7 +79,8 @@ describe('TracesPage websocket security UX', () => {
     const banner = await screen.findByRole('status')
     expect(banner).toHaveTextContent('Live updates are unavailable')
     expect(screen.queryByRole('button', { name: 'Retry connection' })).not.toBeInTheDocument()
-    expect(screen.getByText(/Set VITE_VIZPATH_API_KEY/)).toBeInTheDocument()
+    expect(screen.getByText(/Use a websocket API key to reconnect/)).toBeInTheDocument()
+    expect(screen.getByLabelText('Websocket API key')).toBeInTheDocument()
 
     await waitFor(() => {
       expect(MockWebSocket.instances).toHaveLength(1)
