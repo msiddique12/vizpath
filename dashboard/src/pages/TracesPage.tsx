@@ -466,7 +466,7 @@ export default function TracesPage() {
             {isAuthFailure && (
               <p className="text-xs text-amber-300/90">
                 {authKeyConfigured
-                  ? 'Update the dashboard API key and reload to reconnect.'
+                  ? 'A websocket API key was provided, but authentication failed. Use a replacement key to reconnect.'
                   : 'Use a websocket API key to reconnect with live updates.'}
               </p>
             )}
@@ -479,7 +479,7 @@ export default function TracesPage() {
                 Retry connection
               </button>
             )}
-            {isAuthFailure && !authKeyConfigured && (
+            {isAuthFailure && (
               <form
                 onSubmit={handleManualApiKeySubmit}
                 className="w-full flex items-center gap-2 flex-wrap"
