@@ -14,6 +14,48 @@ type CloseReason = {
 
 const AUTH_FAILURE_CODE = 4001
 const AUTH_FAILURE_REASON = 'Authentication required to stream live updates.'
+const WEBSOCKET_PATH = '/ws/traces'
+
+type WebSocketUrlOptions = {
+  configuredBaseUrl: string | undefined
+  configuredApiKey: string | undefined
+  runtimeApiKey: string
+  origin: string
+}
+
+const normalizeWebSocketBase = (rawBase: string) => {
+  if (/^https?:\/\//i.test(rawBase)) {
+    return rawBase.replace(/^https?:\/\//i, (match) => (match === 'https://' ? 'wss://' : 'ws://'))
+  }
+  return rawBase
+}
+
+const buildWebSocketUrl = ({
+  configuredBaseUrl,
+  configuredApiKey,
+  runtimeApiKey,
+  origin,
+}: WebSocketUrlOptions): string => {
+  const fallbackBase = normalizeWebSocketBase(origin.replace(/^https?:/i, (match) => (match === 'https:' ? 'wss:' : 'ws:')))
+  const candidateBase = configuredBaseUrl?.trim()
+    ? configuredBaseUrl.trim()
+    : fallbackBase
+  const normalizedBase = normalizeWebSocketBase(candidateBase).replace(/\/$/, '')
+  const apiKey = runtimeApiKey || configuredApiKey?.trim()
+  const build = (base: string) => {
+    const url = new URL(WEBSOCKET_PATH, `${base}/`)
+    if (apiKey) {
+      url.searchParams.set('api_key', apiKey)
+    }
+    return url.toString()
+  }
+
+  try {
+    return build(normalizedBase)
+  } catch {
+    return build(fallbackBase)
+  }
+}
 
 interface UseWebSocketOptions {
   onMessage?: (message: WebSocketMessage) => void
@@ -44,18 +86,14 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
   const resolveWebSocketUrl = () => {
     const configuredBase = import.meta.env.VITE_WS_BASE_URL as string | undefined
     const configuredApiKey = import.meta.env.VITE_VIZPATH_API_KEY as string | undefined
-    const baseUrl = configuredBase?.trim()
-      ? configuredBase.trim()
-      : window.location.origin.replace(/^http/, 'ws')
-    const url = new URL('/ws/traces', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`)
-
     const runtimeApiKey = apiKeyRef.current?.trim()
-    const runtimeKey = runtimeApiKey || configuredApiKey?.trim()
-    if (runtimeKey) {
-      url.searchParams.set('api_key', runtimeKey)
-    }
 
-    return url.toString()
+    return buildWebSocketUrl({
+      configuredBaseUrl: configuredBase,
+      configuredApiKey,
+      runtimeApiKey,
+      origin: window.location.origin,
+    })
   }
 
   const connect = useCallback(() => {
@@ -173,3 +211,5 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
 
   return { connected, lastDisconnect, reconnect, setApiKey }
 }
+
+export { buildWebSocketUrl }

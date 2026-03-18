@@ -2,7 +2,7 @@ import { act, render } from '@testing-library/react'
 import { useCallback } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { waitFor } from '@testing-library/react'
-import { useWebSocket } from '../useWebSocket'
+import { buildWebSocketUrl, useWebSocket } from '../useWebSocket'
 import { MockWebSocket } from '../../test/mocks/websocket'
 
 interface CloseReason {
@@ -209,5 +209,26 @@ describe('useWebSocket', () => {
 
     renderResult.unmount()
   })
-}
-)
+
+  it('normalizes configured websocket base URLs to ws/wss schemes', () => {
+    const url = buildWebSocketUrl({
+      configuredBaseUrl: 'http://127.0.0.1:8000',
+      configuredApiKey: 'configured-key',
+      runtimeApiKey: '',
+      origin: 'https://traces.local',
+    })
+
+    expect(url).toBe('ws://127.0.0.1:8000/ws/traces?api_key=configured-key')
+  })
+
+  it('falls back to browser origin when configured websocket base URL is invalid', () => {
+    const url = buildWebSocketUrl({
+      configuredBaseUrl: 'http://%zz',
+      configuredApiKey: undefined,
+      runtimeApiKey: '',
+      origin: 'https://vizpath.example',
+    })
+
+    expect(url).toBe('wss://vizpath.example/ws/traces')
+  })
+})
