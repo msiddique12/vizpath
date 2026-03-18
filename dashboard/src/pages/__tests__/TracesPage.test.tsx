@@ -17,7 +17,7 @@ describe('TracesPage websocket security UX', () => {
 
   beforeEach(() => {
     originalWebSocket = globalThis.WebSocket
-    globalThis.WebSocket = MockWebSocket as typeof WebSocket
+    globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket
     MockWebSocket.reset()
 
     originalFetch = globalThis.fetch

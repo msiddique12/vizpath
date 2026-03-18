@@ -21,6 +21,7 @@ function createHarness(onDisconnect: (event: CloseReason | null) => void) {
   const stateHolder: HarnessState = {
     state: { connected: false, lastDisconnect: null },
     reconnect: () => {},
+    setApiKey: () => {},
   }
 
   const Harness = () => {
@@ -65,7 +66,7 @@ describe('useWebSocket', () => {
 
   beforeEach(() => {
     originalWebSocket = globalThis.WebSocket
-    globalThis.WebSocket = MockWebSocket as typeof WebSocket
+    globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket
     MockWebSocket.reset()
   })
 
