@@ -88,6 +88,32 @@ describe('TracesPage websocket security UX', () => {
     renderResult.unmount()
   })
 
+  it('allows users to reconnect with a runtime websocket API key', async () => {
+    const renderResult = _renderWithProviders(<TracesPage />, ['/traces'])
+
+    await waitFor(() => expect(screen.getByText('Demo trace')).toBeInTheDocument())
+    expect(MockWebSocket.instances).toHaveLength(1)
+
+    act(() => {
+      MockWebSocket.latest().triggerClose(4001, 'Unauthorized: Invalid or missing API key')
+    })
+
+    const input = await screen.findByLabelText('Websocket API key')
+    const submitButton = screen.getByRole('button', { name: 'Connect with API key' })
+
+    await act(async () => {
+      await fireEvent.change(input, { target: { value: 'manual-runtime-key' } })
+      await fireEvent.click(submitButton)
+    })
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(2)
+      expect(MockWebSocket.latest().url).toContain('api_key=manual-runtime-key')
+    })
+
+    renderResult.unmount()
+  })
+
   it('allows manual retry for retryable websocket disconnects', async () => {
     _renderWithProviders(<TracesPage />, ['/traces'])
 

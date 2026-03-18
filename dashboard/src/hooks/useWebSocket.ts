@@ -19,16 +19,18 @@ interface UseWebSocketOptions {
   onMessage?: (message: WebSocketMessage) => void
   onConnect?: () => void
   onDisconnect?: (event: CloseReason | null) => void
+  apiKey?: string
 }
 
 export function useWebSocket(options: UseWebSocketOptions = {}) {
-  const { onMessage, onConnect, onDisconnect } = options
+  const { onMessage, onConnect, onDisconnect, apiKey } = options
   const wsRef = useRef<WebSocket | null>(null)
   const [connected, setConnected] = useState(false)
   const [lastDisconnect, setLastDisconnect] = useState<CloseReason | null>(null)
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout>>()
   const reconnectAttemptRef = useRef(0)
   const shouldReconnectRef = useRef(true)
+  const apiKeyRef = useRef<string>(apiKey?.trim() || '')
   const onMessageRef = useRef<(message: WebSocketMessage) => void>()
   const onConnectRef = useRef<(() => void) | undefined>()
   const onDisconnectRef = useRef<((event: CloseReason | null) => void) | undefined>()
@@ -47,9 +49,10 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       : window.location.origin.replace(/^http/, 'ws')
     const url = new URL('/ws/traces', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`)
 
-    const apiKey = configuredApiKey?.trim()
-    if (apiKey) {
-      url.searchParams.set('api_key', apiKey)
+    const runtimeApiKey = apiKeyRef.current?.trim()
+    const runtimeKey = runtimeApiKey || configuredApiKey?.trim()
+    if (runtimeKey) {
+      url.searchParams.set('api_key', runtimeKey)
     }
 
     return url.toString()
@@ -129,6 +132,10 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     }
   }, [])
 
+  useEffect(() => {
+    apiKeyRef.current = apiKey?.trim() || ''
+  }, [apiKey])
+
   const resetConnection = useCallback(() => {
     shouldReconnectRef.current = false
     if (reconnectTimeoutRef.current) {
@@ -147,6 +154,15 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     connect()
   }, [connect])
 
+  const setApiKey = useCallback(
+    (nextApiKey: string) => {
+      apiKeyRef.current = nextApiKey.trim()
+      resetConnection()
+      reconnect()
+    },
+    [reconnect, resetConnection]
+  )
+
   useEffect(() => {
     connect()
 
@@ -155,5 +171,5 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     }
   }, [connect, resetConnection])
 
-  return { connected, lastDisconnect, reconnect }
+  return { connected, lastDisconnect, reconnect, setApiKey }
 }

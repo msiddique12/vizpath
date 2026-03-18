@@ -14,6 +14,7 @@ interface CloseReason {
 interface HarnessState {
   state: { connected: boolean; lastDisconnect: CloseReason | null }
   reconnect: () => void
+  setApiKey: (nextApiKey: string) => void
 }
 
 function createHarness(onDisconnect: (event: CloseReason | null) => void) {
@@ -48,6 +49,7 @@ function createHarness(onDisconnect: (event: CloseReason | null) => void) {
 
     stateHolder.state = { ...stateHolder.state, connected: ws.connected, lastDisconnect: ws.lastDisconnect }
     stateHolder.reconnect = ws.reconnect
+    stateHolder.setApiKey = ws.setApiKey
 
     return null
   }
@@ -181,6 +183,30 @@ describe('useWebSocket', () => {
 
     expect(socket.sentMessages).toEqual(['pong'])
     expect(stateHolder.state.connected).toBe(true)
+  })
+
+  it('updates websocket API key and reconnects with the provided key', async () => {
+    const onDisconnect = vi.fn()
+    const { stateHolder, renderResult } = createHarness(onDisconnect)
+
+    await waitFor(() => {
+      expect(stateHolder.state.connected).toBe(true)
+      expect(MockWebSocket.instances).toHaveLength(1)
+    })
+
+    const firstSocket = MockWebSocket.latest()
+    expect(firstSocket.url).not.toContain('api_key=')
+
+    act(() => {
+      stateHolder.setApiKey('runtime-test-key')
+    })
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(2)
+    })
+    expect(MockWebSocket.latest().url).toContain('api_key=runtime-test-key')
+
+    renderResult.unmount()
   })
 }
 )

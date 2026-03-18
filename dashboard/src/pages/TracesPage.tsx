@@ -1,4 +1,4 @@
-import { MouseEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { FormEvent, MouseEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
 import { formatDistanceToNow } from 'date-fns'
@@ -247,6 +247,7 @@ export default function TracesPage() {
   const [sortBy, setSortBy] = useState<SortBy>('created_at')
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
   const [summaryWindowDays, setSummaryWindowDays] = useState<7 | 30>(7)
+  const [manualWsApiKey, setManualWsApiKey] = useState('')
 
   useEffect(() => {
     const saved = getSavedFilters()
@@ -334,13 +335,23 @@ export default function TracesPage() {
     }
   }, [hasErrors, minCost, minTokens, search, sortBy, sortOrder])
 
-  const { connected, lastDisconnect, reconnect } = useWebSocket({
+  const { connected, lastDisconnect, reconnect, setApiKey: setRuntimeWebSocketKey } = useWebSocket({
     onMessage: (msg) => {
       if (msg.type === 'span_ingested') {
         queryClient.invalidateQueries({ queryKey: ['traces'] })
       }
     },
   })
+
+  const handleManualApiKeySubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const trimmed = manualWsApiKey.trim()
+    if (!trimmed) {
+      return
+    }
+    setRuntimeWebSocketKey(trimmed)
+    setManualWsApiKey('')
+  }
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['traces', page, statusFilter, queryOptions],
@@ -459,7 +470,7 @@ export default function TracesPage() {
                   : 'Set VITE_VIZPATH_API_KEY and reload to reconnect with websocket access.'}
               </p>
             )}
-            {canRetryConnection && (
+            {canRetryConnection && !isAuthFailure && (
               <button
                 type="button"
                 onClick={reconnect}
@@ -467,6 +478,32 @@ export default function TracesPage() {
               >
                 Retry connection
               </button>
+            )}
+            {isAuthFailure && !authKeyConfigured && (
+              <form
+                onSubmit={handleManualApiKeySubmit}
+                className="w-full flex items-center gap-2 flex-wrap"
+              >
+                <label className="sr-only" htmlFor="ws-auth-key-input">
+                  Websocket API key
+                </label>
+                <input
+                  id="ws-auth-key-input"
+                  name="wsAuthKey"
+                  type="password"
+                  value={manualWsApiKey}
+                  onChange={(event) => setManualWsApiKey(event.target.value)}
+                  placeholder="Enter websocket API key"
+                  className="h-8 px-2 bg-dark-900 border border-dark-700 rounded text-xs text-muted-100 placeholder:text-muted-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                />
+                <button
+                  type="submit"
+                  disabled={!manualWsApiKey.trim()}
+                  className="px-3 py-1 text-xs rounded-full bg-dark-800 border border-dark-700 text-muted-100 hover:bg-dark-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Connect with API key
+                </button>
+              </form>
             )}
             {!canRetryConnection && (
               <p className="text-xs text-amber-300/90">
