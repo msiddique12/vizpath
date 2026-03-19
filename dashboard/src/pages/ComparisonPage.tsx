@@ -1,20 +1,67 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Loader2, GitCompare, X, ArrowLeftRight, Sparkles } from 'lucide-react'
+import { Loader2, GitCompare, X, ArrowLeftRight, Sparkles, BookmarkPlus, Trash2, BookOpen } from 'lucide-react'
 import clsx from 'clsx'
 import { useSearchParams } from 'react-router-dom'
 import { compareTraces, getTraces, getTrace } from '@/lib/api'
 import { Trace } from '@/lib/types'
 import TraceComparison from '@/components/TraceComparison'
 
+interface SavedComparePreset {
+  id: string
+  name: string
+  traceA: string
+  traceB: string
+  createdAt: string
+}
+
+const COMPARE_PRESETS_STORAGE_KEY = 'compare_presets_v1'
+
 export default function ComparisonPage() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const loadPresetsFromStorage = useCallback(() => {
+    if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
+      return []
+    }
+
+    try {
+      const raw = window.localStorage.getItem(COMPARE_PRESETS_STORAGE_KEY)
+      if (!raw) return []
+      const parsed = JSON.parse(raw) as SavedComparePreset[]
+      if (!Array.isArray(parsed)) return []
+
+      return parsed
+        .filter(
+          (preset): preset is SavedComparePreset =>
+            typeof preset?.id === 'string' &&
+            typeof preset?.name === 'string' &&
+            typeof preset?.traceA === 'string' &&
+            typeof preset?.traceB === 'string'
+        )
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    } catch {
+      return []
+    }
+  }, [])
+
+  const getPresetById = useCallback((presetId: string | null): SavedComparePreset | null => {
+    if (!presetId) return null
+    const saved = loadPresetsFromStorage()
+    return saved.find((preset) => preset.id === presetId) || null
+  }, [loadPresetsFromStorage])
+
+  const queryTraceA = searchParams.get('traceA')
+  const queryTraceB = searchParams.get('traceB')
+  const presetFromQuery = searchParams.get('preset')
+
   const [selectedTraceA, setSelectedTraceA] = useState<string | null>(
-    searchParams.get('traceA')
+    queryTraceA
   )
   const [selectedTraceB, setSelectedTraceB] = useState<string | null>(
-    searchParams.get('traceB')
+    queryTraceB
   )
+  const [presetName, setPresetName] = useState('')
+  const [savedPresets, setSavedPresets] = useState<SavedComparePreset[]>([])
 
   const { data: tracesData, isLoading: tracesLoading } = useQuery({
     queryKey: ['traces', 50],
@@ -41,14 +88,42 @@ export default function ComparisonPage() {
 
   const traces = useMemo(() => tracesData?.traces || [], [tracesData?.traces])
 
+  const formatTimestamp = (ts: string) => {
+    return new Date(ts).toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  }
+
   useEffect(() => {
     const next = new URLSearchParams(window.location.search)
     if (selectedTraceA) next.set('traceA', selectedTraceA)
     else next.delete('traceA')
     if (selectedTraceB) next.set('traceB', selectedTraceB)
     else next.delete('traceB')
+
+    const currentSearch = window.location.search.startsWith('?')
+      ? window.location.search.slice(1)
+      : window.location.search
+    if (next.toString() === currentSearch) return
+
     setSearchParams(next, { replace: true })
   }, [selectedTraceA, selectedTraceB, setSearchParams])
+
+  useEffect(() => {
+    const nextTraceA = searchParams.get('traceA')
+    const nextTraceB = searchParams.get('traceB')
+    const preset = getPresetById(presetFromQuery)
+    const resolvedTraceA = nextTraceA ?? preset?.traceA ?? null
+    const resolvedTraceB = nextTraceB ?? preset?.traceB ?? null
+
+    if (resolvedTraceA === selectedTraceA && resolvedTraceB === selectedTraceB) return
+
+    setSelectedTraceA(resolvedTraceA)
+    setSelectedTraceB(resolvedTraceB)
+  }, [searchParams, selectedTraceA, selectedTraceB, presetFromQuery, getPresetById])
 
   const traceOptions = useMemo(
     () =>
@@ -67,13 +142,68 @@ export default function ComparisonPage() {
     }
   }
 
-  const formatTimestamp = (ts: string) => {
-    return new Date(ts).toLocaleString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    })
+  useEffect(() => {
+    setSavedPresets(loadPresetsFromStorage())
+  }, [loadPresetsFromStorage])
+
+  useEffect(() => {
+    if (!searchParams.get('preset')) return
+
+    const nextSearchParams = Object.fromEntries(searchParams.entries())
+    delete nextSearchParams.preset
+    setSearchParams(nextSearchParams, { replace: true })
+  }, [searchParams, setSearchParams])
+
+  useEffect(() => {
+    if (!selectedTraceA || !selectedTraceB) return
+
+    if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') return
+    try {
+      setSavedPresets(loadPresetsFromStorage())
+    } catch {
+      // ignore storage errors
+    }
+  }, [loadPresetsFromStorage, selectedTraceA, selectedTraceB])
+
+  const persistPresets = (presets: SavedComparePreset[]) => {
+    if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') return
+
+    window.localStorage.setItem(COMPARE_PRESETS_STORAGE_KEY, JSON.stringify(presets))
+    setSavedPresets(presets)
+  }
+
+  const handleSavePreset = () => {
+    if (!selectedTraceA || !selectedTraceB) return
+
+    const trimmedName = presetName.trim() || `Compare ${selectedTraceA} vs ${selectedTraceB}`
+    const id = crypto.randomUUID()
+    const nextPreset: SavedComparePreset = {
+      id,
+      name: trimmedName,
+      traceA: selectedTraceA,
+      traceB: selectedTraceB,
+      createdAt: new Date().toISOString(),
+    }
+
+    const nextPresets = [nextPreset, ...savedPresets.filter((preset) => preset.id !== id)]
+    persistPresets(nextPresets)
+    setPresetName('')
+  }
+
+  const handleLoadPreset = (preset: SavedComparePreset) => {
+    setSearchParams(
+      {
+        ...Object.fromEntries(searchParams.entries()),
+        traceA: preset.traceA,
+        traceB: preset.traceB,
+        preset: preset.id,
+      },
+      { replace: true }
+    )
+  }
+
+  const handleDeletePreset = (id: string) => {
+    persistPresets(savedPresets.filter((preset) => preset.id !== id))
   }
 
   const applyLatestTwo = () => {
@@ -99,7 +229,7 @@ export default function ComparisonPage() {
     const selectedTrace = traces.find((t: Trace) => t.id === selected)
 
     return (
-      <div className="flex-1">
+      <div className="flex-1" data-testid={`trace-selector-${slot.toLowerCase()}`}>
         <label className="block text-sm font-medium text-muted-200 mb-2">Trace {slot}</label>
             {selected && selectedTrace ? (
               <div className="flex items-center gap-2 bg-primary-900/20 border border-primary-800 rounded-lg px-3 py-2">
@@ -155,6 +285,75 @@ export default function ComparisonPage() {
           </div>
         ) : (
           <>
+            <div className="mb-4 space-y-3">
+              <div className="text-xs uppercase tracking-wide text-muted-300">Saved Compare Presets</div>
+              <div className="flex flex-wrap gap-2">
+                <input
+                  type="text"
+                  value={presetName}
+                  onChange={(event) => setPresetName(event.target.value)}
+                  placeholder="Preset name (optional)"
+                  className="flex-1 min-w-[220px] bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-sm text-muted-200 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  aria-label="Compare preset name"
+                />
+                <button
+                  type="button"
+                  onClick={handleSavePreset}
+                  disabled={!selectedTraceA || !selectedTraceB}
+                  className={clsx(
+                    'inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs border',
+                    selectedTraceA && selectedTraceB
+                      ? 'bg-dark-800 border-dark-700 text-muted-200 hover:bg-dark-700'
+                      : 'bg-dark-900 border-dark-700 text-muted-500 cursor-not-allowed'
+                  )}
+                >
+                  <BookmarkPlus className="h-3.5 w-3.5" />
+                  Save preset
+                </button>
+              </div>
+
+              {savedPresets.length === 0 ? (
+                <p className="text-xs text-muted-400">No saved compare presets yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {savedPresets.map((preset) => (
+                    <div
+                      key={preset.id}
+                      data-testid={`compare-preset-${preset.id}`}
+                      className="rounded-lg border border-dark-700 bg-dark-900 p-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="text-xs">
+                        <p className="text-muted-200">{preset.name}</p>
+                        <p className="text-muted-400 mt-1">
+                          {preset.traceA} ↔ {preset.traceB}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleLoadPreset(preset)}
+                          aria-label={`Load preset ${preset.name}`}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs border border-dark-700 bg-dark-800 text-muted-200 hover:bg-dark-700"
+                        >
+                          <BookOpen className="h-3.5 w-3.5" />
+                          Load
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeletePreset(preset.id)}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs border border-red-800 text-red-300 hover:bg-red-950/40"
+                          aria-label={`Delete preset ${preset.name}`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <div className="mb-4 flex flex-wrap items-center gap-2">
               <button
                 onClick={applyLatestTwo}
