@@ -1,6 +1,7 @@
 """Intelligence API endpoints for Nemotron-powered trace analysis."""
 
 import logging
+import re
 from math import isfinite
 from typing import Any
 
@@ -17,6 +18,243 @@ from app.validation import ID_PATTERN
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/intelligence", tags=["Intelligence"])
+
+_SEVERITY_WEIGHT = {"low": 10, "medium": 20, "high": 35, "critical": 50}
+_RISK_SUMMARY = {
+    "low": {
+        "threshold": 25,
+        "label": "low",
+    },
+    "medium": {
+        "threshold": 55,
+        "label": "medium",
+    },
+    "high": {
+        "threshold": 75,
+        "label": "high",
+    },
+    "critical": {
+        "threshold": 100,
+        "label": "critical",
+    },
+}
+_SENSITIVE_RULES = [
+    {
+        "id": "pii-email",
+        "category": "pii",
+        "severity": "low",
+        "title": "Potential email address",
+        "description": "Email-like text was found in trace metadata or span payload.",
+        "pattern": re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", re.IGNORECASE),
+    },
+    {
+        "id": "pii-ssn",
+        "category": "pii",
+        "severity": "high",
+        "title": "Potential social security number",
+        "description": "SSN-like numbers were detected; this is highly sensitive.",
+        "pattern": re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
+    },
+    {
+        "id": "pii-phone",
+        "category": "pii",
+        "severity": "low",
+        "title": "Potential phone number",
+        "description": "Phone-number-like text was found.",
+        "pattern": re.compile(r"\b\+?1?[ -.]?\(?\d{3}\)?[ -.]?\d{3}[ -.]?\d{4}\b"),
+    },
+    {
+        "id": "secret-openai-key",
+        "category": "secrets",
+        "severity": "critical",
+        "title": "Possible OpenAI API key",
+        "description": "A token with OpenAI key structure was found.",
+        "pattern": re.compile(r"sk-[A-Za-z0-9]{20,}"),
+    },
+    {
+        "id": "secret-openai-alt-key",
+        "category": "secrets",
+        "severity": "critical",
+        "title": "Possible OpenAI API key",
+        "description": "A token with OpenAI key structure was found.",
+        "pattern": re.compile(r"sk_live_[A-Za-z0-9]{20,}"),
+    },
+    {
+        "id": "secret-aws-key",
+        "category": "secrets",
+        "severity": "critical",
+        "title": "Possible AWS key",
+        "description": "An AWS-style access key pattern was detected.",
+        "pattern": re.compile(r"AKIA[0-9A-Z]{16}"),
+    },
+    {
+        "id": "secret-github-token",
+        "category": "secrets",
+        "severity": "high",
+        "title": "Possible GitHub token",
+        "description": "A GitHub token pattern was detected.",
+        "pattern": re.compile(r"ghp_[A-Za-z0-9]{36}"),
+    },
+    {
+        "id": "secret-bearer",
+        "category": "secrets",
+        "severity": "critical",
+        "title": "Bearer authorization token",
+        "description": "Bearer authorization token format was detected.",
+        "pattern": re.compile(r"\bbearer\s+[A-Za-z0-9._-]{12,}", re.IGNORECASE),
+    },
+    {
+        "id": "secret-private-key",
+        "category": "secrets",
+        "severity": "critical",
+        "title": "Private key header",
+        "description": "Private key block detected in trace payload.",
+        "pattern": re.compile(r"-----BEGIN (?:RSA )?PRIVATE KEY-----"),
+    },
+    {
+        "id": "policy-instruction-hijack",
+        "category": "policy",
+        "severity": "medium",
+        "title": "Potential instruction override",
+        "description": "Language that attempts to override system instructions was found.",
+        "pattern": re.compile(
+            r"(?i)\b(ignore|disregard|override)\s+(all|previous)\s+(instructions|prompts|system)\b"
+        ),
+    },
+    {
+        "id": "policy-destructive-action",
+        "category": "policy",
+        "severity": "high",
+        "title": "Potential destructive action",
+        "description": "Potentially destructive shell-style command text was found.",
+        "pattern": re.compile(r"(?i)\b(rm\s+-rf|drop\s+table|delete\s+from|format\s+\S+|shutdown\s+now)\b"),
+    },
+]
+
+
+def _collect_text_blocks(trace_data: dict[str, Any]) -> list[tuple[str, str, str]]:
+    """Build a deterministic list of searchable trace text fields."""
+    blocks: list[tuple[str, str, str]] = []
+
+    def _add_block(scope: str, field: str, value: Any) -> None:
+        if value is None:
+            return
+        if isinstance(value, str):
+            text = value
+        else:
+            text = str(value)
+        text = text.strip()
+        if text:
+            blocks.append((scope, field, text))
+
+    _add_block("trace", "name", trace_data.get("name"))
+    _add_block("trace", "status", trace_data.get("status"))
+    _add_block("trace", "metadata", trace_data.get("metadata"))
+    _add_block("trace", "trace_error", trace_data.get("error"))
+
+    for span in trace_data.get("spans", []):
+        if not isinstance(span, dict):
+            continue
+        scope = f"span:{span.get('id') or span.get('trace_id') or 'unknown'}"
+        _add_block(scope, "name", span.get("name"))
+        _add_block(scope, "type", span.get("span_type"))
+        _add_block(scope, "status", span.get("status"))
+        _add_block(scope, "error", span.get("error"))
+        _add_block(scope, "input", span.get("input"))
+        _add_block(scope, "output", span.get("output"))
+        _add_block(scope, "attributes", span.get("attributes"))
+        _add_block(scope, "events", span.get("events"))
+
+    return blocks
+
+
+def _redact_match(value: str) -> str:
+    """Redact matched text for safe output."""
+    value = value.strip()
+    if len(value) <= 4:
+        return "*" * len(value)
+    if len(value) <= 12:
+        return value[:1] + "*" * (len(value) - 1)
+    return f"{value[:4]}...{value[-4:]}"
+
+
+def _build_risk_level(score: int) -> str:
+    if score >= _RISK_SUMMARY["critical"]["threshold"]:
+        return "critical"
+    if score >= _RISK_SUMMARY["high"]["threshold"]:
+        return "high"
+    if score >= _RISK_SUMMARY["medium"]["threshold"]:
+        return "medium"
+    return _RISK_SUMMARY["low"]["label"]
+
+
+def _scan_trace_for_risk(trace_data: dict[str, Any]) -> dict[str, Any]:
+    """Run deterministic local safety/privacy risk checks on trace content."""
+    findings: list[dict[str, Any]] = []
+    seen_keys = set[str]()
+    for scope, field, text in _collect_text_blocks(trace_data):
+        for rule in _SENSITIVE_RULES:
+            match_count = 0
+            for match in rule["pattern"].finditer(text):
+                match_count += 1
+                if match_count > 2:
+                    break
+                matched_text = match.group(0)
+                sample_key = f"{scope}:{field}:{rule['id']}:{matched_text[:8]}"
+                if sample_key in seen_keys:
+                    continue
+                seen_keys.add(sample_key)
+                findings.append(
+                    {
+                        "rule_id": rule["id"],
+                        "category": rule["category"],
+                        "severity": rule["severity"],
+                        "title": rule["title"],
+                        "detail": rule["description"],
+                        "location": f"{scope}.{field}",
+                        "sample": _redact_match(matched_text),
+                    }
+                )
+
+    findings.sort(
+        key=lambda item: (_SEVERITY_WEIGHT.get(item["severity"], 0), item["rule_id"]),
+        reverse=True,
+    )
+
+    score = 0
+    for finding in findings:
+        score += _SEVERITY_WEIGHT.get(finding["severity"], 0)
+    score = min(100, score)
+    risk_level = _build_risk_level(score)
+
+    category_counts: dict[str, int] = {}
+    for finding in findings:
+        category_counts[finding["category"]] = category_counts.get(finding["category"], 0) + 1
+
+    recommendations = []
+    if category_counts.get("secrets", 0) > 0:
+        recommendations.append("Rotate exposed secrets immediately and reissue new keys.")
+    if category_counts.get("pii", 0) > 0:
+        recommendations.append("Reduce collection of PII and apply tokenization/masking.")
+    if category_counts.get("policy", 0) > 0:
+        recommendations.append("Validate user-controlled instructions before tool execution.")
+    if not recommendations:
+        recommendations.append("Keep tracing sanitized; no immediate security risks detected.")
+
+    summary = (
+        "Potentially sensitive or policy-risk content detected."
+        if findings
+        else "No high-confidence sensitive or policy-risk content detected."
+    )
+
+    return {
+        "risk_score": score,
+        "risk_level": risk_level,
+        "findings": findings[:12],
+        "category_counts": category_counts,
+        "recommendations": recommendations[:3],
+        "summary": summary,
+    }
 
 
 def _safe_number(value: Any) -> float:
@@ -398,6 +636,12 @@ class CompareRequest(BaseModel):
     trace_b_id: str = Field(min_length=1, max_length=128, pattern=ID_PATTERN)
 
 
+class SafetyScanRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    trace_id: str = Field(min_length=1, max_length=128, pattern=ID_PATTERN)
+
+
 # --- Endpoints ---
 
 
@@ -433,6 +677,19 @@ async def compare_traces(
     spans_a = db.query(Span).filter(Span.trace_id == req.trace_a_id).all()
     spans_b = db.query(Span).filter(Span.trace_id == req.trace_b_id).all()
     return _compare_trace_metrics(trace_a, spans_a, trace_b, spans_b)
+
+
+@router.post("/safety-scan")
+async def safety_scan(
+    req: SafetyScanRequest,
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Run deterministic local safety/privacy scan on trace text fields."""
+    trace_data = _get_trace_data(req.trace_id, project.id, db)
+    result = _scan_trace_for_risk(trace_data)
+    result["trace_id"] = req.trace_id
+    return result
 
 
 @router.get("/status")
