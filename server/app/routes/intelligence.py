@@ -2,6 +2,7 @@
 
 import logging
 import re
+import statistics
 from math import isfinite
 from typing import Any
 
@@ -254,6 +255,151 @@ def _scan_trace_for_risk(trace_data: dict[str, Any]) -> dict[str, Any]:
         "category_counts": category_counts,
         "recommendations": recommendations[:3],
         "summary": summary,
+    }
+
+
+def _trace_metric_vector(trace: Trace, spans: list[Span]) -> dict[str, float]:
+    """Build a deterministic numeric metric vector for a trace."""
+    llm_calls = float(sum(1 for span in spans if span.span_type == "llm"))
+    tool_calls = float(sum(1 for span in spans if span.span_type == "tool"))
+    span_count = float(len(spans))
+    sum_duration = _safe_number(sum(_safe_number(s.duration_ms) for s in spans))
+    sum_tokens = _safe_number(sum(_safe_number(s.tokens) for s in spans))
+    sum_cost = _safe_number(sum(_safe_number(s.cost) for s in spans))
+    error_count = float(
+        sum(1 for span in spans if (span.status or "").lower() == "error")
+    )
+
+    return {
+        "duration_ms": _safe_number(trace.duration_ms) or sum_duration,
+        "error_count": (
+            float(trace.error_count)
+            if isinstance(trace.error_count, int)
+            else error_count
+        ),
+        "total_tokens": (
+            _safe_number(trace.total_tokens)
+            if trace.total_tokens is not None
+            else sum_tokens
+        ),
+        "total_cost": (
+            _safe_number(trace.total_cost) if trace.total_cost is not None else sum_cost
+        ),
+        "span_count": (
+            _safe_number(trace.span_count)
+            if trace.span_count not in (None, 0)
+            else span_count
+        ),
+        "llm_calls": llm_calls,
+        "tool_calls": tool_calls,
+    }
+
+
+def _analyze_anomaly(
+    trace: Trace,
+    spans: list[Span],
+    historical_traces: list[Trace],
+    historical_spans: list[list[Span]],
+    z_threshold: float,
+) -> dict[str, Any]:
+    """Compute outlier score versus recent historical traces."""
+    current = _trace_metric_vector(trace, spans)
+    history_metrics = [
+        _trace_metric_vector(t, s)
+        for t, s in zip(historical_traces, historical_spans, strict=False)
+    ]
+
+    if len(history_metrics) < 3:
+        return {
+            "anomaly_score": 0,
+            "status": "insufficient_history",
+            "anomaly_count": 0,
+            "outlier_metrics": [],
+            "summary": "Insufficient historical traces for anomaly detection.",
+            "recommendations": ["Collect at least 3 historical traces before auto-detecting anomalies."],
+        }
+
+    findings: list[dict[str, Any]] = []
+    for metric, current_value in current.items():
+        values = [history[metric] for history in history_metrics]
+        mean_value = statistics.mean(values)
+        stdev_value = statistics.pstdev(values) if len(values) >= 2 else 0.0
+        if stdev_value == 0:
+            continue
+
+        z_score = (current_value - mean_value) / stdev_value
+        abs_z = abs(z_score)
+        severity = "low"
+        direction = "normal"
+        if abs_z >= 3.0:
+            severity = "high"
+        elif abs_z >= 2.0:
+            severity = "medium"
+        elif abs_z >= 1.3:
+            severity = "low"
+        else:
+            continue
+
+        if z_score > 0:
+            direction = "higher_than_baseline"
+        elif z_score < 0:
+            direction = "lower_than_baseline"
+
+        details = {
+            "metric": metric,
+            "current": current_value,
+            "baseline_mean": mean_value,
+            "baseline_std": stdev_value,
+            "z_score": round(z_score, 4),
+            "abs_z_score": round(abs_z, 4),
+            "direction": direction,
+            "severity": severity,
+        }
+        findings.append(details)
+
+    findings.sort(
+        key=lambda item: (item["abs_z_score"], item["metric"]),
+        reverse=True,
+    )
+
+    anomaly_score = 0
+    for finding in findings:
+        if finding["severity"] == "high":
+            anomaly_score += 35
+        elif finding["severity"] == "medium":
+            anomaly_score += 18
+        else:
+            anomaly_score += 8
+    anomaly_score = min(100, anomaly_score)
+
+    status = "normal"
+    if anomaly_score >= 35:
+        status = "outlier"
+    elif anomaly_score >= 25:
+        status = "degraded"
+    elif anomaly_score > 0:
+        status = "watch"
+
+    recommendations = []
+    for item in findings:
+        if item["metric"] in {"duration_ms", "span_count"}:
+            recommendations.append("Inspect slower spans and cut redundant chain steps.")
+        elif item["metric"] in {"total_cost", "total_tokens"}:
+            recommendations.append("Profile prompt/context and reduce token-heavy operations.")
+        elif item["metric"] in {"error_count", "tool_calls", "llm_calls"}:
+            recommendations.append("Review recent retries/fallbacks and tool strategy before rollout.")
+    if not recommendations:
+        recommendations.append("No strong behavioral anomalies detected.")
+
+    findings = [finding for finding in findings if finding["abs_z_score"] >= z_threshold]
+
+    return {
+        "anomaly_score": anomaly_score,
+        "status": status,
+        "anomaly_count": len(findings),
+        "outlier_metrics": findings,
+        "summary": "Statistical anomaly signal computed against recent trace history.",
+        "recommendations": list(dict.fromkeys(recommendations))[:3],
     }
 
 
@@ -642,6 +788,14 @@ class SafetyScanRequest(BaseModel):
     trace_id: str = Field(min_length=1, max_length=128, pattern=ID_PATTERN)
 
 
+class TraceAnomalyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    trace_id: str = Field(min_length=1, max_length=128, pattern=ID_PATTERN)
+    history_limit: int = Field(default=20, ge=3, le=100)
+    z_threshold: float = Field(default=1.3, ge=0.5, le=8.0)
+
+
 # --- Endpoints ---
 
 
@@ -688,6 +842,46 @@ async def safety_scan(
     """Run deterministic local safety/privacy scan on trace text fields."""
     trace_data = _get_trace_data(req.trace_id, project.id, db)
     result = _scan_trace_for_risk(trace_data)
+    result["trace_id"] = req.trace_id
+    return result
+
+
+@router.post("/anomaly-detect")
+async def anomaly_detect(
+    req: TraceAnomalyRequest,
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Detect statistical anomalies by comparing trace against recent project history."""
+    trace = (
+        db.query(Trace)
+        .filter(Trace.id == req.trace_id, Trace.project_id == project.id)
+        .first()
+    )
+    if not trace:
+        raise HTTPException(status_code=404, detail="Trace not found")
+
+    current_spans = db.query(Span).filter(Span.trace_id == req.trace_id).all()
+
+    historical_traces = (
+        db.query(Trace)
+        .filter(Trace.id != req.trace_id, Trace.project_id == project.id)
+        .order_by(Trace.created_at.desc())
+        .limit(req.history_limit)
+        .all()
+    )
+    historical_spans = [
+        db.query(Span).filter(Span.trace_id == historical_trace.id).all()
+        for historical_trace in historical_traces
+    ]
+
+    result = _analyze_anomaly(
+        trace,
+        current_spans,
+        historical_traces,
+        historical_spans,
+        req.z_threshold,
+    )
     result["trace_id"] = req.trace_id
     return result
 

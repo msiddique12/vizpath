@@ -39,6 +39,34 @@ def trace_with_spans(client, test_db):
     return "test-trace-001"
 
 
+def _post_trace_spans(
+    client,
+    trace_id: str,
+    duration_ms: float,
+    *,
+    status: str = "success",
+    llm_calls: int = 1,
+) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    spans = []
+    for i in range(llm_calls):
+        spans.append(
+            {
+                "span_id": f"{trace_id}-span-llm-{i}",
+                "trace_id": trace_id,
+                "name": "llm_call",
+                "span_type": "llm",
+                "status": status,
+                "start_time": now,
+                "end_time": now,
+                "duration_ms": float(duration_ms) / max(llm_calls, 1),
+                "tokens": 100,
+            }
+        )
+    resp = client.post("/api/v1/traces/spans/batch", json=spans)
+    assert resp.status_code == 201
+
+
 class TestAnalyzeEndpoint:
     def test_analyze_no_nvidia_key(self, client, test_db):
         """Should return 503 when NVIDIA key is not configured."""
@@ -236,6 +264,45 @@ class TestSafetyScanEndpoint:
 
     def test_safety_scan_trace_not_found(self, client, test_db):
         response = client.post("/api/v1/intelligence/safety-scan", json={"trace_id": "missing-trace"})
+        assert response.status_code == 404
+
+
+class TestAnomalyDetectionEndpoint:
+    def test_anomaly_detect_detects_outlier(self, client, test_db):
+        _post_trace_spans(client, "history-a", 120.0)
+        _post_trace_spans(client, "history-b", 110.0)
+        _post_trace_spans(client, "history-c", 130.0)
+        _post_trace_spans(client, "history-d", 90.0)
+        _post_trace_spans(client, "candidate", 1200.0)
+
+        response = client.post(
+            "/api/v1/intelligence/anomaly-detect",
+            json={"trace_id": "candidate", "history_limit": 8, "z_threshold": 1.2},
+        )
+        assert response.status_code == 200
+        result = response.json()
+        assert result["status"] == "outlier"
+        assert result["anomaly_count"] >= 1
+        assert result["anomaly_score"] >= 35
+        assert any(item["metric"] == "duration_ms" for item in result["outlier_metrics"])
+
+    def test_anomaly_detect_insufficient_history(self, client, test_db):
+        _post_trace_spans(client, "candidate-min", 500.0)
+
+        response = client.post(
+            "/api/v1/intelligence/anomaly-detect",
+            json={"trace_id": "candidate-min", "history_limit": 3},
+        )
+        assert response.status_code == 200
+        result = response.json()
+        assert result["status"] == "insufficient_history"
+        assert result["anomaly_count"] == 0
+
+    def test_anomaly_detect_not_found(self, client, test_db):
+        response = client.post(
+            "/api/v1/intelligence/anomaly-detect",
+            json={"trace_id": "missing-trace"},
+        )
         assert response.status_code == 404
 
 
