@@ -1,4 +1,4 @@
-import { FormEvent, useState } from 'react'
+import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import clsx from 'clsx'
 import { CheckCircle2, Circle, Copy, ExternalLink, Loader2, PlayCircle, Server, Sparkles, Wifi, WifiOff } from 'lucide-react'
@@ -11,6 +11,7 @@ import {
   type DemoPreflightResponse,
 } from '@/lib/api'
 import { useWebSocket } from '@/hooks/useWebSocket'
+import WebSocketRecoveryPanel from '@/components/WebSocketRecoveryPanel'
 
 function StatusDot({ ok }: { ok: boolean }) {
   return ok ? (
@@ -24,7 +25,6 @@ export default function DemoPage() {
   const [copiedCmd, setCopiedCmd] = useState<string | null>(null)
   const [lastWsEvent, setLastWsEvent] = useState<string | null>(null)
   const [lastWsTimestamp, setLastWsTimestamp] = useState<string | null>(null)
-  const [manualWsApiKey, setManualWsApiKey] = useState('')
 
   const healthQuery = useQuery({
     queryKey: ['health-detailed'],
@@ -67,15 +67,6 @@ export default function DemoPage() {
     },
   })
 
-  const handleManualApiKeySubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    const trimmed = manualWsApiKey.trim()
-    if (!trimmed) {
-      return
-    }
-    setRuntimeWebSocketKey(trimmed)
-    setManualWsApiKey('')
-  }
 
   const latestStoryModeQuery = useQuery({
     queryKey: ['latest-story-mode'],
@@ -89,14 +80,8 @@ export default function DemoPage() {
   const redisReady = healthQuery.data?.checks.redis?.status === 'healthy'
   const apiReady = healthQuery.data?.status === 'healthy' || healthQuery.data?.status === 'degraded'
   const nimReady = intelligenceQuery.data?.nvidia_api_key_configured ?? false
-  const authKeyConfigured = Boolean(import.meta.env.VITE_VIZPATH_API_KEY?.trim())
   const isAuthFailure = lastDisconnect?.code === 4001
-  const connectionStatusText = isAuthFailure
-    ? 'Live updates are unavailable: authentication is required for WebSocket streaming.'
-    : websocketConnected
-      ? null
-      : 'Live updates disconnected. Retrying automatically when possible.'
-  const canRetryConnection = !isAuthFailure
+  const authKeyConfigured = Boolean(import.meta.env.VITE_VIZPATH_API_KEY?.trim())
   const preflightData: DemoPreflightResponse | undefined = preflightQuery.data
   const canSeedStory = preflightData?.can_seed ?? false
   const demoBlockers = preflightData?.blockers ?? []
@@ -213,69 +198,14 @@ export default function DemoPage() {
             </span>
           )}
         </div>
-
-        {connectionStatusText && (
-          <div
-            role="status"
-            className={clsx(
-              'mt-3 rounded-lg border px-3 py-2 text-xs',
-              isAuthFailure
-                ? 'bg-amber-900/30 border-amber-700/60 text-amber-200'
-                : 'bg-blue-900/30 border-blue-700/60 text-blue-200'
-            )}
-          >
-            <p>{connectionStatusText}</p>
-            <div className="mt-2 flex items-center gap-2 flex-wrap">
-              {isAuthFailure && (
-                <p className="text-xs text-amber-300/90">
-                  {authKeyConfigured
-                    ? 'A websocket API key was provided, but authentication failed. Use a replacement key to reconnect.'
-                    : 'Use a websocket API key to reconnect with live updates.'}
-                </p>
-              )}
-              {canRetryConnection && !isAuthFailure && (
-                <button
-                  type="button"
-                  onClick={reconnect}
-                  className="px-3 py-1 text-xs rounded-full bg-dark-800 border border-dark-700 text-muted-100 hover:bg-dark-700"
-                >
-                  Retry connection
-                </button>
-              )}
-              {isAuthFailure && (
-                <form
-                  onSubmit={handleManualApiKeySubmit}
-                  className="w-full flex items-center gap-2 flex-wrap"
-                >
-                  <label className="sr-only" htmlFor="ws-auth-key-input">
-                    Websocket API key
-                  </label>
-                  <input
-                    id="ws-auth-key-input"
-                    name="wsAuthKey"
-                    type="password"
-                    value={manualWsApiKey}
-                    onChange={(event) => setManualWsApiKey(event.target.value)}
-                    placeholder="Enter websocket API key"
-                    className="h-8 px-2 bg-dark-900 border border-dark-700 rounded text-xs text-muted-100 placeholder:text-muted-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  />
-                  <button
-                    type="submit"
-                    disabled={!manualWsApiKey.trim()}
-                    className="px-3 py-1 text-xs rounded-full bg-dark-800 border border-dark-700 text-muted-100 hover:bg-dark-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Connect with API key
-                  </button>
-                </form>
-              )}
-              {!canRetryConnection && !isAuthFailure && (
-                <p className="text-xs text-amber-300/90">
-                  Streaming views will continue via polling when websocket access is unavailable.
-                </p>
-              )}
-            </div>
-          </div>
-        )}
+        <WebSocketRecoveryPanel
+          isConnected={websocketConnected}
+          lastDisconnect={lastDisconnect}
+          authKeyConfigured={authKeyConfigured}
+          onRetry={reconnect}
+          onSubmitApiKey={setRuntimeWebSocketKey}
+          inputId="demo-ws-auth-key-input"
+        />
       </div>
 
       <div className="bg-dark-900 rounded-lg border border-dark-700 p-4">

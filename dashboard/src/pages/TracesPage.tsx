@@ -1,4 +1,4 @@
-import { FormEvent, MouseEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { MouseEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
 import { formatDistanceToNow } from 'date-fns'
@@ -20,6 +20,7 @@ import clsx from 'clsx'
 import { getTraceSummary, getTraces } from '@/lib/api'
 import { Trace, SpanStatus } from '@/lib/types'
 import { useWebSocket } from '@/hooks/useWebSocket'
+import WebSocketRecoveryPanel from '@/components/WebSocketRecoveryPanel'
 
 const PAGE_SIZE = 50
 const FILTER_STORAGE_KEY = 'traces_filters_v1'
@@ -247,7 +248,6 @@ export default function TracesPage() {
   const [sortBy, setSortBy] = useState<SortBy>('created_at')
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
   const [summaryWindowDays, setSummaryWindowDays] = useState<7 | 30>(7)
-  const [manualWsApiKey, setManualWsApiKey] = useState('')
 
   useEffect(() => {
     const saved = getSavedFilters()
@@ -343,16 +343,6 @@ export default function TracesPage() {
     },
   })
 
-  const handleManualApiKeySubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    const trimmed = manualWsApiKey.trim()
-    if (!trimmed) {
-      return
-    }
-    setRuntimeWebSocketKey(trimmed)
-    setManualWsApiKey('')
-  }
-
   const { data, isLoading, error } = useQuery({
     queryKey: ['traces', page, statusFilter, queryOptions],
     queryFn: () =>
@@ -408,14 +398,7 @@ export default function TracesPage() {
       : null,
   ].filter(Boolean) as Array<{ key: string; label: string; clear: () => void }>
 
-  const isAuthFailure = lastDisconnect?.code === 4001
-  const connectionStatusText = isAuthFailure
-    ? 'Live updates are unavailable: authentication is required for WebSocket streaming.'
-    : connected === false
-      ? 'Live updates disconnected. Retrying automatically when possible.'
-      : null
   const authKeyConfigured = Boolean(import.meta.env.VITE_VIZPATH_API_KEY?.trim())
-  const canRetryConnection = !isAuthFailure
 
   if (isLoading) {
     return (
@@ -451,68 +434,14 @@ export default function TracesPage() {
         </div>
       </div>
 
-      {connectionStatusText && (
-        <div
-          role="status"
-          className={clsx(
-            'mb-4 rounded-lg border px-4 py-3 text-sm',
-            isAuthFailure
-              ? 'bg-amber-900/30 border-amber-700/60 text-amber-200'
-              : 'bg-blue-900/30 border-blue-700/60 text-blue-200'
-          )}
-        >
-          <p>{connectionStatusText}</p>
-          <div className="mt-2 flex items-center gap-2">
-            {isAuthFailure && (
-              <p className="text-xs text-amber-300/90">
-                {authKeyConfigured
-                  ? 'A websocket API key was provided, but authentication failed. Use a replacement key to reconnect.'
-                  : 'Use a websocket API key to reconnect with live updates.'}
-              </p>
-            )}
-            {canRetryConnection && !isAuthFailure && (
-              <button
-                type="button"
-                onClick={reconnect}
-                className="px-3 py-1 text-xs rounded-full bg-dark-800 border border-dark-700 text-muted-100 hover:bg-dark-700"
-              >
-                Retry connection
-              </button>
-            )}
-            {isAuthFailure && (
-              <form
-                onSubmit={handleManualApiKeySubmit}
-                className="w-full flex items-center gap-2 flex-wrap"
-              >
-                <label className="sr-only" htmlFor="ws-auth-key-input">
-                  Websocket API key
-                </label>
-                <input
-                  id="ws-auth-key-input"
-                  name="wsAuthKey"
-                  type="password"
-                  value={manualWsApiKey}
-                  onChange={(event) => setManualWsApiKey(event.target.value)}
-                  placeholder="Enter websocket API key"
-                  className="h-8 px-2 bg-dark-900 border border-dark-700 rounded text-xs text-muted-100 placeholder:text-muted-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                />
-                <button
-                  type="submit"
-                  disabled={!manualWsApiKey.trim()}
-                  className="px-3 py-1 text-xs rounded-full bg-dark-800 border border-dark-700 text-muted-100 hover:bg-dark-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Connect with API key
-                </button>
-              </form>
-            )}
-            {!canRetryConnection && (
-              <p className="text-xs text-amber-300/90">
-                Streaming views will continue via polling when websocket access is unavailable.
-              </p>
-            )}
-          </div>
-        </div>
-      )}
+      <WebSocketRecoveryPanel
+        isConnected={connected}
+        lastDisconnect={lastDisconnect}
+        authKeyConfigured={authKeyConfigured}
+        onRetry={reconnect}
+        onSubmitApiKey={setRuntimeWebSocketKey}
+        inputId="traces-ws-auth-key-input"
+      />
 
       {summaryQuery.data && (
         <div className="mb-4 bg-dark-900 rounded-lg border border-dark-700 p-4">
