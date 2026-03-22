@@ -1,15 +1,19 @@
 import { useState, useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Brain, Sparkles, Loader2, Star, Tag, Lightbulb, CheckCircle2, Wand2 } from 'lucide-react'
+import { Brain, Sparkles, Loader2, Star, Tag, Lightbulb, CheckCircle2, Wand2, ShieldAlert, AlertTriangle } from 'lucide-react'
 import clsx from 'clsx'
 import {
   analyzeTrace,
+  getFailureModes,
   selfAnalyzeTrace,
   getIntelligenceStatus,
+  getRegressionExplain,
   suggestCuration,
   createOrUpdateLabel,
   TraceAnalysis,
   SelfAnalysis,
+  FailureModesResult,
+  RegressionExplainResult,
 } from '@/lib/api'
 
 interface IntelligencePanelProps {
@@ -20,6 +24,9 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
   const queryClient = useQueryClient()
   const [analysis, setAnalysis] = useState<TraceAnalysis | null>(null)
   const [selfAnalysis, setSelfAnalysis] = useState<SelfAnalysis | null>(null)
+  const [failureModes, setFailureModes] = useState<FailureModesResult | null>(null)
+  const [regressionExplain, setRegressionExplain] = useState<RegressionExplainResult | null>(null)
+  const [baselineTraceId, setBaselineTraceId] = useState<string>('')
   const [actionStatus, setActionStatus] = useState<string | null>(null)
   const intelligenceStatus = useQuery({
     queryKey: ['intelligence-status'],
@@ -31,6 +38,9 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
   useEffect(() => {
     setAnalysis(null)
     setSelfAnalysis(null)
+    setFailureModes(null)
+    setRegressionExplain(null)
+    setBaselineTraceId('')
     setActionStatus(null)
   }, [traceId])
 
@@ -42,6 +52,16 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
   const selfAnalyzeMutation = useMutation({
     mutationFn: () => selfAnalyzeTrace(traceId),
     onSuccess: (data) => setSelfAnalysis(data),
+  })
+
+  const failureModesMutation = useMutation({
+    mutationFn: () => getFailureModes(traceId),
+    onSuccess: (data) => setFailureModes(data),
+  })
+
+  const regressionExplainMutation = useMutation({
+    mutationFn: () => getRegressionExplain(baselineTraceId.trim(), traceId),
+    onSuccess: (data) => setRegressionExplain(data),
   })
 
   const applySuggestionMutation = useMutation({
@@ -83,6 +103,10 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
   const isIntelligenceReady = intelligenceStatus.data?.nvidia_api_key_configured === true
   const isAnalyzeDisabled =
     analyzeMutation.isPending || selfAnalyzeMutation.isPending || !isIntelligenceReady
+  const baselineId = baselineTraceId.trim()
+  const isSameTraceComparison = baselineId.length > 0 && baselineId === traceId
+  const isRegressionDisabled =
+    regressionExplainMutation.isPending || baselineId.length === 0 || isSameTraceComparison
 
   return (
     <div className="bg-dark-800 rounded-lg p-4 space-y-4">
@@ -150,6 +174,116 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
           </p>
         </div>
       )}
+
+      <div className="bg-dark-900 border border-dark-700 rounded-lg p-3 space-y-3">
+        <p className="text-xs uppercase tracking-wide text-muted-400">Deterministic Diagnostics</p>
+        <div className="flex gap-2">
+          <button
+            onClick={() => failureModesMutation.mutate()}
+            disabled={failureModesMutation.isPending}
+            className={clsx(
+              'flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg transition-colors',
+              failureModesMutation.isPending
+                ? 'bg-dark-700 text-muted-400 cursor-wait'
+                : 'bg-dark-900 border border-dark-700 text-muted-200 hover:bg-dark-700'
+            )}
+          >
+            {failureModesMutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <ShieldAlert className="h-4 w-4" />
+            )}
+            Failure Modes
+          </button>
+          <button
+            onClick={() => regressionExplainMutation.mutate()}
+            disabled={isRegressionDisabled}
+            className={clsx(
+              'flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg transition-colors',
+              isRegressionDisabled
+                ? 'bg-dark-700 text-muted-400 cursor-not-allowed'
+                : 'bg-dark-900 border border-dark-700 text-muted-200 hover:bg-dark-700'
+            )}
+          >
+            {regressionExplainMutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <AlertTriangle className="h-4 w-4" />
+            )}
+            Explain Regression
+          </button>
+        </div>
+
+        <div>
+          <label htmlFor="baseline-trace-id" className="block text-xs text-muted-400 mb-1">
+            Baseline Trace ID (for regression explain)
+          </label>
+          <input
+            id="baseline-trace-id"
+            type="text"
+            value={baselineTraceId}
+            onChange={(event) => setBaselineTraceId(event.target.value)}
+            placeholder="trace-baseline-123"
+            className="w-full rounded-lg border border-dark-700 bg-dark-800 px-3 py-2 text-sm text-muted-100 placeholder:text-muted-500 focus:outline-none focus:ring-1 focus:ring-primary-600"
+          />
+          {isSameTraceComparison && (
+            <p className="mt-1 text-xs text-amber-400">
+              Baseline trace must be different from current trace.
+            </p>
+          )}
+        </div>
+
+        {(failureModesMutation.isError || regressionExplainMutation.isError) && (
+          <div className="bg-red-900/30 border border-red-800 rounded-lg px-3 py-2">
+            <p className="text-xs text-red-400">
+              {failureModesMutation.error?.message || regressionExplainMutation.error?.message || 'Diagnostics request failed.'}
+            </p>
+          </div>
+        )}
+
+        {failureModes && (
+          <div className="bg-dark-800 rounded-lg p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-muted-400 uppercase tracking-wide">Failure Modes</p>
+              <span className="text-xs text-muted-300">{failureModes.status}</span>
+            </div>
+            <p className="text-sm text-muted-200">{failureModes.summary}</p>
+            {failureModes.status === 'issue_detected' && (
+              <p className="text-xs text-primary-300">
+                Primary mode: <span className="font-medium text-primary-200">{failureModes.primary_mode}</span> ({Math.round(failureModes.confidence * 100)}% confidence)
+              </p>
+            )}
+            {failureModes.modes.slice(0, 2).map((mode) => (
+              <div key={mode.mode} className="bg-dark-900 rounded px-2 py-2">
+                <p className="text-xs text-muted-300">
+                  {mode.mode} · {mode.score} · {mode.severity}
+                </p>
+                {mode.recommendations[0] && (
+                  <p className="text-xs text-muted-400 mt-1">{mode.recommendations[0]}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {regressionExplain && (
+          <div className="bg-dark-800 rounded-lg p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-muted-400 uppercase tracking-wide">Regression Explain</p>
+              <span className="text-xs text-muted-300">{regressionExplain.explanation.status}</span>
+            </div>
+            <p className="text-sm text-muted-200">{regressionExplain.explanation.summary}</p>
+            {regressionExplain.explanation.hypotheses.slice(0, 2).map((hypothesis) => (
+              <div key={hypothesis.id} className="bg-dark-900 rounded px-2 py-2">
+                <p className="text-xs text-muted-200">
+                  {hypothesis.title} ({Math.round(hypothesis.confidence * 100)}%)
+                </p>
+                <p className="text-xs text-muted-400 mt-1">{hypothesis.recommendation}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="bg-dark-900 border border-dark-700 rounded-lg p-3 space-y-2">
         <p className="text-xs uppercase tracking-wide text-muted-400">Action Plan</p>

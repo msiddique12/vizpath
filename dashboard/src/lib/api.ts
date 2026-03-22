@@ -304,6 +304,70 @@ export interface IntelligenceComparison {
   top_actions: string[]
 }
 
+export interface FailureModeEvidence {
+  label: string
+  location: string
+  weight: number
+}
+
+export interface FailureModeEntry {
+  mode: 'infra' | 'llm' | 'tool' | 'policy' | 'data'
+  score: number
+  severity: 'high' | 'medium' | 'low' | 'none'
+  evidence_count: number
+  evidence: FailureModeEvidence[]
+  recommendations: string[]
+}
+
+export interface FailureModesResult {
+  trace_id: string
+  status: 'issue_detected' | 'no_major_failure_signals'
+  primary_mode: 'infra' | 'llm' | 'tool' | 'policy' | 'data' | 'none'
+  confidence: number
+  summary: string
+  modes: FailureModeEntry[]
+}
+
+export interface RegressionHypothesis {
+  id: string
+  title: string
+  confidence: number
+  severity: 'high' | 'medium' | 'low'
+  evidence: string[]
+  recommendation: string
+}
+
+export interface RegressionExplainResult {
+  trace_a_id: string
+  trace_b_id: string
+  compare_summary: {
+    status: 'regressed' | 'mixed' | 'improved' | 'neutral'
+    regression_score: number
+    signal_count: number
+  }
+  candidate_failure: {
+    status: 'issue_detected' | 'no_major_failure_signals'
+    primary_mode: 'infra' | 'llm' | 'tool' | 'policy' | 'data' | 'none'
+    confidence: number
+  }
+  candidate_anomaly: {
+    status: 'outlier' | 'degraded' | 'watch' | 'normal' | 'insufficient_history'
+    anomaly_score: number
+    anomaly_count: number
+  }
+  candidate_safety: {
+    risk_level: 'critical' | 'high' | 'medium' | 'low'
+    risk_score: number
+  }
+  explanation: {
+    status: 'regression_explained' | 'changes_explained' | 'no_clear_regression_cause'
+    hypothesis_count: number
+    top_hypothesis_confidence: number
+    summary: string
+    hypotheses: RegressionHypothesis[]
+  }
+}
+
 export async function analyzeTrace(traceId: string): Promise<TraceAnalysis> {
   return fetchApi('/intelligence/analyze', {
     method: 'POST',
@@ -318,6 +382,28 @@ export async function compareTraces(
   return fetchApi('/intelligence/compare', {
     method: 'POST',
     body: JSON.stringify({ trace_a_id: traceAId, trace_b_id: traceBId }),
+  })
+}
+
+export async function getFailureModes(traceId: string): Promise<FailureModesResult> {
+  return fetchApi('/intelligence/failure-modes', {
+    method: 'POST',
+    body: JSON.stringify({ trace_id: traceId }),
+  })
+}
+
+export async function getRegressionExplain(
+  traceAId: string,
+  traceBId: string,
+  historyLimit = 20
+): Promise<RegressionExplainResult> {
+  return fetchApi('/intelligence/regression-explain', {
+    method: 'POST',
+    body: JSON.stringify({
+      trace_a_id: traceAId,
+      trace_b_id: traceBId,
+      history_limit: historyLimit,
+    }),
   })
 }
 
