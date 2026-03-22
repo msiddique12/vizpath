@@ -131,6 +131,61 @@ _SENSITIVE_RULES = [
         "pattern": re.compile(r"(?i)\b(rm\s+-rf|drop\s+table|delete\s+from|format\s+\S+|shutdown\s+now)\b"),
     },
 ]
+_FAILURE_MODES = ("infra", "llm", "tool", "policy", "data")
+_FAILURE_SIGNAL_RULES = [
+    {
+        "mode": "infra",
+        "weight": 24,
+        "pattern": re.compile(
+            r"(?i)\b(timeout|timed out|connection refused|dns|econnreset|socket|network|503|429|service unavailable|rate limit)\b"
+        ),
+        "label": "Network or service instability",
+        "recommendation": "Add retries with backoff and verify upstream service health.",
+    },
+    {
+        "mode": "llm",
+        "weight": 22,
+        "pattern": re.compile(
+            r"(?i)\b(context length|max tokens|token limit|invalid json|output parser|refusal|unable to comply|hallucinat)\b"
+        ),
+        "label": "LLM output or prompt failure",
+        "recommendation": "Harden prompts/output parsing and reduce oversized context windows.",
+    },
+    {
+        "mode": "tool",
+        "weight": 20,
+        "pattern": re.compile(
+            r"(?i)\b(command failed|exit code|tool not found|permission denied|subprocess|no such file|invalid tool)\b"
+        ),
+        "label": "Tool execution failure",
+        "recommendation": "Validate tool inputs, permissions, and fallback behavior.",
+    },
+    {
+        "mode": "data",
+        "weight": 20,
+        "pattern": re.compile(
+            r"(?i)\b(schema|validation|malformed|missing field|parse error|jsondecodeerror|keyerror|indexerror|empty dataset)\b"
+        ),
+        "label": "Data quality or schema mismatch",
+        "recommendation": "Add strict schema validation and sanitize upstream data before use.",
+    },
+    {
+        "mode": "policy",
+        "weight": 24,
+        "pattern": re.compile(
+            r"(?i)\b(prompt injection|jailbreak|unsafe|forbidden|policy violation|exposed secret|pii)\b"
+        ),
+        "label": "Policy or safety violation",
+        "recommendation": "Block unsafe instructions and enforce policy filters before tool calls.",
+    },
+]
+_FAILURE_MODE_BASE_RECOMMENDATIONS = {
+    "infra": "Monitor infra dependencies and add circuit-breaker style fallbacks.",
+    "llm": "Version prompts and add deterministic response validation.",
+    "tool": "Constrain tool execution paths and validate arguments before invocation.",
+    "policy": "Apply pre-execution safety checks and redact sensitive outputs.",
+    "data": "Validate payload schemas and reject malformed records early.",
+}
 
 
 def _collect_text_blocks(trace_data: dict[str, Any]) -> list[tuple[str, str, str]]:
@@ -255,6 +310,185 @@ def _scan_trace_for_risk(trace_data: dict[str, Any]) -> dict[str, Any]:
         "category_counts": category_counts,
         "recommendations": recommendations[:3],
         "summary": summary,
+    }
+
+
+def _failure_severity(score: int) -> str:
+    if score >= 50:
+        return "high"
+    if score >= 25:
+        return "medium"
+    if score > 0:
+        return "low"
+    return "none"
+
+
+def _classify_failure_modes(trace_data: dict[str, Any]) -> dict[str, Any]:
+    """Classify likely failure domains from trace/span signals."""
+    buckets: dict[str, dict[str, Any]] = {
+        mode: {"score": 0, "evidence": [], "recommendations": set()}
+        for mode in _FAILURE_MODES
+    }
+
+    def _add_signal(
+        mode: str,
+        *,
+        weight: int,
+        label: str,
+        location: str,
+        recommendation: str | None = None,
+    ) -> None:
+        bucket = buckets[mode]
+        bucket["score"] += max(weight, 0)
+        if len(bucket["evidence"]) < 8:
+            bucket["evidence"].append(
+                {
+                    "label": label,
+                    "location": location,
+                    "weight": weight,
+                }
+            )
+        if recommendation:
+            bucket["recommendations"].add(recommendation)
+
+    spans = trace_data.get("spans", [])
+    llm_calls = 0
+    tool_calls = 0
+    error_span_count = 0
+    for span in spans:
+        if not isinstance(span, dict):
+            continue
+        span_type = str(span.get("span_type", "custom")).lower()
+        span_status = str(span.get("status", "unknown")).lower()
+        location = f"span:{span.get('id') or span.get('trace_id') or 'unknown'}"
+
+        if span_type == "llm":
+            llm_calls += 1
+        elif span_type == "tool":
+            tool_calls += 1
+
+        if span_status == "error":
+            error_span_count += 1
+            mode_from_span = "infra"
+            if span_type == "llm":
+                mode_from_span = "llm"
+            elif span_type == "tool":
+                mode_from_span = "tool"
+            elif span_type == "retrieval":
+                mode_from_span = "data"
+
+            _add_signal(
+                mode_from_span,
+                weight=12,
+                label="Span ended with error status",
+                location=location,
+                recommendation=_FAILURE_MODE_BASE_RECOMMENDATIONS[mode_from_span],
+            )
+
+        error_text = str(span.get("error") or "")
+        combined_text = " ".join(
+            [
+                error_text,
+                str(span.get("input") or ""),
+                str(span.get("output") or ""),
+                str(span.get("attributes") or ""),
+                str(span.get("events") or ""),
+            ]
+        )
+        if not combined_text.strip():
+            continue
+
+        for rule in _FAILURE_SIGNAL_RULES:
+            if rule["pattern"].search(combined_text):
+                _add_signal(
+                    rule["mode"],
+                    weight=int(rule["weight"]),
+                    label=str(rule["label"]),
+                    location=location,
+                    recommendation=str(rule["recommendation"]),
+                )
+
+    if llm_calls >= 8:
+        _add_signal(
+            "llm",
+            weight=8,
+            label="High LLM call volume may indicate prompt churn",
+            location="trace",
+            recommendation="Cache repeated context and consolidate prompt calls.",
+        )
+    if tool_calls >= 10:
+        _add_signal(
+            "tool",
+            weight=8,
+            label="High tool-call fanout may increase operational fragility",
+            location="trace",
+            recommendation="Batch or parallelize tools where dependency ordering is not required.",
+        )
+
+    trace_status = str(trace_data.get("status") or "").lower()
+    if trace_status == "error" and error_span_count == 0:
+        _add_signal(
+            "infra",
+            weight=10,
+            label="Trace failed without explicit failing spans",
+            location="trace.status",
+            recommendation=_FAILURE_MODE_BASE_RECOMMENDATIONS["infra"],
+        )
+
+    safety = _scan_trace_for_risk(trace_data)
+    policy_count = int(safety.get("category_counts", {}).get("policy", 0))
+    pii_count = int(safety.get("category_counts", {}).get("pii", 0))
+    secret_count = int(safety.get("category_counts", {}).get("secrets", 0))
+    if policy_count > 0 or pii_count > 0 or secret_count > 0:
+        policy_weight = min(40, policy_count * 12 + pii_count * 8 + secret_count * 12)
+        _add_signal(
+            "policy",
+            weight=policy_weight,
+            label="Safety scan detected policy/PII/secret risk indicators",
+            location="trace.safety-scan",
+            recommendation="Use guardrails and redact sensitive data before persistence.",
+        )
+        for recommendation in safety.get("recommendations", []):
+            buckets["policy"]["recommendations"].add(str(recommendation))
+
+    mode_results = []
+    for mode, bucket in buckets.items():
+        score = min(100, int(bucket["score"]))
+        if score <= 0:
+            continue
+        mode_results.append(
+            {
+                "mode": mode,
+                "score": score,
+                "severity": _failure_severity(score),
+                "evidence_count": len(bucket["evidence"]),
+                "evidence": bucket["evidence"],
+                "recommendations": list(bucket["recommendations"])[:3],
+            }
+        )
+
+    mode_results.sort(key=lambda item: (item["score"], item["mode"]), reverse=True)
+    if not mode_results:
+        return {
+            "status": "no_major_failure_signals",
+            "primary_mode": "none",
+            "confidence": 0.0,
+            "modes": [],
+            "summary": "No high-confidence failure signals detected in this trace.",
+        }
+
+    total_score = sum(mode["score"] for mode in mode_results)
+    primary = mode_results[0]
+    confidence = 0.0
+    if total_score > 0:
+        confidence = round(primary["score"] / total_score, 4)
+
+    return {
+        "status": "issue_detected",
+        "primary_mode": primary["mode"],
+        "confidence": confidence,
+        "modes": mode_results,
+        "summary": f"Primary failure mode is '{primary['mode']}' with {primary['severity']} severity signals.",
     }
 
 
@@ -796,6 +1030,12 @@ class TraceAnomalyRequest(BaseModel):
     z_threshold: float = Field(default=1.3, ge=0.5, le=8.0)
 
 
+class FailureModesRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    trace_id: str = Field(min_length=1, max_length=128, pattern=ID_PATTERN)
+
+
 # --- Endpoints ---
 
 
@@ -882,6 +1122,19 @@ async def anomaly_detect(
         historical_spans,
         req.z_threshold,
     )
+    result["trace_id"] = req.trace_id
+    return result
+
+
+@router.post("/failure-modes")
+async def failure_modes(
+    req: FailureModesRequest,
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Classify likely root failure domains using deterministic heuristics."""
+    trace_data = _get_trace_data(req.trace_id, project.id, db)
+    result = _classify_failure_modes(trace_data)
     result["trace_id"] = req.trace_id
     return result
 
