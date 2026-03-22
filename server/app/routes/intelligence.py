@@ -964,6 +964,146 @@ def _suggest_curation_from_analysis(analysis_result: dict[str, Any], trace_id: s
     }
 
 
+def _trace_to_data(trace: Trace, spans: list[Span]) -> dict[str, Any]:
+    """Convert trace + spans models into the dict format used by intelligence helpers."""
+    data = trace.to_dict()
+    data["spans"] = [span.to_dict() for span in spans]
+    return data
+
+
+def _explain_regression(
+    compare_result: dict[str, Any],
+    failure_result: dict[str, Any],
+    anomaly_result: dict[str, Any],
+    safety_result: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge deterministic intelligence signals into ranked regression hypotheses."""
+    hypotheses: list[dict[str, Any]] = []
+
+    signal_to_hypothesis = {
+        "error-regression": {
+            "id": "reliability_regression",
+            "title": "New reliability failures in candidate trace",
+            "confidence": 0.88,
+            "severity": "high",
+        },
+        "latency-regression": {
+            "id": "latency_path_expansion",
+            "title": "Execution path became slower",
+            "confidence": 0.76,
+            "severity": "high",
+        },
+        "token-inefficiency": {
+            "id": "prompt_bloat",
+            "title": "Prompt or context expansion increased compute cost",
+            "confidence": 0.72,
+            "severity": "medium",
+        },
+        "cost-regression": {
+            "id": "model_or_tool_cost_spike",
+            "title": "Model/tool mix shifted to higher-cost path",
+            "confidence": 0.69,
+            "severity": "medium",
+        },
+        "tool-overhead": {
+            "id": "tool_orchestration_overhead",
+            "title": "Extra tool calls introduced orchestration overhead",
+            "confidence": 0.7,
+            "severity": "medium",
+        },
+    }
+
+    for signal in compare_result.get("signals", []):
+        hypothesis_base = signal_to_hypothesis.get(signal.get("id"))
+        if not hypothesis_base:
+            continue
+        hypotheses.append(
+            {
+                "id": hypothesis_base["id"],
+                "title": hypothesis_base["title"],
+                "confidence": hypothesis_base["confidence"],
+                "severity": hypothesis_base["severity"],
+                "evidence": [signal.get("detail", "")],
+                "recommendation": signal.get("recommendation", ""),
+            }
+        )
+
+    if failure_result.get("status") == "issue_detected":
+        primary_mode = str(failure_result.get("primary_mode", "none"))
+        mode_recommendation = ""
+        if failure_result.get("modes"):
+            mode_recommendation = failure_result["modes"][0].get("recommendations", [""])[0]
+        hypotheses.append(
+            {
+                "id": f"{primary_mode}_failure_domain",
+                "title": f"Candidate trace shows {primary_mode} domain failure signals",
+                "confidence": min(0.92, 0.55 + float(failure_result.get("confidence", 0.0))),
+                "severity": "high" if primary_mode in {"infra", "policy", "tool"} else "medium",
+                "evidence": [
+                    f"Primary mode: {primary_mode}",
+                    f"Classifier confidence: {failure_result.get('confidence', 0.0)}",
+                ],
+                "recommendation": mode_recommendation,
+            }
+        )
+
+    if int(safety_result.get("risk_score", 0)) >= 55:
+        hypotheses.append(
+            {
+                "id": "policy_safety_exposure",
+                "title": "Candidate trace introduces policy/safety risk indicators",
+                "confidence": 0.67,
+                "severity": "high",
+                "evidence": [safety_result.get("summary", "")],
+                "recommendation": "Apply masking/guardrails before writing span data and running tools.",
+            }
+        )
+
+    if anomaly_result.get("status") in {"outlier", "degraded"}:
+        hypotheses.append(
+            {
+                "id": "behavioral_outlier",
+                "title": "Candidate trace behavior is statistically anomalous",
+                "confidence": 0.62 if anomaly_result.get("status") == "degraded" else 0.75,
+                "severity": "medium",
+                "evidence": [
+                    f"Anomaly status: {anomaly_result.get('status')}",
+                    f"Anomaly score: {anomaly_result.get('anomaly_score')}",
+                ],
+                "recommendation": "Review the top outlier metrics and compare changed spans first.",
+            }
+        )
+
+    deduped: dict[str, dict[str, Any]] = {}
+    for hypothesis in hypotheses:
+        hypothesis_id = str(hypothesis.get("id"))
+        if hypothesis_id not in deduped or float(hypothesis["confidence"]) > float(deduped[hypothesis_id]["confidence"]):
+            deduped[hypothesis_id] = hypothesis
+
+    ranked = sorted(
+        deduped.values(),
+        key=lambda item: (float(item.get("confidence", 0)), item.get("id", "")),
+        reverse=True,
+    )
+
+    if not ranked:
+        return {
+            "status": "no_clear_regression_cause",
+            "hypothesis_count": 0,
+            "top_hypothesis_confidence": 0.0,
+            "hypotheses": [],
+            "summary": "Regression detected no clear deterministic root-cause signals.",
+        }
+
+    return {
+        "status": "regression_explained" if compare_result.get("summary", {}).get("regression_score", 0) > 0 else "changes_explained",
+        "hypothesis_count": len(ranked),
+        "top_hypothesis_confidence": ranked[0]["confidence"],
+        "hypotheses": ranked[:5],
+        "summary": f"Generated {len(ranked)} ranked root-cause hypotheses from deterministic signals.",
+    }
+
+
 # --- Request/Response schemas ---
 
 
@@ -1034,6 +1174,14 @@ class FailureModesRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     trace_id: str = Field(min_length=1, max_length=128, pattern=ID_PATTERN)
+
+
+class RegressionExplainRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    trace_a_id: str = Field(min_length=1, max_length=128, pattern=ID_PATTERN)
+    trace_b_id: str = Field(min_length=1, max_length=128, pattern=ID_PATTERN)
+    history_limit: int = Field(default=20, ge=3, le=100)
 
 
 # --- Endpoints ---
@@ -1137,6 +1285,77 @@ async def failure_modes(
     result = _classify_failure_modes(trace_data)
     result["trace_id"] = req.trace_id
     return result
+
+
+@router.post("/regression-explain")
+async def regression_explain(
+    req: RegressionExplainRequest,
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Explain likely root causes behind regressions between two traces."""
+    trace_a = db.query(Trace).filter(Trace.id == req.trace_a_id, Trace.project_id == project.id).first()
+    trace_b = db.query(Trace).filter(Trace.id == req.trace_b_id, Trace.project_id == project.id).first()
+    if not trace_a or not trace_b:
+        raise HTTPException(status_code=404, detail="Trace not found")
+
+    spans_a = db.query(Span).filter(Span.trace_id == req.trace_a_id).all()
+    spans_b = db.query(Span).filter(Span.trace_id == req.trace_b_id).all()
+    compare_result = _compare_trace_metrics(trace_a, spans_a, trace_b, spans_b)
+
+    trace_b_data = _trace_to_data(trace_b, spans_b)
+    failure_result = _classify_failure_modes(trace_b_data)
+    safety_result = _scan_trace_for_risk(trace_b_data)
+
+    historical_traces = (
+        db.query(Trace)
+        .filter(
+            Trace.id != req.trace_b_id,
+            Trace.id != req.trace_a_id,
+            Trace.project_id == project.id,
+        )
+        .order_by(Trace.created_at.desc())
+        .limit(req.history_limit)
+        .all()
+    )
+    historical_spans = [
+        db.query(Span).filter(Span.trace_id == historical_trace.id).all()
+        for historical_trace in historical_traces
+    ]
+    anomaly_result = _analyze_anomaly(
+        trace_b,
+        spans_b,
+        historical_traces,
+        historical_spans,
+        z_threshold=1.5,
+    )
+    explanation = _explain_regression(
+        compare_result,
+        failure_result,
+        anomaly_result,
+        safety_result,
+    )
+
+    return {
+        "trace_a_id": req.trace_a_id,
+        "trace_b_id": req.trace_b_id,
+        "compare_summary": compare_result.get("summary", {}),
+        "candidate_failure": {
+            "status": failure_result.get("status"),
+            "primary_mode": failure_result.get("primary_mode"),
+            "confidence": failure_result.get("confidence"),
+        },
+        "candidate_anomaly": {
+            "status": anomaly_result.get("status"),
+            "anomaly_score": anomaly_result.get("anomaly_score"),
+            "anomaly_count": anomaly_result.get("anomaly_count"),
+        },
+        "candidate_safety": {
+            "risk_level": safety_result.get("risk_level"),
+            "risk_score": safety_result.get("risk_score"),
+        },
+        "explanation": explanation,
+    }
 
 
 @router.get("/status")

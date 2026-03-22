@@ -396,6 +396,106 @@ class TestFailureModesEndpoint:
         assert response.status_code == 404
 
 
+class TestRegressionExplainEndpoint:
+    def test_regression_explain_returns_ranked_hypotheses(self, client, test_db):
+        now = datetime.now(timezone.utc).isoformat()
+        baseline_payload = [
+            {
+                "span_id": "reg-a-agent",
+                "trace_id": "trace-reg-a",
+                "name": "baseline_agent",
+                "span_type": "agent",
+                "status": "success",
+                "start_time": now,
+                "end_time": now,
+                "duration_ms": 300,
+            },
+            {
+                "span_id": "reg-a-llm",
+                "trace_id": "trace-reg-a",
+                "name": "baseline_llm",
+                "span_type": "llm",
+                "status": "success",
+                "start_time": now,
+                "end_time": now,
+                "duration_ms": 120,
+                "tokens": 90,
+                "cost": 0.01,
+            },
+        ]
+        candidate_payload = [
+            {
+                "span_id": "reg-b-agent",
+                "trace_id": "trace-reg-b",
+                "name": "candidate_agent",
+                "span_type": "agent",
+                "status": "error",
+                "start_time": now,
+                "end_time": now,
+                "duration_ms": 1100,
+                "error": "timeout while waiting for network response",
+            },
+            {
+                "span_id": "reg-b-llm",
+                "trace_id": "trace-reg-b",
+                "name": "candidate_llm",
+                "span_type": "llm",
+                "status": "success",
+                "start_time": now,
+                "end_time": now,
+                "duration_ms": 650,
+                "tokens": 520,
+                "cost": 0.07,
+            },
+            {
+                "span_id": "reg-b-tool",
+                "trace_id": "trace-reg-b",
+                "name": "candidate_tool",
+                "span_type": "tool",
+                "status": "error",
+                "start_time": now,
+                "end_time": now,
+                "duration_ms": 350,
+                "error": "Command failed with exit code 127",
+            },
+        ]
+
+        assert client.post("/api/v1/traces/spans/batch", json=baseline_payload).status_code == 201
+        assert client.post("/api/v1/traces/spans/batch", json=candidate_payload).status_code == 201
+
+        _post_trace_spans(client, "trace-reg-h1", 100.0)
+        _post_trace_spans(client, "trace-reg-h2", 130.0)
+        _post_trace_spans(client, "trace-reg-h3", 90.0)
+
+        response = client.post(
+            "/api/v1/intelligence/regression-explain",
+            json={"trace_a_id": "trace-reg-a", "trace_b_id": "trace-reg-b", "history_limit": 10},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        explanation = data["explanation"]
+        assert explanation["status"] in {"regression_explained", "changes_explained"}
+        assert explanation["hypothesis_count"] >= 1
+        hypotheses = explanation["hypotheses"]
+        assert hypotheses[0]["confidence"] >= hypotheses[-1]["confidence"]
+        assert any(h["id"] == "reliability_regression" for h in hypotheses)
+        assert data["candidate_failure"]["status"] in {"issue_detected", "no_major_failure_signals"}
+
+    def test_regression_explain_not_found(self, client, trace_with_spans):
+        response = client.post(
+            "/api/v1/intelligence/regression-explain",
+            json={"trace_a_id": "test-trace-001", "trace_b_id": "missing"},
+        )
+        assert response.status_code == 404
+
+    def test_regression_explain_rejects_invalid_payload(self, client, test_db):
+        response = client.post(
+            "/api/v1/intelligence/regression-explain",
+            json={"trace_a_id": "valid", "trace_b_id": "invalid id"},
+        )
+        assert response.status_code == 422
+
+
 class TestSelfAnalyzeEndpoint:
     def test_self_analyze_no_key(self, client, test_db):
         with patch("app.routes.intelligence.settings") as mock_settings:
