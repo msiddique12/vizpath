@@ -308,6 +308,49 @@ class Client:
 
         return value
 
+    def _post_json(self, endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Send a JSON POST request and return parsed JSON payload."""
+        if not self._client:
+            raise VizpathError("Client is disabled")
+
+        try:
+            response = self._client.post(endpoint, json=payload)
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
+            raise ConnectionError(f"Connection failed: {e}") from e
+
+        self._handle_response(response)
+        try:
+            data = response.json()
+        except ValueError as e:
+            raise VizpathError("Request succeeded but response is not valid JSON") from e
+
+        if not isinstance(data, dict):
+            raise VizpathError("Expected JSON object response")
+        return data
+
+    def get_failure_modes(self, trace_id: str) -> dict[str, Any]:
+        """Fetch deterministic failure mode diagnostics for a trace."""
+        return self._post_json("/intelligence/failure-modes", {"trace_id": trace_id})
+
+    def explain_regression(
+        self,
+        trace_a_id: str,
+        trace_b_id: str,
+        *,
+        history_limit: int = 20,
+    ) -> dict[str, Any]:
+        """Fetch deterministic regression explanation between two traces."""
+        if history_limit < 3:
+            raise ValueError("history_limit must be >= 3")
+        return self._post_json(
+            "/intelligence/regression-explain",
+            {
+                "trace_a_id": trace_a_id,
+                "trace_b_id": trace_b_id,
+                "history_limit": history_limit,
+            },
+        )
+
     def close(self) -> None:
         """Shutdown the client and flush remaining spans."""
         if self._shutdown.is_set():

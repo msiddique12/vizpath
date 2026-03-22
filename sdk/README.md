@@ -144,6 +144,20 @@ with trace.span("llm-call", span_type=SpanType.LLM) as span:
         ...
 ```
 
+### Deterministic Intelligence Helpers
+
+You can also query deterministic intelligence diagnostics directly through the SDK client:
+
+```python
+from vizpath.client import Client
+from vizpath.config import Config
+
+client = Client(Config(api_key="your-api-key", base_url="http://localhost:8000/api/v1"))
+
+failure = client.get_failure_modes("trace-id-123")
+regression = client.explain_regression("trace-baseline", "trace-candidate", history_limit=20)
+```
+
 ### Span Types
 
 - `SpanType.LLM` - Language model calls

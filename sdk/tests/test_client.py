@@ -4,9 +4,11 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import httpx
+import pytest
 
 from vizpath.client import Client
 from vizpath.config import Config
+from vizpath.exceptions import VizpathError
 
 
 class TestClientHeaders:
@@ -525,3 +527,65 @@ class TestClientFlush:
         client.close()
         client.close()
         assert client._shutdown.is_set()
+
+
+class TestClientIntelligenceHelpers:
+    """Test deterministic intelligence helper methods on SDK Client."""
+
+    def test_get_failure_modes_posts_expected_payload(self) -> None:
+        config = Config(api_key="vp_test_key", base_url="http://localhost:8000/api/v1")
+        client = Client(config)
+
+        try:
+            client._client = MagicMock()
+            client._client.post.return_value = httpx.Response(
+                200,
+                json={"trace_id": "trace-1", "primary_mode": "tool"},
+            )
+
+            result = client.get_failure_modes("trace-1")
+            assert result["primary_mode"] == "tool"
+            client._client.post.assert_called_once_with(
+                "/intelligence/failure-modes",
+                json={"trace_id": "trace-1"},
+            )
+        finally:
+            client.close()
+
+    def test_explain_regression_posts_expected_payload(self) -> None:
+        config = Config(api_key="vp_test_key", base_url="http://localhost:8000/api/v1")
+        client = Client(config)
+
+        try:
+            client._client = MagicMock()
+            client._client.post.return_value = httpx.Response(
+                200,
+                json={
+                    "trace_a_id": "trace-a",
+                    "trace_b_id": "trace-b",
+                    "explanation": {"status": "regression_explained"},
+                },
+            )
+
+            result = client.explain_regression("trace-a", "trace-b", history_limit=12)
+            assert result["trace_b_id"] == "trace-b"
+            client._client.post.assert_called_once_with(
+                "/intelligence/regression-explain",
+                json={
+                    "trace_a_id": "trace-a",
+                    "trace_b_id": "trace-b",
+                    "history_limit": 12,
+                },
+            )
+        finally:
+            client.close()
+
+    def test_explain_regression_rejects_invalid_history_limit(self) -> None:
+        client = Client(Config(enabled=False))
+        with pytest.raises(ValueError):
+            client.explain_regression("trace-a", "trace-b", history_limit=1)
+
+    def test_intelligence_helpers_raise_when_client_disabled(self) -> None:
+        client = Client(Config(enabled=False))
+        with pytest.raises(VizpathError):
+            client.get_failure_modes("trace-1")
