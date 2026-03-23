@@ -1,5 +1,5 @@
 import { MouseEvent, useEffect, useMemo, useRef, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
 import { formatDistanceToNow } from 'date-fns'
 import {
@@ -17,7 +17,7 @@ import {
   X,
 } from 'lucide-react'
 import clsx from 'clsx'
-import { getTraceSummary, getTraces } from '@/lib/api'
+import { createOrUpdateLabel, getTraceSummary, getTraces } from '@/lib/api'
 import { Trace, SpanStatus } from '@/lib/types'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import WebSocketRecoveryPanel from '@/components/WebSocketRecoveryPanel'
@@ -44,6 +44,13 @@ type SavedFilterPreset = {
   name: string
   filters: FilterState
 }
+type QuickLabelValue = 'good' | 'needs_improvement' | 'failure'
+
+const QUICK_LABEL_OPTIONS: Array<{ value: QuickLabelValue; label: string }> = [
+  { value: 'good', label: 'Good' },
+  { value: 'needs_improvement', label: 'Needs review' },
+  { value: 'failure', label: 'Failure' },
+]
 
 const sortByValues: SortBy[] = ['created_at', 'duration_ms', 'total_tokens', 'total_cost', 'span_count', 'error_count', 'name']
 const statusFilterValues: StatusFilter[] = ['', 'running', 'success', 'error']
@@ -210,7 +217,17 @@ function StatusBadge({ status }: { status: SpanStatus }) {
   )
 }
 
-function TraceRow({ trace }: { trace: Trace }) {
+function TraceRow({
+  trace,
+  onQuickLabel,
+  activeQuickLabel,
+  quickLabelPending,
+}: {
+  trace: Trace
+  onQuickLabel: (traceId: string, label: QuickLabelValue) => void
+  activeQuickLabel: QuickLabelValue | null
+  quickLabelPending: boolean
+}) {
   const [copiedTraceId, setCopiedTraceId] = useState(false)
   const [copiedTraceLink, setCopiedTraceLink] = useState(false)
   const traceUrl = `${window.location.origin}${window.location.pathname}/${trace.id}`
@@ -231,6 +248,12 @@ function TraceRow({ trace }: { trace: Trace }) {
     }
   }
 
+  const handleQuickLabel = (event: MouseEvent<HTMLButtonElement>, label: QuickLabelValue) => {
+    event.preventDefault()
+    event.stopPropagation()
+    onQuickLabel(trace.id, label)
+  }
+
   return (
     <Link
       to={`/traces/${trace.id}`}
@@ -247,6 +270,29 @@ function TraceRow({ trace }: { trace: Trace }) {
             {trace.total_tokens && ` · ${trace.total_tokens.toLocaleString()} tokens`}
             {trace.total_cost && ` · ${formatCost(trace.total_cost)}`}
           </p>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <span className="text-xs text-muted-500">Quick label:</span>
+            {QUICK_LABEL_OPTIONS.map((labelOption) => {
+              const isActive = activeQuickLabel === labelOption.value
+              return (
+                <button
+                  key={labelOption.value}
+                  type="button"
+                  onClick={(event) => handleQuickLabel(event, labelOption.value)}
+                  disabled={quickLabelPending}
+                  className={clsx(
+                    'px-2 py-0.5 text-xs rounded-full border transition-colors',
+                    isActive
+                      ? 'bg-primary-600/20 border-primary-500 text-primary-300'
+                      : 'bg-dark-900 border-dark-700 text-muted-300 hover:text-muted-100 hover:border-muted-500',
+                    quickLabelPending && 'opacity-60 cursor-not-allowed'
+                  )}
+                >
+                  {quickLabelPending && isActive ? 'Saving...' : labelOption.label}
+                </button>
+              )
+            })}
+          </div>
         </div>
         <div className="ml-6 flex items-start gap-6">
           <div className="text-right text-sm text-muted-400">
@@ -306,6 +352,8 @@ export default function TracesPage() {
   const [summaryWindowDays, setSummaryWindowDays] = useState<7 | 30>(7)
   const [savedFilterName, setSavedFilterName] = useState('')
   const [savedFilterPresets, setSavedFilterPresets] = useState<SavedFilterPreset[]>(() => getSavedFilterPresets())
+  const [quickLabels, setQuickLabels] = useState<Record<string, QuickLabelValue>>({})
+  const [pendingQuickLabels, setPendingQuickLabels] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     const parsed = getFiltersFromSearchParams(searchParams)
@@ -494,6 +542,30 @@ export default function TracesPage() {
 
   const authKeyConfigured = Boolean(import.meta.env.VITE_VIZPATH_API_KEY?.trim())
 
+  const quickLabelMutation = useMutation({
+    mutationFn: ({ traceId, label }: { traceId: string; label: QuickLabelValue }) =>
+      createOrUpdateLabel({ trace_id: traceId, label }),
+    onMutate: ({ traceId }) => {
+      setPendingQuickLabels((prev) => ({ ...prev, [traceId]: true }))
+    },
+    onSuccess: (result) => {
+      const nextLabel = result.label
+      if (nextLabel === 'good' || nextLabel === 'needs_improvement' || nextLabel === 'failure') {
+        setQuickLabels((prev) => ({ ...prev, [result.trace_id]: nextLabel }))
+      }
+      queryClient.invalidateQueries({ queryKey: ['curation-label', result.trace_id] })
+      queryClient.invalidateQueries({ queryKey: ['curated-traces'] })
+      queryClient.invalidateQueries({ queryKey: ['curation-stats'] })
+    },
+    onSettled: (_result, _error, variables) => {
+      setPendingQuickLabels((prev) => {
+        const next = { ...prev }
+        delete next[variables.traceId]
+        return next
+      })
+    },
+  })
+
   const applyFilters = (nextFilters: FilterState) => {
     setSearch(nextFilters.search)
     setStatusFilter(nextFilters.statusFilter)
@@ -530,6 +602,13 @@ export default function TracesPage() {
 
   const handleDeleteFilterPreset = (presetId: string) => {
     setSavedFilterPresets((prev) => prev.filter((preset) => preset.id !== presetId))
+  }
+
+  const handleQuickLabel = (traceId: string, label: QuickLabelValue) => {
+    if (pendingQuickLabels[traceId]) {
+      return
+    }
+    quickLabelMutation.mutate({ traceId, label })
   }
 
   if (isLoading) {
@@ -894,7 +973,15 @@ export default function TracesPage() {
             )}
           </div>
         ) : (
-          data?.traces.map((trace) => <TraceRow key={trace.id} trace={trace} />)
+          data?.traces.map((trace) => (
+            <TraceRow
+              key={trace.id}
+              trace={trace}
+              onQuickLabel={handleQuickLabel}
+              activeQuickLabel={quickLabels[trace.id] || null}
+              quickLabelPending={Boolean(pendingQuickLabels[trace.id])}
+            />
+          ))
         )}
       </div>
 

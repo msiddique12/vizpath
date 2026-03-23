@@ -11,6 +11,16 @@ function createJsonResponse(body: unknown) {
   })
 }
 
+function resolveUrl(input: RequestInfo | URL): string {
+  if (typeof input === 'string') {
+    return input
+  }
+  if (input instanceof URL) {
+    return input.toString()
+  }
+  return input.url
+}
+
 describe('TracesPage websocket security UX', () => {
   let originalWebSocket: typeof WebSocket
   let originalFetch: typeof fetch
@@ -21,8 +31,23 @@ describe('TracesPage websocket security UX', () => {
     MockWebSocket.reset()
 
     originalFetch = globalThis.fetch
-    globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
-      const url = typeof input === 'string' ? input : input.toString()
+    globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = resolveUrl(input)
+      const requestMethod = init?.method ?? (input instanceof Request ? input.method : 'GET')
+
+      if (url.includes('/curation/labels') && requestMethod === 'POST') {
+        const body = typeof init?.body === 'string' ? JSON.parse(init.body) : {}
+        return createJsonResponse({
+          trace_id: body.trace_id ?? 'trace-1',
+          label: body.label ?? null,
+          quality_score: null,
+          notes: null,
+          exported: false,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+      }
+
       if (url.includes('/traces/summary')) {
         return createJsonResponse({
           window_days: 7,
@@ -162,6 +187,26 @@ describe('TracesPage websocket security UX', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Errors view' }))
     await waitFor(() => {
       expect(getSearchInput()).toHaveValue('demo')
+    })
+  })
+
+  it('sends quick label actions from trace rows', async () => {
+    _renderWithProviders(<TracesPage />, ['/traces'])
+
+    await waitFor(() => expect(screen.getByText('Demo trace')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Good' }))
+
+    await waitFor(() => {
+      const calls = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls
+      const labelCall = calls.find(([input, init]) => {
+        const url = resolveUrl(input as RequestInfo | URL)
+        return url.includes('/curation/labels') && (init as RequestInit | undefined)?.method === 'POST'
+      })
+
+      expect(labelCall).toBeDefined()
+      const requestInit = labelCall?.[1] as RequestInit | undefined
+      expect(requestInit?.body).toBe(JSON.stringify({ trace_id: 'trace-1', label: 'good' }))
     })
   })
 })
