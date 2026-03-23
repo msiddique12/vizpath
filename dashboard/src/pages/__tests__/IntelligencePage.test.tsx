@@ -26,6 +26,7 @@ describe('IntelligencePage triage workflow', () => {
     let compareBody: Record<string, unknown> | null = null
     let failureBody: Record<string, unknown> | null = null
     let regressionBody: Record<string, unknown> | null = null
+    let summaryBody: Record<string, unknown> | null = null
 
     globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString()
@@ -110,6 +111,39 @@ describe('IntelligencePage triage workflow', () => {
         })
       }
 
+      if (url.includes('/api/v1/intelligence/summary')) {
+        summaryBody = JSON.parse(String(init?.body ?? '{}'))
+        return createJsonResponse({
+          trace_id: 'trace-b',
+          baseline_trace_id: 'trace-a',
+          triage_score: 52,
+          triage_status: 'review',
+          candidate_failure: { status: 'issue_detected', primary_mode: 'tool', confidence: 0.73 },
+          candidate_anomaly: { status: 'degraded', anomaly_score: 32, anomaly_count: 1 },
+          candidate_safety: { risk_level: 'low', risk_score: 0 },
+          compare_summary: { status: 'regressed', regression_score: 45, signal_count: 1 },
+          explanation: {
+            status: 'regression_explained',
+            hypothesis_count: 1,
+            top_hypothesis_confidence: 0.88,
+            summary: 'Generated 1 ranked root-cause hypotheses from deterministic signals.',
+            hypotheses: [
+              {
+                id: 'reliability_regression',
+                title: 'New reliability failures in candidate trace',
+                confidence: 0.88,
+                severity: 'high',
+                evidence: [],
+                recommendation: 'Fix erroring spans first.',
+              },
+            ],
+          },
+          generated_at: new Date().toISOString(),
+          cached: true,
+          cache_ttl_seconds: 120,
+        })
+      }
+
       if (url.includes('/api/v1/intelligence/regression-explain')) {
         regressionBody = JSON.parse(String(init?.body ?? '{}'))
         return createJsonResponse({
@@ -151,16 +185,24 @@ describe('IntelligencePage triage workflow', () => {
     fireEvent.change(screen.getByLabelText('Baseline Trace'), { target: { value: 'trace-a' } })
     fireEvent.change(screen.getByLabelText('Candidate Trace'), { target: { value: 'trace-b' } })
 
+    fireEvent.click(screen.getByRole('button', { name: 'Load Summary' }))
     fireEvent.click(screen.getByRole('button', { name: 'Run Failure Modes' }))
     fireEvent.click(screen.getByRole('button', { name: 'Explain Regression' }))
 
     await waitFor(() => {
+      expect(screen.getByText(/Summary Snapshot/)).toBeInTheDocument()
       expect(screen.getByText(/Regression score: 45/)).toBeInTheDocument()
       expect(screen.getByText(/Primary failure mode is 'tool'/)).toBeInTheDocument()
       expect(screen.getByText(/New reliability failures in candidate trace/)).toBeInTheDocument()
     })
 
     expect(compareBody).toEqual({ trace_a_id: 'trace-a', trace_b_id: 'trace-b' })
+    expect(summaryBody).toEqual({
+      trace_id: 'trace-b',
+      baseline_trace_id: 'trace-a',
+      history_limit: 20,
+      refresh_cache: false,
+    })
     expect(failureBody).toEqual({ trace_id: 'trace-b' })
     expect(regressionBody).toMatchObject({
       trace_a_id: 'trace-a',

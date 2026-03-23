@@ -2,7 +2,13 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { AlertTriangle, Brain, Loader2, ShieldAlert } from 'lucide-react'
 import clsx from 'clsx'
-import { compareTraces, getFailureModes, getRegressionExplain, getTraces } from '@/lib/api'
+import {
+  compareTraces,
+  getFailureModes,
+  getIntelligenceSummary,
+  getRegressionExplain,
+  getTraces,
+} from '@/lib/api'
 
 export default function IntelligencePage() {
   const [candidateTraceId, setCandidateTraceId] = useState('')
@@ -27,6 +33,13 @@ export default function IntelligencePage() {
 
   const regressionExplainMutation = useMutation({
     mutationFn: () => getRegressionExplain(baselineTraceId, candidateTraceId),
+  })
+  const summaryMutation = useMutation({
+    mutationFn: (refreshCache: boolean) =>
+      getIntelligenceSummary(candidateTraceId, {
+        baselineTraceId: baselineTraceId || undefined,
+        refreshCache,
+      }),
   })
 
   const baselineAndCandidateValid =
@@ -105,6 +118,36 @@ export default function IntelligencePage() {
         <div className="flex gap-2">
           <button
             type="button"
+            onClick={() => summaryMutation.mutate(false)}
+            disabled={candidateTraceId.length === 0 || summaryMutation.isPending}
+            className={clsx(
+              'flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
+              candidateTraceId.length > 0 && !summaryMutation.isPending
+                ? 'bg-dark-800 border border-dark-700 text-muted-200 hover:bg-dark-700'
+                : 'bg-dark-700 text-muted-500 cursor-not-allowed'
+            )}
+          >
+            {summaryMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Brain className="h-4 w-4" />}
+            Load Summary
+          </button>
+          <button
+            type="button"
+            onClick={() => summaryMutation.mutate(true)}
+            disabled={candidateTraceId.length === 0 || summaryMutation.isPending}
+            className={clsx(
+              'flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
+              candidateTraceId.length > 0 && !summaryMutation.isPending
+                ? 'bg-dark-800 border border-dark-700 text-muted-200 hover:bg-dark-700'
+                : 'bg-dark-700 text-muted-500 cursor-not-allowed'
+            )}
+          >
+            Refresh Summary
+          </button>
+        </div>
+
+        <div className="flex gap-2">
+          <button
+            type="button"
             onClick={() => failureModesMutation.mutate()}
             disabled={candidateTraceId.length === 0 || failureModesMutation.isPending}
             className={clsx(
@@ -140,6 +183,18 @@ export default function IntelligencePage() {
             Explain Regression
           </button>
         </div>
+
+        {summaryMutation.data && (
+          <div className="bg-dark-800 rounded-lg p-3">
+            <p className="text-xs text-muted-400 uppercase tracking-wide">Summary Snapshot</p>
+            <p className="text-sm text-muted-200 mt-1">
+              Triage score: <span className="text-primary-300">{summaryMutation.data.triage_score}</span> · status {summaryMutation.data.triage_status}
+            </p>
+            <p className="text-xs text-muted-400 mt-1">
+              {summaryMutation.data.cached ? 'Cached' : 'Fresh'} · generated {new Date(summaryMutation.data.generated_at).toLocaleTimeString()}
+            </p>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
@@ -149,15 +204,21 @@ export default function IntelligencePage() {
             <p className="text-sm text-muted-400">Computing compare metrics...</p>
           ) : compareQuery.error ? (
             <p className="text-sm text-red-400">Compare query failed.</p>
-          ) : compareQuery.data ? (
+          ) : compareQuery.data || summaryMutation.data?.compare_summary ? (
             <>
               <p className="text-sm text-muted-200">
-                Status: <span className="text-primary-300">{compareQuery.data.summary.status}</span>
+                Status:{' '}
+                <span className="text-primary-300">
+                  {(compareQuery.data?.summary ?? summaryMutation.data?.compare_summary)?.status}
+                </span>
               </p>
               <p className="text-xs text-muted-400">
-                Regression score: {compareQuery.data.summary.regression_score} · Signals: {compareQuery.data.summary.signal_count}
+                Regression score:{' '}
+                {(compareQuery.data?.summary ?? summaryMutation.data?.compare_summary)?.regression_score}{' '}
+                · Signals:{' '}
+                {(compareQuery.data?.summary ?? summaryMutation.data?.compare_summary)?.signal_count}
               </p>
-              {compareQuery.data.signals.slice(0, 2).map((signal) => (
+              {(compareQuery.data?.signals ?? []).slice(0, 2).map((signal) => (
                 <div key={signal.id} className="bg-dark-800 rounded p-2">
                   <p className="text-xs text-muted-200">{signal.title}</p>
                   <p className="text-xs text-muted-400 mt-1">{signal.detail}</p>
@@ -173,13 +234,22 @@ export default function IntelligencePage() {
           <p className="text-xs uppercase tracking-wide text-muted-400">Failure Modes</p>
           {failureModesMutation.isError ? (
             <p className="text-sm text-red-400">Failure mode diagnostics request failed.</p>
-          ) : failureModesMutation.data ? (
+          ) : failureModesMutation.data || summaryMutation.data ? (
             <>
-              <p className="text-sm text-muted-200">{failureModesMutation.data.summary}</p>
-              <p className="text-xs text-primary-300">
-                Primary: {failureModesMutation.data.primary_mode} ({Math.round(failureModesMutation.data.confidence * 100)}%)
+              <p className="text-sm text-muted-200">
+                {failureModesMutation.data?.summary ??
+                  `Primary mode: ${summaryMutation.data?.candidate_failure.primary_mode}`}
               </p>
-              {failureModesMutation.data.modes.slice(0, 2).map((mode) => (
+              <p className="text-xs text-primary-300">
+                Primary:{' '}
+                {failureModesMutation.data?.primary_mode ?? summaryMutation.data?.candidate_failure.primary_mode}{' '}
+                ({Math.round(
+                  (failureModesMutation.data?.confidence ??
+                    summaryMutation.data?.candidate_failure.confidence ??
+                    0) * 100
+                )}%)
+              </p>
+              {(failureModesMutation.data?.modes ?? []).slice(0, 2).map((mode) => (
                 <div key={mode.mode} className="bg-dark-800 rounded p-2">
                   <p className="text-xs text-muted-200">
                     {mode.mode} · {mode.score} · {mode.severity}
@@ -199,13 +269,23 @@ export default function IntelligencePage() {
           <p className="text-xs uppercase tracking-wide text-muted-400">Regression Explain</p>
           {regressionExplainMutation.isError ? (
             <p className="text-sm text-red-400">Regression explanation request failed.</p>
-          ) : regressionExplainMutation.data ? (
+          ) : regressionExplainMutation.data || summaryMutation.data?.explanation ? (
             <>
-              <p className="text-sm text-muted-200">{regressionExplainMutation.data.explanation.summary}</p>
-              <p className="text-xs text-muted-400">
-                Top confidence: {Math.round(regressionExplainMutation.data.explanation.top_hypothesis_confidence * 100)}%
+              <p className="text-sm text-muted-200">
+                {regressionExplainMutation.data?.explanation.summary ??
+                  summaryMutation.data?.explanation?.summary}
               </p>
-              {regressionExplainMutation.data.explanation.hypotheses.slice(0, 2).map((hypothesis) => (
+              <p className="text-xs text-muted-400">
+                Top confidence:{' '}
+                {Math.round(
+                  (regressionExplainMutation.data?.explanation.top_hypothesis_confidence ??
+                    summaryMutation.data?.explanation?.top_hypothesis_confidence ??
+                    0) * 100
+                )}%
+              </p>
+              {(regressionExplainMutation.data?.explanation.hypotheses ??
+                summaryMutation.data?.explanation?.hypotheses ??
+                []).slice(0, 2).map((hypothesis) => (
                 <div key={hypothesis.id} className="bg-dark-800 rounded p-2">
                   <p className="text-xs text-muted-200">{hypothesis.title}</p>
                   <p className="text-xs text-muted-400 mt-1">{hypothesis.recommendation}</p>

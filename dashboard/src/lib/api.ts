@@ -368,6 +368,42 @@ export interface RegressionExplainResult {
   }
 }
 
+export interface IntelligenceSummaryResult {
+  trace_id: string
+  baseline_trace_id: string | null
+  triage_score: number
+  triage_status: 'high_risk' | 'review' | 'stable'
+  candidate_failure: {
+    status: 'issue_detected' | 'no_major_failure_signals'
+    primary_mode: 'infra' | 'llm' | 'tool' | 'policy' | 'data' | 'none'
+    confidence: number
+  }
+  candidate_anomaly: {
+    status: 'outlier' | 'degraded' | 'watch' | 'normal' | 'insufficient_history'
+    anomaly_score: number
+    anomaly_count: number
+  }
+  candidate_safety: {
+    risk_level: 'critical' | 'high' | 'medium' | 'low'
+    risk_score: number
+  }
+  compare_summary: {
+    status: 'regressed' | 'mixed' | 'improved' | 'neutral'
+    regression_score: number
+    signal_count: number
+  } | null
+  explanation: {
+    status: 'regression_explained' | 'changes_explained' | 'no_clear_regression_cause'
+    hypothesis_count: number
+    top_hypothesis_confidence: number
+    summary: string
+    hypotheses: RegressionHypothesis[]
+  } | null
+  generated_at: string
+  cached: boolean
+  cache_ttl_seconds: number
+}
+
 export async function analyzeTrace(traceId: string): Promise<TraceAnalysis> {
   return fetchApi('/intelligence/analyze', {
     method: 'POST',
@@ -403,6 +439,25 @@ export async function getRegressionExplain(
       trace_a_id: traceAId,
       trace_b_id: traceBId,
       history_limit: historyLimit,
+    }),
+  })
+}
+
+export async function getIntelligenceSummary(
+  traceId: string,
+  options?: {
+    baselineTraceId?: string
+    historyLimit?: number
+    refreshCache?: boolean
+  }
+): Promise<IntelligenceSummaryResult> {
+  return fetchApi('/intelligence/summary', {
+    method: 'POST',
+    body: JSON.stringify({
+      trace_id: traceId,
+      baseline_trace_id: options?.baselineTraceId,
+      history_limit: options?.historyLimit ?? 20,
+      refresh_cache: options?.refreshCache ?? false,
     }),
   })
 }
