@@ -24,11 +24,26 @@ import WebSocketRecoveryPanel from '@/components/WebSocketRecoveryPanel'
 
 const PAGE_SIZE = 50
 const FILTER_STORAGE_KEY = 'traces_filters_v1'
+const FILTER_PRESETS_STORAGE_KEY = 'traces_filter_presets_v1'
 
 type SortBy = 'created_at' | 'duration_ms' | 'total_tokens' | 'total_cost' | 'span_count' | 'error_count' | 'name'
 type SortOrder = 'asc' | 'desc'
 type StatusFilter = '' | 'running' | 'success' | 'error'
 type HasErrorsFilter = '' | 'true' | 'false'
+type FilterState = {
+  search: string
+  statusFilter: StatusFilter
+  minTokens: string
+  minCost: string
+  hasErrors: HasErrorsFilter
+  sortBy: SortBy
+  sortOrder: SortOrder
+}
+type SavedFilterPreset = {
+  id: string
+  name: string
+  filters: FilterState
+}
 
 const sortByValues: SortBy[] = ['created_at', 'duration_ms', 'total_tokens', 'total_cost', 'span_count', 'error_count', 'name']
 const statusFilterValues: StatusFilter[] = ['', 'running', 'success', 'error']
@@ -55,7 +70,7 @@ function parseNumericFilter(value: string | null): string {
   return Number.isNaN(parsed) || parsed < 0 ? '' : String(parsed)
 }
 
-function getSavedFilters() {
+function getSavedFilters(): FilterState | null {
   if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
     return null
   }
@@ -93,15 +108,55 @@ function getFiltersFromSearchParams(searchParams: URLSearchParams) {
   }
 }
 
-function buildSearchParamsFromFilters(filters: {
-  search: string
-  statusFilter: StatusFilter
-  minTokens: string
-  minCost: string
-  hasErrors: HasErrorsFilter
-  sortBy: SortBy
-  sortOrder: SortOrder
-}) {
+function getSavedFilterPresets(): SavedFilterPreset[] {
+  if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
+    return []
+  }
+
+  try {
+    const savedRaw = window.localStorage.getItem(FILTER_PRESETS_STORAGE_KEY)
+    if (!savedRaw) return []
+    const parsed = JSON.parse(savedRaw)
+    if (!Array.isArray(parsed)) {
+      return []
+    }
+
+    return parsed
+      .map((item) => {
+        if (typeof item !== 'object' || item === null) {
+          return null
+        }
+        const candidate = item as Partial<SavedFilterPreset>
+        if (typeof candidate.id !== 'string' || typeof candidate.name !== 'string') {
+          return null
+        }
+        const filters = candidate.filters
+        if (typeof filters !== 'object' || filters === null) {
+          return null
+        }
+
+        return {
+          id: candidate.id,
+          name: candidate.name,
+          filters: {
+            search: typeof filters.search === 'string' ? filters.search : '',
+            statusFilter: parseStatusFilter(filters.statusFilter ?? ''),
+            minTokens: parseNumericFilter(filters.minTokens ?? ''),
+            minCost: parseNumericFilter(filters.minCost ?? ''),
+            hasErrors: parseHasErrorsFilter(filters.hasErrors ?? ''),
+            sortBy: parseSortBy(filters.sortBy ?? '') ?? 'created_at',
+            sortOrder: filters.sortOrder === 'asc' || filters.sortOrder === 'desc' ? filters.sortOrder : 'desc',
+          },
+        } satisfies SavedFilterPreset
+      })
+      .filter((value): value is SavedFilterPreset => value !== null)
+      .slice(0, 8)
+  } catch {
+    return []
+  }
+}
+
+function buildSearchParamsFromFilters(filters: FilterState) {
   const next = new URLSearchParams()
   if (filters.search.trim()) {
     next.set('q', filters.search.trim())
@@ -238,6 +293,7 @@ function TraceRow({ trace }: { trace: Trace }) {
 export default function TracesPage() {
   const queryClient = useQueryClient()
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const filtersInitializedRef = useRef(false)
   const [searchParams, setSearchParams] = useSearchParams()
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
@@ -248,18 +304,32 @@ export default function TracesPage() {
   const [sortBy, setSortBy] = useState<SortBy>('created_at')
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
   const [summaryWindowDays, setSummaryWindowDays] = useState<7 | 30>(7)
+  const [savedFilterName, setSavedFilterName] = useState('')
+  const [savedFilterPresets, setSavedFilterPresets] = useState<SavedFilterPreset[]>(() => getSavedFilterPresets())
 
   useEffect(() => {
-    const saved = getSavedFilters()
     const parsed = getFiltersFromSearchParams(searchParams)
 
-    setSearch(searchParams.has('q') ? parsed.search : saved?.search || '')
-    setStatusFilter(searchParams.has('status') ? parsed.statusFilter : saved?.statusFilter || '')
-    setMinTokens(searchParams.has('min_tokens') ? parsed.minTokens : saved?.minTokens || '')
-    setMinCost(searchParams.has('min_cost') ? parsed.minCost : saved?.minCost || '')
-    setHasErrors(searchParams.has('has_errors') ? parsed.hasErrors : saved?.hasErrors || '')
-    setSortBy(parsed.sortBy || saved?.sortBy || 'created_at')
-    setSortOrder(parsed.sortOrder || saved?.sortOrder || 'desc')
+    if (!filtersInitializedRef.current) {
+      const saved = getSavedFilters()
+      setSearch(searchParams.has('q') ? parsed.search : saved?.search || '')
+      setStatusFilter(searchParams.has('status') ? parsed.statusFilter : saved?.statusFilter || '')
+      setMinTokens(searchParams.has('min_tokens') ? parsed.minTokens : saved?.minTokens || '')
+      setMinCost(searchParams.has('min_cost') ? parsed.minCost : saved?.minCost || '')
+      setHasErrors(searchParams.has('has_errors') ? parsed.hasErrors : saved?.hasErrors || '')
+      setSortBy(parsed.sortBy || saved?.sortBy || 'created_at')
+      setSortOrder(parsed.sortOrder || saved?.sortOrder || 'desc')
+      filtersInitializedRef.current = true
+      return
+    }
+
+    setSearch(parsed.search)
+    setStatusFilter(parsed.statusFilter)
+    setMinTokens(parsed.minTokens)
+    setMinCost(parsed.minCost)
+    setHasErrors(parsed.hasErrors)
+    setSortBy(parsed.sortBy || 'created_at')
+    setSortOrder(parsed.sortOrder || 'desc')
   }, [searchParams])
 
   useEffect(() => {
@@ -284,6 +354,18 @@ export default function TracesPage() {
       // Ignore storage failures (for example in restricted environments).
     }
   }, [hasErrors, minCost, minTokens, search, sortBy, sortOrder, statusFilter])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
+      return
+    }
+
+    try {
+      window.localStorage.setItem(FILTER_PRESETS_STORAGE_KEY, JSON.stringify(savedFilterPresets))
+    } catch {
+      // Ignore storage failures (for example in restricted environments).
+    }
+  }, [savedFilterPresets])
 
   useEffect(() => {
     const next = buildSearchParamsFromFilters({
@@ -366,6 +448,18 @@ export default function TracesPage() {
   const hasPrevPage = page > 1
   const hasActiveFilters =
     Boolean(search) || Boolean(statusFilter) || Boolean(hasErrors) || Boolean(minTokens) || Boolean(minCost)
+  const currentFilters: FilterState = useMemo(
+    () => ({
+      search,
+      statusFilter,
+      minTokens,
+      minCost,
+      hasErrors,
+      sortBy,
+      sortOrder,
+    }),
+    [hasErrors, minCost, minTokens, search, sortBy, sortOrder, statusFilter]
+  )
   const activeFilterChips = [
     search ? { key: 'search', label: `Search: ${search}`, clear: () => setSearch('') } : null,
     statusFilter
@@ -399,6 +493,44 @@ export default function TracesPage() {
   ].filter(Boolean) as Array<{ key: string; label: string; clear: () => void }>
 
   const authKeyConfigured = Boolean(import.meta.env.VITE_VIZPATH_API_KEY?.trim())
+
+  const applyFilters = (nextFilters: FilterState) => {
+    setSearch(nextFilters.search)
+    setStatusFilter(nextFilters.statusFilter)
+    setMinTokens(nextFilters.minTokens)
+    setMinCost(nextFilters.minCost)
+    setHasErrors(nextFilters.hasErrors)
+    setSortBy(nextFilters.sortBy)
+    setSortOrder(nextFilters.sortOrder)
+  }
+
+  const handleSaveFilterPreset = () => {
+    const name = savedFilterName.trim()
+    if (!name) {
+      return
+    }
+
+    const normalizedName = name.toLowerCase()
+    const existing = savedFilterPresets.find((preset) => preset.name.toLowerCase() === normalizedName)
+    if (existing) {
+      setSavedFilterPresets((prev) =>
+        prev.map((preset) => (preset.id === existing.id ? { ...preset, name, filters: currentFilters } : preset))
+      )
+    } else {
+      const newPreset: SavedFilterPreset = {
+        id: `preset-${Date.now().toString(36)}`,
+        name,
+        filters: currentFilters,
+      }
+      setSavedFilterPresets((prev) => [newPreset, ...prev].slice(0, 8))
+    }
+
+    setSavedFilterName('')
+  }
+
+  const handleDeleteFilterPreset = (presetId: string) => {
+    setSavedFilterPresets((prev) => prev.filter((preset) => preset.id !== presetId))
+  }
 
   if (isLoading) {
     return (
@@ -648,6 +780,60 @@ export default function TracesPage() {
           >
             Clear
           </button>
+        </div>
+
+        <div className="pt-2 border-t border-dark-700/70 space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={savedFilterName}
+              onChange={(event) => setSavedFilterName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  handleSaveFilterPreset()
+                }
+              }}
+              placeholder="Preset name"
+              aria-label="Saved filter name"
+              className="min-w-[180px] flex-1 max-w-sm bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-sm text-muted-100 placeholder:text-muted-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            />
+            <button
+              onClick={handleSaveFilterPreset}
+              disabled={!savedFilterName.trim()}
+              className={clsx(
+                'px-3 py-2 text-xs rounded-lg border',
+                savedFilterName.trim()
+                  ? 'bg-primary-600 border-primary-500 text-white hover:bg-primary-700'
+                  : 'bg-dark-800 border-dark-700 text-muted-500 cursor-not-allowed'
+              )}
+            >
+              Save current filter
+            </button>
+          </div>
+
+          {savedFilterPresets.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              {savedFilterPresets.map((preset) => (
+                <div key={preset.id} className="inline-flex items-center rounded-lg border border-dark-700 bg-dark-800">
+                  <button
+                    onClick={() => applyFilters(preset.filters)}
+                    className="px-2.5 py-1.5 text-xs text-muted-200 hover:text-muted-100"
+                    title={`Apply saved filter: ${preset.name}`}
+                  >
+                    {preset.name}
+                  </button>
+                  <button
+                    onClick={() => handleDeleteFilterPreset(preset.id)}
+                    className="px-2 py-1.5 text-xs text-muted-500 hover:text-red-400 border-l border-dark-700"
+                    aria-label={`Delete saved filter ${preset.name}`}
+                    title={`Delete saved filter ${preset.name}`}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {activeFilterChips.length > 0 && (

@@ -140,4 +140,28 @@ describe('TracesPage websocket security UX', () => {
       expect(MockWebSocket.instances).toHaveLength(2)
     })
   })
+
+  it('saves and reapplies named filter presets', async () => {
+    _renderWithProviders(<TracesPage />, ['/traces'])
+
+    await waitFor(() => expect(screen.getByText('Demo trace')).toBeInTheDocument())
+
+    const getSearchInput = () => screen.getByPlaceholderText('Search trace name')
+
+    fireEvent.change(getSearchInput(), { target: { value: 'demo' } })
+
+    const savedFilterNameInput = await screen.findByLabelText('Saved filter name')
+    fireEvent.change(savedFilterNameInput, { target: { value: 'Errors view' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save current filter' }))
+
+    expect(await screen.findByRole('button', { name: 'Errors view' })).toBeInTheDocument()
+
+    fireEvent.change(getSearchInput(), { target: { value: '' } })
+    expect(getSearchInput()).toHaveValue('')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Errors view' }))
+    await waitFor(() => {
+      expect(getSearchInput()).toHaveValue('demo')
+    })
+  })
 })
