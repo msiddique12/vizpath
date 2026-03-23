@@ -496,6 +496,77 @@ class TestRegressionExplainEndpoint:
         assert response.status_code == 422
 
 
+class TestIntelligenceSummaryEndpoint:
+    def test_summary_returns_cached_result_on_second_call(self, client, test_db):
+        suffix = str(int(datetime.now(timezone.utc).timestamp() * 1000000))
+        baseline_id = f"summary-base-{suffix}"
+        candidate_id = f"summary-candidate-{suffix}"
+
+        _post_trace_spans(client, baseline_id, 120.0)
+        _post_trace_spans(client, candidate_id, 430.0, status="error")
+        _post_trace_spans(client, f"summary-h1-{suffix}", 100.0)
+        _post_trace_spans(client, f"summary-h2-{suffix}", 110.0)
+        _post_trace_spans(client, f"summary-h3-{suffix}", 105.0)
+
+        first_response = client.post(
+            "/api/v1/intelligence/summary",
+            json={"trace_id": candidate_id, "baseline_trace_id": baseline_id, "history_limit": 10},
+        )
+        assert first_response.status_code == 200
+        first = first_response.json()
+        assert first["cached"] is False
+        assert first["trace_id"] == candidate_id
+        assert first["baseline_trace_id"] == baseline_id
+        assert "triage_score" in first
+        assert "candidate_failure" in first
+        assert first["compare_summary"] is not None
+        generated_at = first["generated_at"]
+
+        second_response = client.post(
+            "/api/v1/intelligence/summary",
+            json={"trace_id": candidate_id, "baseline_trace_id": baseline_id, "history_limit": 10},
+        )
+        assert second_response.status_code == 200
+        second = second_response.json()
+        assert second["cached"] is True
+        assert second["generated_at"] == generated_at
+
+    def test_summary_refresh_cache_forces_recompute(self, client, test_db):
+        suffix = str(int(datetime.now(timezone.utc).timestamp() * 1000000))
+        candidate_id = f"summary-refresh-{suffix}"
+        _post_trace_spans(client, candidate_id, 220.0)
+        _post_trace_spans(client, f"summary-refresh-h1-{suffix}", 90.0)
+        _post_trace_spans(client, f"summary-refresh-h2-{suffix}", 95.0)
+        _post_trace_spans(client, f"summary-refresh-h3-{suffix}", 100.0)
+
+        initial = client.post("/api/v1/intelligence/summary", json={"trace_id": candidate_id})
+        assert initial.status_code == 200
+        assert initial.json()["cached"] is False
+
+        refreshed = client.post(
+            "/api/v1/intelligence/summary",
+            json={"trace_id": candidate_id, "refresh_cache": True},
+        )
+        assert refreshed.status_code == 200
+        assert refreshed.json()["cached"] is False
+
+    def test_summary_trace_not_found(self, client, test_db):
+        response = client.post(
+            "/api/v1/intelligence/summary",
+            json={"trace_id": "missing-trace"},
+        )
+        assert response.status_code == 404
+
+    def test_summary_baseline_not_found(self, client, test_db):
+        candidate_id = "summary-candidate-missing-baseline"
+        _post_trace_spans(client, candidate_id, 200.0)
+        response = client.post(
+            "/api/v1/intelligence/summary",
+            json={"trace_id": candidate_id, "baseline_trace_id": "missing-baseline"},
+        )
+        assert response.status_code == 404
+
+
 class TestSelfAnalyzeEndpoint:
     def test_self_analyze_no_key(self, client, test_db):
         with patch("app.routes.intelligence.settings") as mock_settings:

@@ -1,9 +1,13 @@
 """Intelligence API endpoints for Nemotron-powered trace analysis."""
 
+import json
 import logging
 import re
 import statistics
+import time
+from datetime import datetime, timezone
 from math import isfinite
+from threading import Lock
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -186,6 +190,9 @@ _FAILURE_MODE_BASE_RECOMMENDATIONS = {
     "policy": "Apply pre-execution safety checks and redact sensitive outputs.",
     "data": "Validate payload schemas and reject malformed records early.",
 }
+_INTELLIGENCE_SUMMARY_CACHE_TTL_SECONDS = 120
+_intelligence_summary_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_intelligence_summary_cache_lock = Lock()
 
 
 def _collect_text_blocks(trace_data: dict[str, Any]) -> list[tuple[str, str, str]]:
@@ -971,6 +978,147 @@ def _trace_to_data(trace: Trace, spans: list[Span]) -> dict[str, Any]:
     return data
 
 
+def _summary_cache_key(
+    project_id: Any,
+    trace_id: str,
+    baseline_trace_id: str | None,
+    history_limit: int,
+) -> str:
+    baseline = baseline_trace_id or "-"
+    return f"{project_id}:{trace_id}:{baseline}:{history_limit}"
+
+
+def _get_cached_intelligence_summary(cache_key: str) -> dict[str, Any] | None:
+    now_ts = time.time()
+    with _intelligence_summary_cache_lock:
+        cached = _intelligence_summary_cache.get(cache_key)
+        if not cached:
+            return None
+        expires_at, payload = cached
+        if expires_at <= now_ts:
+            _intelligence_summary_cache.pop(cache_key, None)
+            return None
+        return json.loads(json.dumps(payload))
+
+
+def _set_cached_intelligence_summary(cache_key: str, payload: dict[str, Any]) -> None:
+    cache_payload = json.loads(json.dumps(payload))
+    expires_at = time.time() + _INTELLIGENCE_SUMMARY_CACHE_TTL_SECONDS
+    with _intelligence_summary_cache_lock:
+        _intelligence_summary_cache[cache_key] = (expires_at, cache_payload)
+
+
+def _build_intelligence_summary(
+    trace: Trace,
+    spans: list[Span],
+    project_id: Any,
+    db: Session,
+    baseline_trace_id: str | None,
+    history_limit: int,
+) -> dict[str, Any]:
+    """Build deterministic triage summary combining safety, failure, anomaly, and regression context."""
+    trace_data = _trace_to_data(trace, spans)
+    failure_result = _classify_failure_modes(trace_data)
+    safety_result = _scan_trace_for_risk(trace_data)
+
+    historical_query = (
+        db.query(Trace)
+        .filter(
+            Trace.id != trace.id,
+            Trace.project_id == project_id,
+        )
+    )
+    if baseline_trace_id:
+        historical_query = historical_query.filter(Trace.id != baseline_trace_id)
+    historical_traces = (
+        historical_query
+        .order_by(Trace.created_at.desc())
+        .limit(history_limit)
+        .all()
+    )
+    historical_spans = [
+        db.query(Span).filter(Span.trace_id == historical_trace.id).all()
+        for historical_trace in historical_traces
+    ]
+    anomaly_result = _analyze_anomaly(
+        trace,
+        spans,
+        historical_traces,
+        historical_spans,
+        z_threshold=1.5,
+    )
+
+    compare_summary: dict[str, Any] | None = None
+    explanation: dict[str, Any] | None = None
+    if baseline_trace_id:
+        baseline_trace = (
+            db.query(Trace)
+            .filter(Trace.id == baseline_trace_id, Trace.project_id == project_id)
+            .first()
+        )
+        if not baseline_trace:
+            raise HTTPException(status_code=404, detail="Trace not found")
+        baseline_spans = db.query(Span).filter(Span.trace_id == baseline_trace_id).all()
+        compare_result = _compare_trace_metrics(baseline_trace, baseline_spans, trace, spans)
+        compare_summary = compare_result.get("summary", {})
+        explanation = _explain_regression(
+            compare_result,
+            failure_result,
+            anomaly_result,
+            safety_result,
+        )
+
+    failure_top_score = 0
+    if failure_result.get("status") == "issue_detected":
+        top_mode = (failure_result.get("modes") or [{}])[0]
+        failure_top_score = int(top_mode.get("score", 0))
+
+    compare_regression_score = int((compare_summary or {}).get("regression_score", 0))
+    anomaly_score = int(anomaly_result.get("anomaly_score", 0))
+    safety_score = int(safety_result.get("risk_score", 0))
+    if compare_summary:
+        triage_score = min(
+            100,
+            int(compare_regression_score * 0.45 + anomaly_score * 0.3 + safety_score * 0.15 + failure_top_score * 0.1),
+        )
+    else:
+        triage_score = min(
+            100,
+            int(failure_top_score * 0.5 + anomaly_score * 0.35 + safety_score * 0.15),
+        )
+
+    if triage_score >= 70:
+        triage_status = "high_risk"
+    elif triage_score >= 40:
+        triage_status = "review"
+    else:
+        triage_status = "stable"
+
+    return {
+        "trace_id": str(trace.id),
+        "baseline_trace_id": baseline_trace_id,
+        "triage_score": triage_score,
+        "triage_status": triage_status,
+        "candidate_failure": {
+            "status": failure_result.get("status"),
+            "primary_mode": failure_result.get("primary_mode"),
+            "confidence": failure_result.get("confidence", 0.0),
+        },
+        "candidate_anomaly": {
+            "status": anomaly_result.get("status"),
+            "anomaly_score": anomaly_result.get("anomaly_score"),
+            "anomaly_count": anomaly_result.get("anomaly_count"),
+        },
+        "candidate_safety": {
+            "risk_level": safety_result.get("risk_level"),
+            "risk_score": safety_result.get("risk_score"),
+        },
+        "compare_summary": compare_summary,
+        "explanation": explanation,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 def _explain_regression(
     compare_result: dict[str, Any],
     failure_result: dict[str, Any],
@@ -1184,6 +1332,15 @@ class RegressionExplainRequest(BaseModel):
     history_limit: int = Field(default=20, ge=3, le=100)
 
 
+class IntelligenceSummaryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    trace_id: str = Field(min_length=1, max_length=128, pattern=ID_PATTERN)
+    baseline_trace_id: str | None = Field(default=None, min_length=1, max_length=128, pattern=ID_PATTERN)
+    history_limit: int = Field(default=20, ge=3, le=100)
+    refresh_cache: bool = False
+
+
 # --- Endpoints ---
 
 
@@ -1356,6 +1513,48 @@ async def regression_explain(
         },
         "explanation": explanation,
     }
+
+
+@router.post("/summary")
+async def intelligence_summary(
+    req: IntelligenceSummaryRequest,
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Return cached deterministic intelligence summary for triage workflows."""
+    trace = (
+        db.query(Trace)
+        .filter(Trace.id == req.trace_id, Trace.project_id == project.id)
+        .first()
+    )
+    if not trace:
+        raise HTTPException(status_code=404, detail="Trace not found")
+
+    spans = db.query(Span).filter(Span.trace_id == req.trace_id).all()
+    cache_key = _summary_cache_key(
+        project.id,
+        req.trace_id,
+        req.baseline_trace_id,
+        req.history_limit,
+    )
+    if not req.refresh_cache:
+        cached = _get_cached_intelligence_summary(cache_key)
+        if cached is not None:
+            cached["cached"] = True
+            return cached
+
+    result = _build_intelligence_summary(
+        trace,
+        spans,
+        project.id,
+        db,
+        req.baseline_trace_id,
+        req.history_limit,
+    )
+    result["cache_ttl_seconds"] = _INTELLIGENCE_SUMMARY_CACHE_TTL_SECONDS
+    _set_cached_intelligence_summary(cache_key, result)
+    result["cached"] = False
+    return result
 
 
 @router.get("/status")
