@@ -10,6 +10,7 @@ import app.rate_limit as rate_limit
 from app.config import settings
 from app.database import Base, get_db
 from app.main import app
+from app.routes.intelligence import _clear_intelligence_summary_cache
 
 
 @pytest.fixture(scope="function")
@@ -53,3 +54,9 @@ def _disable_rate_limiting_for_test_suite(monkeypatch):
         "_limiter",
         rate_limit.RateLimiter(rate_limit.InMemoryRateLimitBackend()),
     )
+
+
+@pytest.fixture(autouse=True)
+def _clear_intelligence_summary_cache_between_tests():
+    """Prevent cached intelligence summaries from leaking across tests."""
+    _clear_intelligence_summary_cache()

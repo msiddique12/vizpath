@@ -195,6 +195,12 @@ _intelligence_summary_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _intelligence_summary_cache_lock = Lock()
 
 
+def _clear_intelligence_summary_cache() -> None:
+    """Clear in-process intelligence summary cache (used by tests)."""
+    with _intelligence_summary_cache_lock:
+        _intelligence_summary_cache.clear()
+
+
 def _collect_text_blocks(trace_data: dict[str, Any]) -> list[tuple[str, str, str]]:
     """Build a deterministic list of searchable trace text fields."""
     blocks: list[tuple[str, str, str]] = []
