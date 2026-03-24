@@ -354,6 +354,7 @@ export default function TracesPage() {
   const [savedFilterPresets, setSavedFilterPresets] = useState<SavedFilterPreset[]>(() => getSavedFilterPresets())
   const [quickLabels, setQuickLabels] = useState<Record<string, QuickLabelValue>>({})
   const [pendingQuickLabels, setPendingQuickLabels] = useState<Record<string, boolean>>({})
+  const [copiedEmptyStateCommand, setCopiedEmptyStateCommand] = useState<string | null>(null)
 
   useEffect(() => {
     const parsed = getFiltersFromSearchParams(searchParams)
@@ -609,6 +610,19 @@ export default function TracesPage() {
       return
     }
     quickLabelMutation.mutate({ traceId, label })
+  }
+
+  const handleCopyCommand = async (command: string) => {
+    try {
+      if (!navigator.clipboard?.writeText) {
+        return
+      }
+      await navigator.clipboard.writeText(command)
+      setCopiedEmptyStateCommand(command)
+      window.setTimeout(() => setCopiedEmptyStateCommand((current) => (current === command ? null : current)), 1200)
+    } catch {
+      // Clipboard is convenience-only in this view.
+    }
   }
 
   if (isLoading) {
@@ -969,7 +983,34 @@ export default function TracesPage() {
                 </button>
               </div>
             ) : (
-              <p className="text-muted-400">No traces yet. Start tracing your agents to see them here.</p>
+              <div className="space-y-4">
+                <p className="text-muted-400">No traces yet. Start your first run:</p>
+                <div className="grid gap-2 max-w-2xl mx-auto text-left">
+                  {[
+                    { title: 'Start local stack', command: './demo.sh' },
+                    {
+                      title: 'Send a first trace',
+                      command: 'python -m examples.code_agent.run "How does the intelligence module work?"',
+                    },
+                  ].map((item) => (
+                    <div key={item.command} className="bg-dark-800 border border-dark-700 rounded-lg px-3 py-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs text-muted-400">{item.title}</p>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyCommand(item.command)}
+                          className="inline-flex items-center gap-1 text-xs text-muted-300 hover:text-muted-100"
+                          aria-label={`Copy command: ${item.title}`}
+                        >
+                          <ClipboardCopy className="h-3.5 w-3.5" />
+                          {copiedEmptyStateCommand === item.command ? 'Copied' : 'Copy'}
+                        </button>
+                      </div>
+                      <code className="mt-1 block text-xs text-muted-100 break-all">{item.command}</code>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
         ) : (

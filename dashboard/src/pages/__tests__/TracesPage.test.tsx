@@ -209,4 +209,38 @@ describe('TracesPage websocket security UX', () => {
       expect(requestInit?.body).toBe(JSON.stringify({ trace_id: 'trace-1', label: 'good' }))
     })
   })
+
+  it('shows quick-start commands in empty state when no traces exist', async () => {
+    globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = resolveUrl(input)
+      if (url.includes('/traces/summary')) {
+        return createJsonResponse({
+          window_days: 7,
+          trace_count: 0,
+          success_rate: 0,
+          running_count: 0,
+          error_count: 0,
+          p50_duration_ms: 0,
+          p95_duration_ms: 0,
+          avg_tokens: 0,
+          avg_cost: 0,
+        })
+      }
+
+      return createJsonResponse({
+        traces: [],
+        total: 0,
+        limit: 50,
+        offset: 0,
+      })
+    }) as unknown as typeof fetch
+
+    _renderWithProviders(<TracesPage />, ['/traces'])
+
+    expect(await screen.findByText('No traces yet. Start your first run:')).toBeInTheDocument()
+    expect(screen.getByText('./demo.sh')).toBeInTheDocument()
+    expect(
+      screen.getByText('python -m examples.code_agent.run "How does the intelligence module work?"')
+    ).toBeInTheDocument()
+  })
 })
