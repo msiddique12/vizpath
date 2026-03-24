@@ -210,6 +210,98 @@ describe('TracesPage websocket security UX', () => {
     })
   })
 
+  it('supports bulk labels and compare from selected traces', async () => {
+    globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = resolveUrl(input)
+      const method = init?.method ?? (input instanceof Request ? input.method : 'GET')
+
+      if (url.includes('/curation/labels') && method === 'POST') {
+        const body = typeof init?.body === 'string' ? JSON.parse(init.body) : {}
+        return createJsonResponse({
+          trace_id: body.trace_id ?? 'trace-1',
+          label: body.label ?? null,
+          quality_score: null,
+          notes: null,
+          exported: false,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+      }
+
+      if (url.includes('/traces/summary')) {
+        return createJsonResponse({
+          window_days: 7,
+          trace_count: 2,
+          success_rate: 100,
+          running_count: 0,
+          error_count: 0,
+          p50_duration_ms: 42,
+          p95_duration_ms: 120,
+          avg_tokens: 22,
+          avg_cost: 0.0009,
+        })
+      }
+
+      return createJsonResponse({
+        traces: [
+          {
+            id: 'trace-1',
+            name: 'Demo trace A',
+            status: 'success',
+            start_time: new Date().toISOString(),
+            end_time: new Date().toISOString(),
+            duration_ms: 45,
+            metadata: {},
+            total_tokens: 20,
+            total_cost: 0.001,
+            span_count: 5,
+            error_count: 0,
+            created_at: new Date().toISOString(),
+          },
+          {
+            id: 'trace-2',
+            name: 'Demo trace B',
+            status: 'success',
+            start_time: new Date().toISOString(),
+            end_time: new Date().toISOString(),
+            duration_ms: 55,
+            metadata: {},
+            total_tokens: 30,
+            total_cost: 0.002,
+            span_count: 8,
+            error_count: 0,
+            created_at: new Date().toISOString(),
+          },
+        ],
+        total: 2,
+        limit: 50,
+        offset: 0,
+      })
+    }) as unknown as typeof fetch
+
+    _renderWithProviders(<TracesPage />, ['/traces'])
+
+    await waitFor(() => expect(screen.getByText('Demo trace A')).toBeInTheDocument())
+    expect(screen.getByText('Demo trace B')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select trace trace-1' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Select trace trace-2' }))
+
+    const compareLink = await screen.findByRole('link', { name: 'Compare selected' })
+    expect(compareLink.getAttribute('href')).toBe('/compare?traceA=trace-1&traceB=trace-2')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Label selected: Good' }))
+
+    await waitFor(() => {
+      const calls = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls
+      const labelCalls = calls.filter(([input, init]) => {
+        const url = resolveUrl(input as RequestInfo | URL)
+        return url.includes('/curation/labels') && (init as RequestInit | undefined)?.method === 'POST'
+      })
+      expect(labelCalls).toHaveLength(2)
+    })
+  })
+
   it('shows quick-start commands in empty state when no traces exist', async () => {
     globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
       const url = resolveUrl(input)

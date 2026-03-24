@@ -222,11 +222,15 @@ function TraceRow({
   onQuickLabel,
   activeQuickLabel,
   quickLabelPending,
+  selected,
+  onToggleSelect,
 }: {
   trace: Trace
   onQuickLabel: (traceId: string, label: QuickLabelValue) => void
   activeQuickLabel: QuickLabelValue | null
   quickLabelPending: boolean
+  selected: boolean
+  onToggleSelect: (traceId: string) => void
 }) {
   const [copiedTraceId, setCopiedTraceId] = useState(false)
   const [copiedTraceLink, setCopiedTraceLink] = useState(false)
@@ -254,13 +258,35 @@ function TraceRow({
     onQuickLabel(trace.id, label)
   }
 
+  const handleToggleSelect = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    onToggleSelect(trace.id)
+  }
+
   return (
     <Link
       to={`/traces/${trace.id}`}
-      className="block hover:bg-dark-800 transition-colors"
+      className={clsx(
+        'block hover:bg-dark-800 transition-colors',
+        selected && 'bg-primary-600/5 border-l-2 border-primary-500'
+      )}
     >
       <div className="px-6 py-4 flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
+          <button
+            type="button"
+            onClick={handleToggleSelect}
+            aria-label={selected ? `Deselect trace ${trace.id}` : `Select trace ${trace.id}`}
+            className={clsx(
+              'mb-2 inline-flex items-center rounded-md border px-2 py-0.5 text-xs transition-colors',
+              selected
+                ? 'border-primary-500 text-primary-300 bg-primary-600/10'
+                : 'border-dark-700 text-muted-400 hover:text-muted-200'
+            )}
+          >
+            {selected ? 'Selected' : 'Select'}
+          </button>
           <div className="flex items-center gap-3">
             <p className="text-sm font-medium text-muted-100 truncate">{trace.name}</p>
             <StatusBadge status={trace.status} />
@@ -354,6 +380,7 @@ export default function TracesPage() {
   const [savedFilterPresets, setSavedFilterPresets] = useState<SavedFilterPreset[]>(() => getSavedFilterPresets())
   const [quickLabels, setQuickLabels] = useState<Record<string, QuickLabelValue>>({})
   const [pendingQuickLabels, setPendingQuickLabels] = useState<Record<string, boolean>>({})
+  const [selectedTraceIds, setSelectedTraceIds] = useState<string[]>([])
   const [copiedEmptyStateCommand, setCopiedEmptyStateCommand] = useState<string | null>(null)
 
   useEffect(() => {
@@ -567,6 +594,42 @@ export default function TracesPage() {
     },
   })
 
+  const bulkQuickLabelMutation = useMutation({
+    mutationFn: async ({ traceIds, label }: { traceIds: string[]; label: QuickLabelValue }) =>
+      Promise.all(traceIds.map((traceId) => createOrUpdateLabel({ trace_id: traceId, label }))),
+    onMutate: ({ traceIds }) => {
+      setPendingQuickLabels((prev) => {
+        const next = { ...prev }
+        traceIds.forEach((traceId) => {
+          next[traceId] = true
+        })
+        return next
+      })
+    },
+    onSuccess: (results) => {
+      setQuickLabels((prev) => {
+        const next = { ...prev }
+        results.forEach((result) => {
+          if (result.label === 'good' || result.label === 'needs_improvement' || result.label === 'failure') {
+            next[result.trace_id] = result.label
+          }
+        })
+        return next
+      })
+      queryClient.invalidateQueries({ queryKey: ['curated-traces'] })
+      queryClient.invalidateQueries({ queryKey: ['curation-stats'] })
+    },
+    onSettled: (_result, _error, variables) => {
+      setPendingQuickLabels((prev) => {
+        const next = { ...prev }
+        variables.traceIds.forEach((traceId) => {
+          delete next[traceId]
+        })
+        return next
+      })
+    },
+  })
+
   const applyFilters = (nextFilters: FilterState) => {
     setSearch(nextFilters.search)
     setStatusFilter(nextFilters.statusFilter)
@@ -612,6 +675,19 @@ export default function TracesPage() {
     quickLabelMutation.mutate({ traceId, label })
   }
 
+  const handleToggleTraceSelection = (traceId: string) => {
+    setSelectedTraceIds((prev) =>
+      prev.includes(traceId) ? prev.filter((id) => id !== traceId) : [...prev, traceId]
+    )
+  }
+
+  const handleBulkQuickLabel = (label: QuickLabelValue) => {
+    if (selectedTraceIds.length === 0 || bulkQuickLabelMutation.isPending) {
+      return
+    }
+    bulkQuickLabelMutation.mutate({ traceIds: selectedTraceIds, label })
+  }
+
   const handleCopyCommand = async (command: string) => {
     try {
       if (!navigator.clipboard?.writeText) {
@@ -624,6 +700,14 @@ export default function TracesPage() {
       // Clipboard is convenience-only in this view.
     }
   }
+
+  useEffect(() => {
+    if (!data?.traces) {
+      return
+    }
+    const visibleTraceIds = new Set(data.traces.map((trace) => trace.id))
+    setSelectedTraceIds((prev) => prev.filter((traceId) => visibleTraceIds.has(traceId)))
+  }, [data?.traces])
 
   if (isLoading) {
     return (
@@ -964,6 +1048,49 @@ export default function TracesPage() {
       </div>
 
       <div className="bg-dark-900 rounded-lg border border-dark-700 divide-y divide-dark-700">
+        {selectedTraceIds.length > 0 && (
+          <div className="px-6 py-3 flex flex-wrap items-center justify-between gap-2 bg-dark-800/80 border-b border-dark-700">
+            <div className="flex items-center gap-2 text-xs text-muted-300">
+              <span>{selectedTraceIds.length} selected</span>
+              <button
+                type="button"
+                onClick={() => setSelectedTraceIds([])}
+                className="text-muted-400 hover:text-muted-200"
+              >
+                Clear selection
+              </button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {QUICK_LABEL_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => handleBulkQuickLabel(option.value)}
+                  disabled={bulkQuickLabelMutation.isPending}
+                  className="px-2.5 py-1 text-xs rounded-lg border border-dark-600 bg-dark-700 text-muted-200 hover:bg-dark-600 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  Label selected: {option.label}
+                </button>
+              ))}
+              {selectedTraceIds.length === 2 ? (
+                <Link
+                  to={`/compare?traceA=${encodeURIComponent(selectedTraceIds[0])}&traceB=${encodeURIComponent(selectedTraceIds[1])}`}
+                  className="px-2.5 py-1 text-xs rounded-lg border border-primary-500 bg-primary-600/10 text-primary-200 hover:bg-primary-600/20"
+                >
+                  Compare selected
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  disabled
+                  className="px-2.5 py-1 text-xs rounded-lg border border-dark-700 bg-dark-800 text-muted-500 cursor-not-allowed"
+                >
+                  Compare selected (pick 2)
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         {data?.traces.length === 0 ? (
           <div className="px-6 py-12 text-center">
             {hasActiveFilters ? (
@@ -1021,6 +1148,8 @@ export default function TracesPage() {
               onQuickLabel={handleQuickLabel}
               activeQuickLabel={quickLabels[trace.id] || null}
               quickLabelPending={Boolean(pendingQuickLabels[trace.id])}
+              selected={selectedTraceIds.includes(trace.id)}
+              onToggleSelect={handleToggleTraceSelection}
             />
           ))
         )}
