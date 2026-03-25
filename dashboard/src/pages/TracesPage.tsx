@@ -25,6 +25,7 @@ import WebSocketRecoveryPanel from '@/components/WebSocketRecoveryPanel'
 const PAGE_SIZE = 50
 const FILTER_STORAGE_KEY = 'traces_filters_v1'
 const FILTER_PRESETS_STORAGE_KEY = 'traces_filter_presets_v1'
+const PINNED_TRACES_STORAGE_KEY = 'traces_pinned_v1'
 
 type SortBy = 'created_at' | 'duration_ms' | 'total_tokens' | 'total_cost' | 'span_count' | 'error_count' | 'name'
 type SortOrder = 'asc' | 'desc'
@@ -36,6 +37,7 @@ type FilterState = {
   minTokens: string
   minCost: string
   hasErrors: HasErrorsFilter
+  pinnedOnly: boolean
   sortBy: SortBy
   sortOrder: SortOrder
 }
@@ -77,6 +79,10 @@ function parseNumericFilter(value: string | null): string {
   return Number.isNaN(parsed) || parsed < 0 ? '' : String(parsed)
 }
 
+function parseBooleanFilter(value: unknown): boolean {
+  return value === true || value === 'true'
+}
+
 function getSavedFilters(): FilterState | null {
   if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
     return null
@@ -92,6 +98,7 @@ function getSavedFilters(): FilterState | null {
       minTokens: parseNumericFilter(parsed.minTokens ?? ''),
       minCost: parseNumericFilter(parsed.minCost ?? ''),
       hasErrors: parseHasErrorsFilter(parsed.hasErrors ?? ''),
+      pinnedOnly: parseBooleanFilter(parsed.pinnedOnly),
       sortBy: parseSortBy(parsed.sortBy ?? '') ?? 'created_at',
       sortOrder: parsed.sortOrder === 'asc' || parsed.sortOrder === 'desc' ? parsed.sortOrder : 'desc',
     }
@@ -107,6 +114,7 @@ function getFiltersFromSearchParams(searchParams: URLSearchParams) {
     minTokens: parseNumericFilter(searchParams.get('min_tokens')),
     minCost: parseNumericFilter(searchParams.get('min_cost')),
     hasErrors: parseHasErrorsFilter(searchParams.get('has_errors')),
+    pinnedOnly: parseBooleanFilter(searchParams.get('pinned_only')),
     sortBy: parseSortBy(searchParams.get('sort_by')) ?? undefined,
     sortOrder:
       searchParams.get('sort_order') === 'asc' || searchParams.get('sort_order') === 'desc'
@@ -151,6 +159,7 @@ function getSavedFilterPresets(): SavedFilterPreset[] {
             minTokens: parseNumericFilter(filters.minTokens ?? ''),
             minCost: parseNumericFilter(filters.minCost ?? ''),
             hasErrors: parseHasErrorsFilter(filters.hasErrors ?? ''),
+            pinnedOnly: parseBooleanFilter(filters.pinnedOnly),
             sortBy: parseSortBy(filters.sortBy ?? '') ?? 'created_at',
             sortOrder: filters.sortOrder === 'asc' || filters.sortOrder === 'desc' ? filters.sortOrder : 'desc',
           },
@@ -180,6 +189,9 @@ function buildSearchParamsFromFilters(filters: FilterState) {
   if (filters.hasErrors) {
     next.set('has_errors', filters.hasErrors)
   }
+  if (filters.pinnedOnly) {
+    next.set('pinned_only', 'true')
+  }
   if (filters.sortBy !== 'created_at') {
     next.set('sort_by', filters.sortBy)
   }
@@ -187,6 +199,24 @@ function buildSearchParamsFromFilters(filters: FilterState) {
     next.set('sort_order', filters.sortOrder)
   }
   return next
+}
+
+function getPinnedTraceIds(): string[] {
+  if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
+    return []
+  }
+
+  try {
+    const savedRaw = window.localStorage.getItem(PINNED_TRACES_STORAGE_KEY)
+    if (!savedRaw) return []
+    const parsed = JSON.parse(savedRaw)
+    if (!Array.isArray(parsed)) {
+      return []
+    }
+    return parsed.filter((item): item is string => typeof item === 'string').slice(0, 500)
+  } catch {
+    return []
+  }
 }
 
 function formatCost(value: number): string {
@@ -224,6 +254,8 @@ function TraceRow({
   quickLabelPending,
   selected,
   onToggleSelect,
+  pinned,
+  onTogglePin,
   noteSummary,
   noteDraft,
   noteEditorOpen,
@@ -240,6 +272,8 @@ function TraceRow({
   quickLabelPending: boolean
   selected: boolean
   onToggleSelect: (traceId: string) => void
+  pinned: boolean
+  onTogglePin: (traceId: string) => void
   noteSummary: string
   noteDraft: string
   noteEditorOpen: boolean
@@ -282,6 +316,12 @@ function TraceRow({
     onToggleSelect(trace.id)
   }
 
+  const handleTogglePin = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    onTogglePin(trace.id)
+  }
+
   const handleOpenNoteEditor = (event: MouseEvent<HTMLButtonElement>) => {
     event.preventDefault()
     event.stopPropagation()
@@ -310,19 +350,34 @@ function TraceRow({
     >
       <div className="px-6 py-4 flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
-          <button
-            type="button"
-            onClick={handleToggleSelect}
-            aria-label={selected ? `Deselect trace ${trace.id}` : `Select trace ${trace.id}`}
-            className={clsx(
-              'mb-2 inline-flex items-center rounded-md border px-2 py-0.5 text-xs transition-colors',
-              selected
-                ? 'border-primary-500 text-primary-300 bg-primary-600/10'
-                : 'border-dark-700 text-muted-400 hover:text-muted-200'
-            )}
-          >
-            {selected ? 'Selected' : 'Select'}
-          </button>
+          <div className="mb-2 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleToggleSelect}
+              aria-label={selected ? `Deselect trace ${trace.id}` : `Select trace ${trace.id}`}
+              className={clsx(
+                'inline-flex items-center rounded-md border px-2 py-0.5 text-xs transition-colors',
+                selected
+                  ? 'border-primary-500 text-primary-300 bg-primary-600/10'
+                  : 'border-dark-700 text-muted-400 hover:text-muted-200'
+              )}
+            >
+              {selected ? 'Selected' : 'Select'}
+            </button>
+            <button
+              type="button"
+              onClick={handleTogglePin}
+              aria-label={pinned ? `Unpin trace ${trace.id}` : `Pin trace ${trace.id}`}
+              className={clsx(
+                'inline-flex items-center rounded-md border px-2 py-0.5 text-xs transition-colors',
+                pinned
+                  ? 'border-amber-500 text-amber-300 bg-amber-500/10'
+                  : 'border-dark-700 text-muted-400 hover:text-muted-200'
+              )}
+            >
+              {pinned ? 'Pinned' : 'Pin'}
+            </button>
+          </div>
           <div className="flex items-center gap-3">
             <p className="text-sm font-medium text-muted-100 truncate">{trace.name}</p>
             <StatusBadge status={trace.status} />
@@ -455,6 +510,7 @@ export default function TracesPage() {
   const [minTokens, setMinTokens] = useState('')
   const [minCost, setMinCost] = useState('')
   const [hasErrors, setHasErrors] = useState<HasErrorsFilter>('')
+  const [pinnedOnly, setPinnedOnly] = useState(false)
   const [sortBy, setSortBy] = useState<SortBy>('created_at')
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
   const [summaryWindowDays, setSummaryWindowDays] = useState<7 | 30>(7)
@@ -463,6 +519,7 @@ export default function TracesPage() {
   const [quickLabels, setQuickLabels] = useState<Record<string, QuickLabelValue>>({})
   const [pendingQuickLabels, setPendingQuickLabels] = useState<Record<string, boolean>>({})
   const [selectedTraceIds, setSelectedTraceIds] = useState<string[]>([])
+  const [pinnedTraceIds, setPinnedTraceIds] = useState<string[]>(() => getPinnedTraceIds())
   const [copiedEmptyStateCommand, setCopiedEmptyStateCommand] = useState<string | null>(null)
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({})
   const [openNoteEditors, setOpenNoteEditors] = useState<Record<string, boolean>>({})
@@ -479,6 +536,7 @@ export default function TracesPage() {
       setMinTokens(searchParams.has('min_tokens') ? parsed.minTokens : saved?.minTokens || '')
       setMinCost(searchParams.has('min_cost') ? parsed.minCost : saved?.minCost || '')
       setHasErrors(searchParams.has('has_errors') ? parsed.hasErrors : saved?.hasErrors || '')
+      setPinnedOnly(searchParams.has('pinned_only') ? parsed.pinnedOnly : saved?.pinnedOnly || false)
       setSortBy(parsed.sortBy || saved?.sortBy || 'created_at')
       setSortOrder(parsed.sortOrder || saved?.sortOrder || 'desc')
       filtersInitializedRef.current = true
@@ -490,6 +548,7 @@ export default function TracesPage() {
     setMinTokens(parsed.minTokens)
     setMinCost(parsed.minCost)
     setHasErrors(parsed.hasErrors)
+    setPinnedOnly(parsed.pinnedOnly)
     setSortBy(parsed.sortBy || 'created_at')
     setSortOrder(parsed.sortOrder || 'desc')
   }, [searchParams])
@@ -508,6 +567,7 @@ export default function TracesPage() {
           minTokens,
           minCost,
           hasErrors,
+          pinnedOnly,
           sortBy,
           sortOrder,
         })
@@ -515,7 +575,7 @@ export default function TracesPage() {
     } catch {
       // Ignore storage failures (for example in restricted environments).
     }
-  }, [hasErrors, minCost, minTokens, search, sortBy, sortOrder, statusFilter])
+  }, [hasErrors, minCost, minTokens, pinnedOnly, search, sortBy, sortOrder, statusFilter])
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
@@ -536,6 +596,7 @@ export default function TracesPage() {
       minTokens,
       minCost,
       hasErrors,
+      pinnedOnly,
       sortBy,
       sortOrder,
     })
@@ -544,11 +605,23 @@ export default function TracesPage() {
     if (next.toString() !== current.toString()) {
       setSearchParams(next, { replace: true })
     }
-  }, [hasErrors, minCost, minTokens, search, searchParams, setSearchParams, sortBy, sortOrder, statusFilter])
+  }, [hasErrors, minCost, minTokens, pinnedOnly, search, searchParams, setSearchParams, sortBy, sortOrder, statusFilter])
 
   useEffect(() => {
     setPage(1)
-  }, [search, statusFilter, minTokens, minCost, hasErrors, sortBy, sortOrder])
+  }, [search, statusFilter, minTokens, minCost, hasErrors, pinnedOnly, sortBy, sortOrder])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
+      return
+    }
+
+    try {
+      window.localStorage.setItem(PINNED_TRACES_STORAGE_KEY, JSON.stringify(pinnedTraceIds))
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [pinnedTraceIds])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -587,12 +660,14 @@ export default function TracesPage() {
     },
   })
 
+  const traceQueryLimit = pinnedOnly ? 500 : PAGE_SIZE
+
   const { data, isLoading, error } = useQuery({
-    queryKey: ['traces', page, statusFilter, queryOptions],
+    queryKey: ['traces', page, statusFilter, queryOptions, traceQueryLimit],
     queryFn: () =>
       getTraces(
-        PAGE_SIZE,
-        (page - 1) * PAGE_SIZE,
+        traceQueryLimit,
+        pinnedOnly ? 0 : (page - 1) * PAGE_SIZE,
         statusFilter || undefined,
         queryOptions
       ),
@@ -605,11 +680,23 @@ export default function TracesPage() {
     refetchInterval: connected ? false : 5000,
   })
 
-  const totalPages = data?.total ? Math.ceil(data.total / PAGE_SIZE) : 1
+  const pinnedTraceIdSet = useMemo(() => new Set(pinnedTraceIds), [pinnedTraceIds])
+  const visibleTraces = useMemo(() => {
+    const traces = data?.traces || []
+    return pinnedOnly ? traces.filter((trace) => pinnedTraceIdSet.has(trace.id)) : traces
+  }, [data?.traces, pinnedOnly, pinnedTraceIdSet])
+
+  const visibleTotal = pinnedOnly ? visibleTraces.length : (data?.total ?? 0)
+  const totalPages = pinnedOnly ? 1 : data?.total ? Math.ceil(data.total / PAGE_SIZE) : 1
   const hasNextPage = page < totalPages
   const hasPrevPage = page > 1
   const hasActiveFilters =
-    Boolean(search) || Boolean(statusFilter) || Boolean(hasErrors) || Boolean(minTokens) || Boolean(minCost)
+    Boolean(search) ||
+    Boolean(statusFilter) ||
+    Boolean(hasErrors) ||
+    Boolean(minTokens) ||
+    Boolean(minCost) ||
+    pinnedOnly
   const currentFilters: FilterState = useMemo(
     () => ({
       search,
@@ -617,10 +704,11 @@ export default function TracesPage() {
       minTokens,
       minCost,
       hasErrors,
+      pinnedOnly,
       sortBy,
       sortOrder,
     }),
-    [hasErrors, minCost, minTokens, search, sortBy, sortOrder, statusFilter]
+    [hasErrors, minCost, minTokens, pinnedOnly, search, sortBy, sortOrder, statusFilter]
   )
   const activeFilterChips = [
     search ? { key: 'search', label: `Search: ${search}`, clear: () => setSearch('') } : null,
@@ -636,6 +724,13 @@ export default function TracesPage() {
           key: 'errors',
           label: hasErrors === 'true' ? 'With errors only' : 'Without errors only',
           clear: () => setHasErrors(''),
+        }
+      : null,
+    pinnedOnly
+      ? {
+          key: 'pinnedOnly',
+          label: 'Pinned only',
+          clear: () => setPinnedOnly(false),
         }
       : null,
     minTokens
@@ -758,6 +853,7 @@ export default function TracesPage() {
     setMinTokens(nextFilters.minTokens)
     setMinCost(nextFilters.minCost)
     setHasErrors(nextFilters.hasErrors)
+    setPinnedOnly(nextFilters.pinnedOnly)
     setSortBy(nextFilters.sortBy)
     setSortOrder(nextFilters.sortOrder)
   }
@@ -800,6 +896,12 @@ export default function TracesPage() {
   const handleToggleTraceSelection = (traceId: string) => {
     setSelectedTraceIds((prev) =>
       prev.includes(traceId) ? prev.filter((id) => id !== traceId) : [...prev, traceId]
+    )
+  }
+
+  const handleTogglePinned = (traceId: string) => {
+    setPinnedTraceIds((prev) =>
+      prev.includes(traceId) ? prev.filter((id) => id !== traceId) : [traceId, ...prev].slice(0, 500)
     )
   }
 
@@ -859,12 +961,9 @@ export default function TracesPage() {
   }
 
   useEffect(() => {
-    if (!data?.traces) {
-      return
-    }
-    const visibleTraceIds = new Set(data.traces.map((trace) => trace.id))
+    const visibleTraceIds = new Set(visibleTraces.map((trace) => trace.id))
     setSelectedTraceIds((prev) => prev.filter((traceId) => visibleTraceIds.has(traceId)))
-  }, [data?.traces])
+  }, [visibleTraces])
 
   if (isLoading) {
     return (
@@ -888,7 +987,7 @@ export default function TracesPage() {
         <div>
           <h1 className="text-2xl font-semibold text-muted-100">Traces</h1>
           <p className="mt-1 text-sm text-muted-400">
-            {data?.total ?? 0} traces recorded
+            {visibleTotal} traces {pinnedOnly ? 'in pinned view' : 'recorded'}
           </p>
         </div>
         <div className={clsx(
@@ -1065,6 +1164,7 @@ export default function TracesPage() {
               setMinTokens('')
               setMinCost('')
               setHasErrors('')
+              setPinnedOnly(false)
               setSortBy('created_at')
               setSortOrder('desc')
             }}
@@ -1079,6 +1179,7 @@ export default function TracesPage() {
               setMinTokens('')
               setMinCost('')
               setHasErrors('true')
+              setPinnedOnly(false)
               setSortBy('error_count')
               setSortOrder('desc')
             }}
@@ -1093,6 +1194,7 @@ export default function TracesPage() {
               setMinTokens('')
               setMinCost('')
               setHasErrors('')
+              setPinnedOnly(false)
               setSortBy('total_cost')
               setSortOrder('desc')
             }}
@@ -1101,12 +1203,24 @@ export default function TracesPage() {
             Preset: High cost
           </button>
           <button
+            onClick={() => setPinnedOnly((prev) => !prev)}
+            className={clsx(
+              'px-3 py-2 text-xs border rounded-lg',
+              pinnedOnly
+                ? 'bg-amber-600/10 border-amber-500 text-amber-300'
+                : 'bg-dark-800 border-dark-700 text-muted-200 hover:bg-dark-700'
+            )}
+          >
+            Pinned only
+          </button>
+          <button
             onClick={() => {
               setStatusFilter('')
               setSearch('')
               setMinTokens('')
               setMinCost('')
               setHasErrors('')
+              setPinnedOnly(false)
               setSortBy('created_at')
               setSortOrder('desc')
             }}
@@ -1195,6 +1309,7 @@ export default function TracesPage() {
                 setMinTokens('')
                 setMinCost('')
                 setHasErrors('')
+                setPinnedOnly(false)
               }}
               className="px-3 py-1.5 text-xs bg-dark-800 border border-primary-500 text-primary-300 rounded-lg hover:bg-dark-700"
             >
@@ -1248,7 +1363,7 @@ export default function TracesPage() {
             </div>
           </div>
         )}
-        {data?.traces.length === 0 ? (
+        {visibleTraces.length === 0 ? (
           <div className="px-6 py-12 text-center">
             {hasActiveFilters ? (
               <div className="space-y-3">
@@ -1260,6 +1375,7 @@ export default function TracesPage() {
                     setMinTokens('')
                     setMinCost('')
                     setHasErrors('')
+                    setPinnedOnly(false)
                   }}
                   className="px-3 py-1.5 text-xs bg-dark-800 border border-dark-700 rounded-lg text-muted-200 hover:bg-dark-700"
                 >
@@ -1298,7 +1414,7 @@ export default function TracesPage() {
             )}
           </div>
         ) : (
-          data?.traces.map((trace) => (
+          visibleTraces.map((trace) => (
             <TraceRow
               key={trace.id}
               trace={trace}
@@ -1307,6 +1423,8 @@ export default function TracesPage() {
               quickLabelPending={Boolean(pendingQuickLabels[trace.id])}
               selected={selectedTraceIds.includes(trace.id)}
               onToggleSelect={handleToggleTraceSelection}
+              pinned={pinnedTraceIdSet.has(trace.id)}
+              onTogglePin={handleTogglePinned}
               noteSummary={noteDrafts[trace.id] ?? curatedNotesByTrace[trace.id] ?? ''}
               noteDraft={noteDrafts[trace.id] ?? ''}
               noteEditorOpen={Boolean(openNoteEditors[trace.id])}
@@ -1324,7 +1442,7 @@ export default function TracesPage() {
       {totalPages > 1 && (
         <div className="mt-4 flex items-center justify-between">
           <p className="text-sm text-muted-400">
-            Showing {((page - 1) * PAGE_SIZE) + 1} - {Math.min(page * PAGE_SIZE, data?.total || 0)} of {data?.total || 0}
+            Showing {((page - 1) * PAGE_SIZE) + 1} - {Math.min(page * PAGE_SIZE, visibleTotal)} of {visibleTotal}
           </p>
           <div className="flex items-center gap-2">
             <button

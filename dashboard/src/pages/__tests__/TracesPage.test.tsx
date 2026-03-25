@@ -313,6 +313,74 @@ describe('TracesPage websocket security UX', () => {
     })
   })
 
+  it('supports pinning traces and pinned-only view', async () => {
+    globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = resolveUrl(input)
+      if (url.includes('/traces/summary')) {
+        return createJsonResponse({
+          window_days: 7,
+          trace_count: 2,
+          success_rate: 100,
+          running_count: 0,
+          error_count: 0,
+          p50_duration_ms: 42,
+          p95_duration_ms: 120,
+          avg_tokens: 22,
+          avg_cost: 0.0009,
+        })
+      }
+
+      return createJsonResponse({
+        traces: [
+          {
+            id: 'trace-1',
+            name: 'Pinned candidate',
+            status: 'success',
+            start_time: new Date().toISOString(),
+            end_time: new Date().toISOString(),
+            duration_ms: 45,
+            metadata: {},
+            total_tokens: 20,
+            total_cost: 0.001,
+            span_count: 5,
+            error_count: 0,
+            created_at: new Date().toISOString(),
+          },
+          {
+            id: 'trace-2',
+            name: 'Unpinned trace',
+            status: 'success',
+            start_time: new Date().toISOString(),
+            end_time: new Date().toISOString(),
+            duration_ms: 55,
+            metadata: {},
+            total_tokens: 30,
+            total_cost: 0.002,
+            span_count: 8,
+            error_count: 0,
+            created_at: new Date().toISOString(),
+          },
+        ],
+        total: 2,
+        limit: 50,
+        offset: 0,
+      })
+    }) as unknown as typeof fetch
+
+    _renderWithProviders(<TracesPage />, ['/traces'])
+
+    await waitFor(() => expect(screen.getByText('Pinned candidate')).toBeInTheDocument())
+    expect(screen.getByText('Unpinned trace')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pin trace trace-1' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Pinned only' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Pinned candidate')).toBeInTheDocument()
+      expect(screen.queryByText('Unpinned trace')).not.toBeInTheDocument()
+    })
+  })
+
   it('saves inline notes from trace rows', async () => {
     _renderWithProviders(<TracesPage />, ['/traces'])
 
