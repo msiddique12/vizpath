@@ -17,7 +17,7 @@ import {
   X,
 } from 'lucide-react'
 import clsx from 'clsx'
-import { createOrUpdateLabel, getTraceSummary, getTraces } from '@/lib/api'
+import { createOrUpdateLabel, getCuratedTraces, getLabel, getTraceSummary, getTraces } from '@/lib/api'
 import { Trace, SpanStatus } from '@/lib/types'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import WebSocketRecoveryPanel from '@/components/WebSocketRecoveryPanel'
@@ -224,6 +224,15 @@ function TraceRow({
   quickLabelPending,
   selected,
   onToggleSelect,
+  noteSummary,
+  noteDraft,
+  noteEditorOpen,
+  noteLoading,
+  noteSaving,
+  onOpenNoteEditor,
+  onChangeNoteDraft,
+  onCloseNoteEditor,
+  onSaveNote,
 }: {
   trace: Trace
   onQuickLabel: (traceId: string, label: QuickLabelValue) => void
@@ -231,6 +240,15 @@ function TraceRow({
   quickLabelPending: boolean
   selected: boolean
   onToggleSelect: (traceId: string) => void
+  noteSummary: string
+  noteDraft: string
+  noteEditorOpen: boolean
+  noteLoading: boolean
+  noteSaving: boolean
+  onOpenNoteEditor: (traceId: string) => void
+  onChangeNoteDraft: (traceId: string, value: string) => void
+  onCloseNoteEditor: (traceId: string) => void
+  onSaveNote: (traceId: string) => void
 }) {
   const [copiedTraceId, setCopiedTraceId] = useState(false)
   const [copiedTraceLink, setCopiedTraceLink] = useState(false)
@@ -262,6 +280,24 @@ function TraceRow({
     event.preventDefault()
     event.stopPropagation()
     onToggleSelect(trace.id)
+  }
+
+  const handleOpenNoteEditor = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    onOpenNoteEditor(trace.id)
+  }
+
+  const handleSaveNote = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    onSaveNote(trace.id)
+  }
+
+  const handleCloseNoteEditor = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    onCloseNoteEditor(trace.id)
   }
 
   return (
@@ -318,7 +354,53 @@ function TraceRow({
                 </button>
               )
             })}
+            <button
+              type="button"
+              onClick={handleOpenNoteEditor}
+              className="px-2 py-0.5 text-xs rounded-full border bg-dark-900 border-dark-700 text-muted-300 hover:text-muted-100 hover:border-muted-500"
+              aria-label={`Edit note for ${trace.id}`}
+            >
+              {noteSummary ? 'Edit note' : 'Add note'}
+            </button>
           </div>
+          {noteSummary && !noteEditorOpen && (
+            <p className="mt-2 text-xs text-muted-400 truncate" title={noteSummary}>
+              Note: {noteSummary}
+            </p>
+          )}
+          {noteEditorOpen && (
+            <div
+              className="mt-2 flex items-center gap-2"
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+              }}
+            >
+              <input
+                value={noteDraft}
+                onChange={(event) => onChangeNoteDraft(trace.id, event.target.value)}
+                placeholder={noteLoading ? 'Loading note...' : 'Add handoff note'}
+                disabled={noteLoading || noteSaving}
+                className="flex-1 min-w-0 bg-dark-900 border border-dark-700 rounded px-2 py-1 text-xs text-muted-100 placeholder:text-muted-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+              <button
+                type="button"
+                onClick={handleSaveNote}
+                disabled={noteLoading || noteSaving}
+                className="px-2 py-1 text-xs rounded border border-primary-500 text-primary-300 bg-primary-600/10 hover:bg-primary-600/20 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {noteSaving ? 'Saving...' : 'Save'}
+              </button>
+              <button
+                type="button"
+                onClick={handleCloseNoteEditor}
+                disabled={noteSaving}
+                className="px-2 py-1 text-xs rounded border border-dark-700 text-muted-300 hover:text-muted-100 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
         </div>
         <div className="ml-6 flex items-start gap-6">
           <div className="text-right text-sm text-muted-400">
@@ -382,6 +464,10 @@ export default function TracesPage() {
   const [pendingQuickLabels, setPendingQuickLabels] = useState<Record<string, boolean>>({})
   const [selectedTraceIds, setSelectedTraceIds] = useState<string[]>([])
   const [copiedEmptyStateCommand, setCopiedEmptyStateCommand] = useState<string | null>(null)
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({})
+  const [openNoteEditors, setOpenNoteEditors] = useState<Record<string, boolean>>({})
+  const [loadingNotes, setLoadingNotes] = useState<Record<string, boolean>>({})
+  const [pendingNoteSaves, setPendingNoteSaves] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     const parsed = getFiltersFromSearchParams(searchParams)
@@ -570,6 +656,21 @@ export default function TracesPage() {
 
   const authKeyConfigured = Boolean(import.meta.env.VITE_VIZPATH_API_KEY?.trim())
 
+  const curatedTracesQuery = useQuery({
+    queryKey: ['curated-traces', 'notes-cache'],
+    queryFn: () => getCuratedTraces({ limit: 200, offset: 0 }),
+    refetchInterval: connected ? false : 10000,
+  })
+
+  const curatedNotesByTrace = useMemo(() => {
+    const map: Record<string, string> = {}
+    const curatedRows = Array.isArray(curatedTracesQuery.data) ? curatedTracesQuery.data : []
+    curatedRows.forEach((item) => {
+      map[item.trace_id] = item.notes ?? ''
+    })
+    return map
+  }, [curatedTracesQuery.data])
+
   const quickLabelMutation = useMutation({
     mutationFn: ({ traceId, label }: { traceId: string; label: QuickLabelValue }) =>
       createOrUpdateLabel({ trace_id: traceId, label }),
@@ -625,6 +726,27 @@ export default function TracesPage() {
         variables.traceIds.forEach((traceId) => {
           delete next[traceId]
         })
+        return next
+      })
+    },
+  })
+
+  const saveNoteMutation = useMutation({
+    mutationFn: async ({ traceId, notes }: { traceId: string; notes: string }) =>
+      createOrUpdateLabel({ trace_id: traceId, notes }),
+    onMutate: ({ traceId }) => {
+      setPendingNoteSaves((prev) => ({ ...prev, [traceId]: true }))
+    },
+    onSuccess: (result) => {
+      setNoteDrafts((prev) => ({ ...prev, [result.trace_id]: result.notes || '' }))
+      setOpenNoteEditors((prev) => ({ ...prev, [result.trace_id]: false }))
+      queryClient.invalidateQueries({ queryKey: ['curation-label', result.trace_id] })
+      queryClient.invalidateQueries({ queryKey: ['curated-traces'] })
+    },
+    onSettled: (_result, _error, variables) => {
+      setPendingNoteSaves((prev) => {
+        const next = { ...prev }
+        delete next[variables.traceId]
         return next
       })
     },
@@ -699,6 +821,41 @@ export default function TracesPage() {
     } catch {
       // Clipboard is convenience-only in this view.
     }
+  }
+
+  const handleOpenNoteEditor = async (traceId: string) => {
+    setOpenNoteEditors((prev) => ({ ...prev, [traceId]: true }))
+    if (noteDrafts[traceId] !== undefined) {
+      return
+    }
+    if (curatedNotesByTrace[traceId] !== undefined) {
+      setNoteDrafts((prev) => ({ ...prev, [traceId]: curatedNotesByTrace[traceId] }))
+      return
+    }
+
+    setLoadingNotes((prev) => ({ ...prev, [traceId]: true }))
+    const label = await getLabel(traceId)
+    setNoteDrafts((prev) => ({ ...prev, [traceId]: label?.notes || '' }))
+    setLoadingNotes((prev) => {
+      const next = { ...prev }
+      delete next[traceId]
+      return next
+    })
+  }
+
+  const handleCloseNoteEditor = (traceId: string) => {
+    setOpenNoteEditors((prev) => ({ ...prev, [traceId]: false }))
+  }
+
+  const handleChangeNoteDraft = (traceId: string, value: string) => {
+    setNoteDrafts((prev) => ({ ...prev, [traceId]: value }))
+  }
+
+  const handleSaveNote = (traceId: string) => {
+    if (pendingNoteSaves[traceId]) {
+      return
+    }
+    saveNoteMutation.mutate({ traceId, notes: noteDrafts[traceId] || '' })
   }
 
   useEffect(() => {
@@ -1150,6 +1307,15 @@ export default function TracesPage() {
               quickLabelPending={Boolean(pendingQuickLabels[trace.id])}
               selected={selectedTraceIds.includes(trace.id)}
               onToggleSelect={handleToggleTraceSelection}
+              noteSummary={noteDrafts[trace.id] ?? curatedNotesByTrace[trace.id] ?? ''}
+              noteDraft={noteDrafts[trace.id] ?? ''}
+              noteEditorOpen={Boolean(openNoteEditors[trace.id])}
+              noteLoading={Boolean(loadingNotes[trace.id])}
+              noteSaving={Boolean(pendingNoteSaves[trace.id])}
+              onOpenNoteEditor={handleOpenNoteEditor}
+              onChangeNoteDraft={handleChangeNoteDraft}
+              onCloseNoteEditor={handleCloseNoteEditor}
+              onSaveNote={handleSaveNote}
             />
           ))
         )}

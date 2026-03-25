@@ -35,6 +35,17 @@ describe('TracesPage websocket security UX', () => {
       const url = resolveUrl(input)
       const requestMethod = init?.method ?? (input instanceof Request ? input.method : 'GET')
 
+      if (url.includes('/curation/traces')) {
+        return createJsonResponse([])
+      }
+
+      if (url.includes('/curation/labels/') && requestMethod === 'GET') {
+        return new Response(JSON.stringify({ detail: 'Label not found' }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+
       if (url.includes('/curation/labels') && requestMethod === 'POST') {
         const body = typeof init?.body === 'string' ? JSON.parse(init.body) : {}
         return createJsonResponse({
@@ -299,6 +310,32 @@ describe('TracesPage websocket security UX', () => {
         return url.includes('/curation/labels') && (init as RequestInit | undefined)?.method === 'POST'
       })
       expect(labelCalls).toHaveLength(2)
+    })
+  })
+
+  it('saves inline notes from trace rows', async () => {
+    _renderWithProviders(<TracesPage />, ['/traces'])
+
+    await waitFor(() => expect(screen.getByText('Demo trace')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit note for trace-1' }))
+    const noteInput = await screen.findByPlaceholderText('Add handoff note')
+    fireEvent.change(noteInput, { target: { value: 'Investigate retry timeout path' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => {
+      const calls = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls
+      const noteCall = calls.find(([input, init]) => {
+        const url = resolveUrl(input as RequestInfo | URL)
+        if (!url.includes('/curation/labels') || (init as RequestInit | undefined)?.method !== 'POST') {
+          return false
+        }
+        const body = typeof (init as RequestInit | undefined)?.body === 'string'
+          ? JSON.parse((init as RequestInit).body as string)
+          : {}
+        return body.notes === 'Investigate retry timeout path'
+      })
+      expect(noteCall).toBeDefined()
     })
   })
 
