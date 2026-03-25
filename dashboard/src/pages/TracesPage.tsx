@@ -19,6 +19,7 @@ import {
 import clsx from 'clsx'
 import { createOrUpdateLabel, getCuratedTraces, getLabel, getTraceSummary, getTraces } from '@/lib/api'
 import { Trace, SpanStatus } from '@/lib/types'
+import { getTraceRiskFlags } from '@/lib/traceRisk'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import WebSocketRecoveryPanel from '@/components/WebSocketRecoveryPanel'
 
@@ -287,6 +288,7 @@ function TraceRow({
   const [copiedTraceId, setCopiedTraceId] = useState(false)
   const [copiedTraceLink, setCopiedTraceLink] = useState(false)
   const traceUrl = `${window.location.origin}${window.location.pathname}/${trace.id}`
+  const riskFlags = getTraceRiskFlags(trace)
 
   const handleCopy = async (
     event: MouseEvent<HTMLButtonElement>,
@@ -381,6 +383,19 @@ function TraceRow({
           <div className="flex items-center gap-3">
             <p className="text-sm font-medium text-muted-100 truncate">{trace.name}</p>
             <StatusBadge status={trace.status} />
+            {riskFlags.map((flag) => (
+              <span
+                key={flag.key}
+                className={clsx(
+                  'inline-flex items-center rounded-full px-2 py-0.5 text-xs border',
+                  flag.level === 'high'
+                    ? 'bg-red-900/30 border-red-700 text-red-300'
+                    : 'bg-amber-900/30 border-amber-700 text-amber-300'
+                )}
+              >
+                {flag.label}
+              </span>
+            ))}
           </div>
           <p className="mt-1 text-sm text-muted-400">
             {trace.span_count} spans

@@ -381,6 +381,54 @@ describe('TracesPage websocket security UX', () => {
     })
   })
 
+  it('shows risk flags for traces with loop and resource pressure signals', async () => {
+    globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = resolveUrl(input)
+      if (url.includes('/traces/summary')) {
+        return createJsonResponse({
+          window_days: 7,
+          trace_count: 1,
+          success_rate: 0,
+          running_count: 0,
+          error_count: 1,
+          p50_duration_ms: 60000,
+          p95_duration_ms: 60000,
+          avg_tokens: 18000,
+          avg_cost: 0.5,
+        })
+      }
+
+      return createJsonResponse({
+        traces: [
+          {
+            id: 'trace-risky',
+            name: 'Retry loop agent',
+            status: 'error',
+            start_time: new Date().toISOString(),
+            end_time: new Date().toISOString(),
+            duration_ms: 60000,
+            metadata: { reason: 'retrying in loop due to tool timeout' },
+            total_tokens: 18000,
+            total_cost: 0.4,
+            span_count: 48,
+            error_count: 3,
+            created_at: new Date().toISOString(),
+          },
+        ],
+        total: 1,
+        limit: 50,
+        offset: 0,
+      })
+    }) as unknown as typeof fetch
+
+    _renderWithProviders(<TracesPage />, ['/traces'])
+
+    await waitFor(() => expect(screen.getByText('Retry loop agent')).toBeInTheDocument())
+    expect(screen.getByText('Loop risk')).toBeInTheDocument()
+    expect(screen.getByText('Long runtime')).toBeInTheDocument()
+    expect(screen.getByText('Token pressure')).toBeInTheDocument()
+  })
+
   it('saves inline notes from trace rows', async () => {
     _renderWithProviders(<TracesPage />, ['/traces'])
 
