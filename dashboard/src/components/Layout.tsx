@@ -1,10 +1,11 @@
 import { Outlet, Link, useLocation } from 'react-router-dom'
-import { Activity, LayoutGrid, GitCompare, DollarSign, Tag, Rocket, FlaskConical, Brain } from 'lucide-react'
+import { Activity, LayoutGrid, GitCompare, DollarSign, Tag, Rocket, FlaskConical, Brain, AlertTriangle } from 'lucide-react'
 import clsx from 'clsx'
 
 const navigation = [
   { name: 'Demo', href: '/demo', icon: Rocket },
   { name: 'Traces', href: '/traces', icon: Activity },
+  { name: 'Failures', href: '/inbox', icon: AlertTriangle },
   { name: 'Experiments', href: '/experiments', icon: FlaskConical },
   { name: 'Compare', href: '/compare', icon: GitCompare },
   { name: 'Intelligence', href: '/intelligence', icon: Brain },
