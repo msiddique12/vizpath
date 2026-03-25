@@ -25,7 +25,18 @@ describe('TracesPage websocket security UX', () => {
   let originalWebSocket: typeof WebSocket
   let originalFetch: typeof fetch
 
+  const resetTracePageStorage = () => {
+    const storage = window.localStorage as Storage & {
+      removeItem?: (key: string) => void
+    }
+    storage.removeItem?.('traces_filters_v1')
+    storage.removeItem?.('traces_filter_presets_v1')
+    storage.removeItem?.('traces_pinned_v1')
+  }
+
   beforeEach(() => {
+    resetTracePageStorage()
+
     originalWebSocket = globalThis.WebSocket
     globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket
     MockWebSocket.reset()
@@ -98,6 +109,7 @@ describe('TracesPage websocket security UX', () => {
   })
 
   afterEach(() => {
+    resetTracePageStorage()
     globalThis.WebSocket = originalWebSocket
     globalThis.fetch = originalFetch
   })
