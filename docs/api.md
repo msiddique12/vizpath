@@ -29,6 +29,9 @@ Project and key lifecycle endpoints:
 - `POST /api/v1/projects/me/api-key/rotate` — rotate key (grace period support included)
 - `POST /api/v1/projects/me/api-key/revoke` — revoke current key
 
+Unauthenticated fallback is disabled by default. For local-only demo workflows,
+set `ALLOW_UNAUTHENTICATED_DEV_FALLBACK=true` explicitly.
+
 ---
 
 ## Health

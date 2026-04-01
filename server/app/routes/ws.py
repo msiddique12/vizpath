@@ -79,9 +79,12 @@ async def traces_websocket(
     # Verify API key before accepting connection
     project = _verify_ws_api_key(api_key, db=db)
 
-    # In production mode, require valid API key
-    # Enforce API key in production or strict mode. Development defaults to optional auth.
-    require_auth = settings.is_production or settings.security_strict_mode
+    # Require API key unless explicit unauthenticated dev fallback is enabled.
+    require_auth = (
+        settings.is_production
+        or settings.security_strict_mode
+        or not settings.allow_unauthenticated_dev_fallback
+    )
     if require_auth and project is None:
         await websocket.close(code=4001, reason="Unauthorized: Invalid or missing API key")
         return

@@ -57,3 +57,8 @@ def test_max_request_body_bytes_must_be_non_negative():
     with pytest.raises(ValidationError) as exc:
         Settings(**BASE_SETTINGS, MAX_REQUEST_BODY_BYTES=-1)
     assert "max_request_body_bytes must be 0 or greater" in str(exc.value)
+
+
+def test_allow_unauthenticated_dev_fallback_defaults_to_false():
+    settings = Settings(**BASE_SETTINGS)
+    assert settings.allow_unauthenticated_dev_fallback is False

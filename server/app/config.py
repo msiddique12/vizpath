@@ -41,6 +41,10 @@ class Settings(BaseSettings):
         alias="CORS_ALLOWED_ORIGINS",
     )
     security_strict_mode: bool = Field(default=False, alias="SECURITY_STRICT_MODE")
+    allow_unauthenticated_dev_fallback: bool = Field(
+        default=False,
+        alias="ALLOW_UNAUTHENTICATED_DEV_FALLBACK",
+    )
 
     rate_limit_rpm: int = Field(default=120, alias="RATE_LIMIT_RPM")
     rate_limit_enabled: bool = Field(default=True, alias="RATE_LIMIT_ENABLED")

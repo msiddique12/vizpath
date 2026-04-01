@@ -77,20 +77,14 @@ def get_project_by_api_key(db: Session, api_key: str) -> Project | None:
 def _get_or_create_default_project(db: Session) -> Project:
     """Get or create the default project for unauthenticated dev requests.
 
-    In production mode, blocks unauthenticated requests once real projects exist.
-    In dev mode, always creates/returns a default project.
+    Disabled by default. Enable only for local/demo workflows by setting
+    ALLOW_UNAUTHENTICATED_DEV_FALLBACK=true.
     """
-    is_production = settings.is_production
-
-    if is_production:
-        real_project_count = (
-            db.query(Project).filter(Project.api_key_hash != "default").count()
+    if not settings.allow_unauthenticated_dev_fallback:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing API key. Include X-API-Key header.",
         )
-        if real_project_count > 0:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Missing API key. Include X-API-Key header.",
-            )
 
     default_project = db.query(Project).filter(Project.api_key_hash == "default").first()
     if default_project:
@@ -120,8 +114,8 @@ async def verify_api_key(
     Verify the API key and return the associated project.
 
     - If a key is provided, it must be valid (fail-fast).
-    - If no key is provided, fall back to default project (dev mode)
-      or reject in production when real projects exist.
+    - If no key is provided, fall back to default project only when
+      ALLOW_UNAUTHENTICATED_DEV_FALLBACK=true.
     """
     if api_key:
         project = get_project_by_api_key(db, api_key)

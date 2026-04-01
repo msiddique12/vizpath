@@ -9,8 +9,8 @@ from app.models import Project
 class TestTraceIngestionAuth:
     """Tests for auth behavior on the ingestion endpoint."""
 
-    def test_ingest_no_key_creates_default_project(self, client, test_db):
-        """Without API key in dev mode, a default project is created."""
+    def test_ingest_no_key_creates_default_project_when_fallback_enabled(self, client, test_db):
+        """With dev fallback enabled, unauthenticated ingestion uses default project."""
         payload = [
             {
                 "span_id": "span-auth-1",
@@ -24,6 +24,24 @@ class TestTraceIngestionAuth:
         assert response.status_code == 201
         project = test_db.query(Project).filter(Project.api_key_hash == "default").first()
         assert project is not None
+
+    def test_ingest_no_key_rejected_when_fallback_disabled(self, client, monkeypatch):
+        """Missing API key is rejected by default when fallback mode is disabled."""
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "allow_unauthenticated_dev_fallback", False)
+        payload = [
+            {
+                "span_id": "span-auth-missing-key",
+                "trace_id": "trace-auth-missing-key",
+                "name": "test",
+                "start_time": datetime.now(timezone.utc).isoformat(),
+            }
+        ]
+        response = client.post("/api/v1/traces/spans/batch", json=payload)
+
+        assert response.status_code == 401
+        assert "Missing API key" in response.json()["detail"]
 
     def test_ingest_valid_key(self, client, test_db):
         """With a valid API key, spans are linked to that project."""

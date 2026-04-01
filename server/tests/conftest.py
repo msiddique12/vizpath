@@ -49,6 +49,9 @@ def client(test_db):
 def _disable_rate_limiting_for_test_suite(monkeypatch):
     """Keep most tests deterministic by disabling rate limits by default."""
     monkeypatch.setattr(settings, "rate_limit_enabled", False)
+    # Most existing tests exercise business logic and use unauthenticated requests.
+    # Keep that behavior in tests while production defaults stay locked down.
+    monkeypatch.setattr(settings, "allow_unauthenticated_dev_fallback", True)
     monkeypatch.setattr(
         rate_limit,
         "_limiter",

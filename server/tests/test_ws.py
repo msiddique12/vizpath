@@ -66,6 +66,26 @@ class TestWebSocketAuth:
         finally:
             monkeypatch.setattr(settings, "security_strict_mode", original)
 
+    def test_fallback_disabled_rejects_missing_key(self, client, monkeypatch):
+        """Missing key is rejected when dev fallback is disabled, even without strict mode."""
+        original_fallback = settings.allow_unauthenticated_dev_fallback
+        original_strict = settings.security_strict_mode
+        monkeypatch.setattr(settings, "allow_unauthenticated_dev_fallback", False)
+        monkeypatch.setattr(settings, "security_strict_mode", False)
+
+        try:
+            with pytest.raises(WebSocketDisconnect) as exc_info:
+                with client.websocket_connect("/ws/traces"):
+                    pass
+
+            assert exc_info.value.code == 4001
+            assert exc_info.value.reason == "Unauthorized: Invalid or missing API key"
+        finally:
+            monkeypatch.setattr(
+                settings, "allow_unauthenticated_dev_fallback", original_fallback
+            )
+            monkeypatch.setattr(settings, "security_strict_mode", original_strict)
+
     def test_strict_mode_allows_valid_key(self, client, test_db, monkeypatch):
         """Strict mode still allows authenticated websocket connections."""
         from app.auth import generate_api_key, hash_api_key
