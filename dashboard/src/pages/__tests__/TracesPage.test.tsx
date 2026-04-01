@@ -85,6 +85,24 @@ describe('TracesPage websocket security UX', () => {
         })
       }
 
+      if (url.includes('/projects/me/budget/status')) {
+        return createJsonResponse({
+          month_start: new Date().toISOString(),
+          month_end: new Date().toISOString(),
+          tokens_used: 90,
+          cost_used: 0.9,
+          monthly_token_limit: 100,
+          monthly_cost_limit: 1.0,
+          token_usage_percent: 90,
+          cost_usage_percent: 90,
+          alert_threshold_percent: 80,
+          token_alert_triggered: true,
+          cost_alert_triggered: true,
+          alert_triggered: true,
+          hard_stop_enabled: true,
+        })
+      }
+
       return createJsonResponse({
         traces: [
           {
@@ -136,6 +154,16 @@ describe('TracesPage websocket security UX', () => {
     })
 
     renderResult.unmount()
+  })
+
+  it('shows budget guardrail status card when budget data is available', async () => {
+    _renderWithProviders(<TracesPage />, ['/traces'])
+
+    await waitFor(() => expect(screen.getByText('Demo trace')).toBeInTheDocument())
+    expect(screen.getByText('Budget Guardrails')).toBeInTheDocument()
+    expect(screen.getByText('Hard stop on')).toBeInTheDocument()
+    expect(screen.getByText('Token budget')).toBeInTheDocument()
+    expect(screen.getByText('Cost budget')).toBeInTheDocument()
   })
 
   it('allows users to reconnect with a runtime websocket API key', async () => {
@@ -263,6 +291,24 @@ describe('TracesPage websocket security UX', () => {
           p95_duration_ms: 120,
           avg_tokens: 22,
           avg_cost: 0.0009,
+        })
+      }
+
+      if (url.includes('/projects/me/budget/status')) {
+        return createJsonResponse({
+          month_start: new Date().toISOString(),
+          month_end: new Date().toISOString(),
+          tokens_used: 0,
+          cost_used: 0,
+          monthly_token_limit: null,
+          monthly_cost_limit: null,
+          token_usage_percent: null,
+          cost_usage_percent: null,
+          alert_threshold_percent: 80,
+          token_alert_triggered: false,
+          cost_alert_triggered: false,
+          alert_triggered: false,
+          hard_stop_enabled: false,
         })
       }
 

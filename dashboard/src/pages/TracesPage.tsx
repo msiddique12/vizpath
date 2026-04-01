@@ -17,7 +17,14 @@ import {
   X,
 } from 'lucide-react'
 import clsx from 'clsx'
-import { createOrUpdateLabel, getCuratedTraces, getLabel, getTraceSummary, getTraces } from '@/lib/api'
+import {
+  createOrUpdateLabel,
+  getCuratedTraces,
+  getLabel,
+  getProjectBudgetStatus,
+  getTraceSummary,
+  getTraces,
+} from '@/lib/api'
 import { getEffectiveApiKey } from '@/lib/apiKey'
 import { Trace, SpanStatus } from '@/lib/types'
 import { getTraceRiskFlags } from '@/lib/traceRisk'
@@ -231,6 +238,13 @@ function formatDuration(value: number | null): string {
   }
 
   return value < 1000 ? `${value.toFixed(0)}ms` : `${(value / 1000).toFixed(2)}s`
+}
+
+function formatBudgetPercent(value: number | null): string {
+  if (value === null || Number.isNaN(value)) {
+    return '-'
+  }
+  return `${value.toFixed(1)}%`
 }
 
 function StatusBadge({ status }: { status: SpanStatus }) {
@@ -672,6 +686,7 @@ export default function TracesPage() {
     onMessage: (msg) => {
       if (msg.type === 'span_ingested') {
         queryClient.invalidateQueries({ queryKey: ['traces'] })
+        queryClient.invalidateQueries({ queryKey: ['project-budget-status'] })
       }
     },
   })
@@ -700,6 +715,20 @@ export default function TracesPage() {
     queryFn: () => getTraceSummary(summaryWindowDays),
     refetchInterval: connected ? false : 5000,
   })
+
+  const budgetStatusQuery = useQuery({
+    queryKey: ['project-budget-status'],
+    queryFn: getProjectBudgetStatus,
+    refetchInterval: connected ? false : 15000,
+    retry: false,
+  })
+  const budgetStatusData = budgetStatusQuery.data
+  const hasBudgetStatusData =
+    budgetStatusData &&
+    typeof budgetStatusData.tokens_used === 'number' &&
+    typeof budgetStatusData.cost_used === 'number' &&
+    typeof budgetStatusData.alert_threshold_percent === 'number' &&
+    typeof budgetStatusData.hard_stop_enabled === 'boolean'
 
   const pinnedTraceIdSet = useMemo(() => new Set(pinnedTraceIds), [pinnedTraceIds])
   const visibleTraces = useMemo(() => {
@@ -1097,6 +1126,82 @@ export default function TracesPage() {
               </p>
             </div>
           </div>
+        </div>
+      )}
+
+      {hasBudgetStatusData && (
+        <div
+          className={clsx(
+            'mb-4 rounded-lg border p-4',
+            budgetStatusData.alert_triggered
+              ? 'bg-amber-900/20 border-amber-700/60'
+              : 'bg-dark-900 border-dark-700'
+          )}
+        >
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-medium text-muted-200">Budget Guardrails</h2>
+            <span
+              className={clsx(
+                'text-xs px-2 py-1 rounded-full',
+                budgetStatusData.hard_stop_enabled
+                  ? 'bg-red-900/40 text-red-300'
+                  : 'bg-dark-800 text-muted-300'
+              )}
+            >
+              {budgetStatusData.hard_stop_enabled ? 'Hard stop on' : 'Hard stop off'}
+            </span>
+          </div>
+
+          {budgetStatusData.monthly_token_limit === null &&
+          budgetStatusData.monthly_cost_limit === null ? (
+            <p className="text-xs text-muted-400">
+              No monthly budget configured. Set token or cost limits via
+              <code className="ml-1 text-muted-300">/api/v1/projects/me/budget</code>.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="bg-dark-800 rounded-lg p-3">
+                <p className="text-xs text-muted-400">Token budget</p>
+                <p className="text-sm text-muted-100 mt-1">
+                  {budgetStatusData.tokens_used.toLocaleString()}
+                  {budgetStatusData.monthly_token_limit !== null
+                    ? ` / ${budgetStatusData.monthly_token_limit.toLocaleString()}`
+                    : ''}
+                </p>
+                <p
+                  className={clsx(
+                    'text-xs mt-1',
+                    budgetStatusData.token_usage_percent !== null &&
+                      budgetStatusData.token_usage_percent >= budgetStatusData.alert_threshold_percent
+                      ? 'text-amber-300'
+                      : 'text-muted-400'
+                  )}
+                >
+                  {formatBudgetPercent(budgetStatusData.token_usage_percent)}
+                </p>
+              </div>
+              <div className="bg-dark-800 rounded-lg p-3">
+                <p className="text-xs text-muted-400">Cost budget</p>
+                <p className="text-sm text-muted-100 mt-1">
+                  ${budgetStatusData.cost_used.toFixed(4)}
+                  {budgetStatusData.monthly_cost_limit !== null
+                    ? ` / $${budgetStatusData.monthly_cost_limit.toFixed(4)}`
+                    : ''}
+                </p>
+                <p
+                  className={clsx(
+                    'text-xs mt-1',
+                    budgetStatusData.cost_usage_percent !== null &&
+                      budgetStatusData.cost_usage_percent >= budgetStatusData.alert_threshold_percent
+                      ? 'text-amber-300'
+                      : 'text-muted-400'
+                  )}
+                >
+                  {formatBudgetPercent(budgetStatusData.cost_usage_percent)}
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

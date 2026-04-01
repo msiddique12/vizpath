@@ -134,6 +134,22 @@ export interface TraceSummaryResponse {
   avg_cost: number | null
 }
 
+export interface ProjectBudgetStatusResponse {
+  month_start: string
+  month_end: string
+  tokens_used: number
+  cost_used: number
+  monthly_token_limit: number | null
+  monthly_cost_limit: number | null
+  token_usage_percent: number | null
+  cost_usage_percent: number | null
+  alert_threshold_percent: number
+  token_alert_triggered: boolean
+  cost_alert_triggered: boolean
+  alert_triggered: boolean
+  hard_stop_enabled: boolean
+}
+
 export async function getExperiments(options?: {
   field?: 'run_id' | 'model' | 'prompt_version'
   limit?: number
@@ -152,6 +168,10 @@ export async function getExperiments(options?: {
 
 export async function getTraceSummary(windowDays = 7): Promise<TraceSummaryResponse> {
   return fetchApi(`/traces/summary?window_days=${windowDays}`)
+}
+
+export async function getProjectBudgetStatus(): Promise<ProjectBudgetStatusResponse> {
+  return fetchApi('/projects/me/budget/status')
 }
 
 // Curation API
