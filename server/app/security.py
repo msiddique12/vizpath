@@ -12,6 +12,8 @@ from app.config import settings
 
 REQUEST_ID_HEADER = "X-Request-ID"
 MINIMAL_CSP = "default-src 'self'; frame-ancestors 'none'; object-src 'none'"
+PERMISSIONS_POLICY = "accelerometer=(), camera=(), geolocation=(), gyroscope=(), microphone=(), payment=(), usb=()"
+HSTS_HEADER_VALUE = "max-age=31536000; includeSubDomains"
 SENSITIVE_HEADERS = {"authorization", "proxy-authorization", "x-api-key"}
 SENSITIVE_AUDIT_FIELDS = {"api_key", "api_key_hash", "previous_api_key_hash"}
 
@@ -77,9 +79,13 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Content-Security-Policy"] = MINIMAL_CSP
+    response.headers["Permissions-Policy"] = PERMISSIONS_POLICY
+    response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
 
-    if settings.security_strict_mode:
-        response.headers["Content-Security-Policy"] = MINIMAL_CSP
+    if settings.is_production or settings.security_strict_mode:
+        response.headers["Strict-Transport-Security"] = HSTS_HEADER_VALUE
 
     return response
 

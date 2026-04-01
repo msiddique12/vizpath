@@ -252,7 +252,7 @@ cp .env.example .env
 
 Key local defaults:
 
-- `SECURITY_STRICT_MODE=false`: enables minimal secure headers by default, stricter CSP when set to `true`
+- `SECURITY_STRICT_MODE=false`: security headers are always on; strict mode additionally enables HSTS
 - `ALLOW_UNAUTHENTICATED_DEV_FALLBACK=false`: deny requests without `X-API-Key` unless explicitly enabled for demo/dev
 - `CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173`
 - `RATE_LIMIT_ENABLED=true`
