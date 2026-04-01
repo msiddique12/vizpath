@@ -3,13 +3,14 @@
 import logging
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.auth import generate_api_key, hash_api_key, verify_api_key
 from app.database import get_db
 from app.models import Project
+from app.security import audit_log
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,7 @@ class RevokeKeyRequest(BaseModel):
 @router.post("/", response_model=ProjectWithKeyResponse, status_code=201)
 async def create_project(
     payload: ProjectCreate,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> ProjectWithKeyResponse:
     """
@@ -78,6 +80,12 @@ async def create_project(
     db.refresh(project)
 
     logger.info(f"Created project: {project.name} (id={project.id})")
+    audit_log(
+        "project_created",
+        request_id=getattr(request.state, "request_id", None),
+        project_id=str(project.id),
+        project_name=project.name,
+    )
 
     return ProjectWithKeyResponse(
         id=str(project.id),
@@ -119,6 +127,7 @@ async def get_current_project(
 @router.post("/me/api-key/rotate", response_model=RotateKeyResponse)
 async def rotate_api_key(
     payload: RotateKeyRequest,
+    request: Request,
     project: Project = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ) -> RotateKeyResponse:
@@ -135,6 +144,12 @@ async def rotate_api_key(
 
     db.commit()
     db.refresh(project)
+    audit_log(
+        "api_key_rotated",
+        request_id=getattr(request.state, "request_id", None),
+        project_id=str(project.id),
+        grace_period_minutes=payload.grace_period_minutes,
+    )
 
     return RotateKeyResponse(
         project_id=str(project.id),
@@ -146,6 +161,7 @@ async def rotate_api_key(
 @router.post("/me/api-key/revoke")
 async def revoke_api_key(
     payload: RevokeKeyRequest,
+    request: Request,
     project: Project = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
@@ -162,5 +178,11 @@ async def revoke_api_key(
 
     project.updated_at = now
     db.commit()
+    audit_log(
+        "api_key_revoked",
+        request_id=getattr(request.state, "request_id", None),
+        project_id=str(project.id),
+        key_type=payload.key_type,
+    )
 
     return {"status": "revoked", "key_type": payload.key_type}

@@ -5,7 +5,7 @@ import logging
 import secrets
 from datetime import datetime, timezone
 
-from fastapi import Depends, HTTPException, Security, status
+from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import APIKeyHeader
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.models import Project
+from app.security import audit_log
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,10 @@ def _get_or_create_default_project(db: Session) -> Project:
     ALLOW_UNAUTHENTICATED_DEV_FALLBACK=true.
     """
     if not settings.allow_unauthenticated_dev_fallback:
+        audit_log(
+            "missing_api_key_rejected",
+            reason="unauthenticated_fallback_disabled",
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing API key. Include X-API-Key header.",
@@ -88,12 +93,17 @@ def _get_or_create_default_project(db: Session) -> Project:
 
     default_project = db.query(Project).filter(Project.api_key_hash == "default").first()
     if default_project:
+        audit_log("unauthenticated_fallback_project_reused", project_id=str(default_project.id))
         return default_project
 
     try:
         default_project = Project(name="default", api_key_hash="default")
         db.add(default_project)
         db.commit()
+        audit_log(
+            "unauthenticated_fallback_project_created",
+            project_id=str(default_project.id),
+        )
         return default_project
     except IntegrityError:
         db.rollback()
@@ -107,6 +117,7 @@ def _get_or_create_default_project(db: Session) -> Project:
 
 
 async def verify_api_key(
+    request: Request,
     api_key: str | None = Security(api_key_header),
     db: Session = Depends(get_db),
 ) -> Project:
@@ -121,12 +132,18 @@ async def verify_api_key(
         project = get_project_by_api_key(db, api_key)
         if not project:
             logger.warning("Invalid API key attempt: fingerprint=%s", api_key_fingerprint(api_key))
+            audit_log(
+                "invalid_api_key",
+                request_id=getattr(request.state, "request_id", None),
+                api_key_fingerprint=api_key_fingerprint(api_key),
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid API key.",
             )
         return project
 
+    audit_log("missing_api_key", request_id=getattr(request.state, "request_id", None))
     return _get_or_create_default_project(db)
 
 

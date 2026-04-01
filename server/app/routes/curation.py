@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.auth import verify_api_key
 from app.database import get_db
 from app.models import CuratedLabel, Project, Span, Trace
+from app.security import audit_log
 from app.validation import ID_PATTERN, TAG_PATTERN, normalize_text
 
 router = APIRouter(prefix="/curation", tags=["curation"])
@@ -106,6 +107,7 @@ class ExportRequest(BaseModel):
 @router.post("/labels", response_model=LabelResponse)
 def create_or_update_label(
     data: LabelCreate,
+    request: Request,
     project: Project = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ) -> LabelResponse:
@@ -141,6 +143,14 @@ def create_or_update_label(
         db.add(label)
         db.commit()
         db.refresh(label)
+
+    audit_log(
+        "curation_label_upserted",
+        request_id=getattr(request.state, "request_id", None),
+        project_id=str(project.id),
+        trace_id=data.trace_id,
+        label=label.label,
+    )
 
     return LabelResponse(
         id=label.id,
@@ -188,6 +198,7 @@ def get_label(
 )
 def delete_label(
     trace_id: str,
+    request: Request,
     project: Project = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ) -> Response:
@@ -203,6 +214,12 @@ def delete_label(
 
     db.delete(label)
     db.commit()
+    audit_log(
+        "curation_label_deleted",
+        request_id=getattr(request.state, "request_id", None),
+        project_id=str(project.id),
+        trace_id=trace_id,
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -294,6 +311,7 @@ def get_curation_stats(
 @router.post("/export")
 def export_traces(
     data: ExportRequest,
+    request: Request,
     project: Project = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -337,6 +355,14 @@ def export_traces(
             label.exported = True
 
     db.commit()
+    audit_log(
+        "curation_export_created",
+        request_id=getattr(request.state, "request_id", None),
+        project_id=str(project.id),
+        trace_count=len(traces_data),
+        format=data.format,
+        include_input_output=data.include_input_output,
+    )
 
     return {
         "format": data.format,

@@ -1,5 +1,7 @@
 """Security middleware and shared error response helpers."""
 
+import json
+import logging
 from collections.abc import Mapping
 from uuid import uuid4
 
@@ -11,6 +13,9 @@ from app.config import settings
 REQUEST_ID_HEADER = "X-Request-ID"
 MINIMAL_CSP = "default-src 'self'; frame-ancestors 'none'; object-src 'none'"
 SENSITIVE_HEADERS = {"authorization", "proxy-authorization", "x-api-key"}
+SENSITIVE_AUDIT_FIELDS = {"api_key", "api_key_hash", "previous_api_key_hash"}
+
+audit_logger = logging.getLogger("app.security.audit")
 
 
 def build_error_response(
@@ -43,6 +48,17 @@ def redact_headers(headers: Mapping[str, str]) -> dict[str, str]:
         else:
             redacted[key] = value
     return redacted
+
+
+def audit_log(event: str, *, request_id: str | None = None, **fields: object) -> None:
+    """Emit structured security-sensitive audit events."""
+    payload: dict[str, object] = {"event": event, "request_id": request_id}
+    for key, value in fields.items():
+        if key in SENSITIVE_AUDIT_FIELDS:
+            payload[key] = "[REDACTED]"
+        else:
+            payload[key] = value
+    audit_logger.info("audit_event %s", json.dumps(payload, sort_keys=True, default=str))
 
 
 async def request_id_middleware(request: Request, call_next):
