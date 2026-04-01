@@ -26,11 +26,21 @@ Project and key lifecycle endpoints:
 
 - `POST /api/v1/projects/` — create a project and receive an API key
 - `GET /api/v1/projects/me` — get current project metadata
+- `GET /api/v1/projects/me/keys` — list additional scoped API keys
+- `POST /api/v1/projects/me/keys` — create additional scoped API keys
+- `POST /api/v1/projects/me/keys/{key_id}/revoke` — revoke a scoped API key
 - `GET /api/v1/projects/me/budget` — get monthly budget configuration
 - `PUT /api/v1/projects/me/budget` — update monthly budget configuration
 - `GET /api/v1/projects/me/budget/status` — get current month usage + alert status
 - `POST /api/v1/projects/me/api-key/rotate` — rotate key (grace period support included)
 - `POST /api/v1/projects/me/api-key/revoke` — revoke current key
+
+Scoped key permissions:
+
+- `read` — trace/intelligence read access
+- `ingest` — span ingestion
+- `curate` — curation labels/exports
+- `admin` — key/budget management and destructive operations (implies all scopes)
 
 Unauthenticated fallback is disabled by default. For local-only demo workflows,
 set `ALLOW_UNAUTHENTICATED_DEV_FALLBACK=true` explicitly.

@@ -2,12 +2,19 @@
 
 import logging
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.auth import generate_api_key, hash_api_key, verify_api_key
+from app.auth import (
+    api_key_fingerprint,
+    generate_api_key,
+    hash_api_key,
+    normalize_api_key_scopes,
+    verify_api_key,
+)
 from app.budgeting import (
     DEFAULT_ALERT_THRESHOLD_PERCENT,
     get_month_window,
@@ -15,7 +22,7 @@ from app.budgeting import (
     get_project_month_usage,
 )
 from app.database import get_db
-from app.models import Project, ProjectBudget
+from app.models import Project, ProjectApiKey, ProjectBudget
 from app.security import audit_log
 
 logger = logging.getLogger(__name__)
@@ -64,6 +71,36 @@ class RevokeKeyRequest(BaseModel):
     """Request model for key revocation."""
 
     key_type: str = Field(default="previous", pattern="^(previous|current)$")
+
+
+class ProjectApiKeyCreateRequest(BaseModel):
+    """Request for creating an additional scoped API key."""
+
+    name: str = Field(min_length=1, max_length=100)
+    scopes: list[str] = Field(
+        default_factory=lambda: ["read", "ingest", "curate"],
+        min_length=1,
+        max_length=4,
+    )
+
+
+class ProjectApiKeyResponse(BaseModel):
+    """Metadata response for scoped API keys."""
+
+    id: str
+    name: str
+    scopes: list[str]
+    key_fingerprint: str
+    is_active: bool
+    created_at: str
+    revoked_at: str | None
+    last_used_at: str | None
+
+
+class ProjectApiKeyCreateResponse(ProjectApiKeyResponse):
+    """Scoped key response that includes the plaintext key exactly once."""
+
+    api_key: str
 
 
 class ProjectBudgetResponse(BaseModel):
@@ -117,6 +154,20 @@ def _to_budget_response(budget: ProjectBudget | None) -> ProjectBudgetResponse:
         monthly_cost_limit=budget.monthly_cost_limit,
         alert_threshold_percent=budget.alert_threshold_percent,
         hard_stop_enabled=budget.hard_stop_enabled,
+    )
+
+
+def _to_project_api_key_response(key: ProjectApiKey) -> ProjectApiKeyResponse:
+    """Serialize API key metadata consistently."""
+    return ProjectApiKeyResponse(
+        id=str(key.id),
+        name=key.name,
+        scopes=sorted(normalize_api_key_scopes(key.scopes or [])),
+        key_fingerprint=key.key_fingerprint,
+        is_active=key.is_active,
+        created_at=key.created_at.isoformat(),
+        revoked_at=key.revoked_at.isoformat() if key.revoked_at else None,
+        last_used_at=key.last_used_at.isoformat() if key.last_used_at else None,
     )
 
 
@@ -182,6 +233,101 @@ async def get_current_project(
         name=project.name,
         created_at=project.created_at.isoformat(),
     )
+
+
+@router.get("/me/keys", response_model=list[ProjectApiKeyResponse])
+async def list_project_api_keys(
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> list[ProjectApiKeyResponse]:
+    """List scoped API keys for the current project."""
+    keys = (
+        db.query(ProjectApiKey)
+        .filter(ProjectApiKey.project_id == project.id)
+        .order_by(ProjectApiKey.created_at.desc())
+        .all()
+    )
+    return [_to_project_api_key_response(key) for key in keys]
+
+
+@router.post("/me/keys", response_model=ProjectApiKeyCreateResponse, status_code=201)
+async def create_project_api_key(
+    payload: ProjectApiKeyCreateRequest,
+    request: Request,
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> ProjectApiKeyCreateResponse:
+    """Create a new scoped API key for the current project."""
+    try:
+        scopes = sorted(normalize_api_key_scopes(payload.scopes))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not scopes:
+        raise HTTPException(status_code=422, detail="At least one scope must be specified.")
+
+    plaintext_key = generate_api_key()
+    scoped_key = ProjectApiKey(
+        project_id=project.id,
+        name=payload.name.strip(),
+        key_hash=hash_api_key(plaintext_key),
+        key_fingerprint=api_key_fingerprint(plaintext_key),
+        scopes=scopes,
+        is_active=True,
+    )
+    db.add(scoped_key)
+    db.commit()
+    db.refresh(scoped_key)
+
+    audit_log(
+        "project_scoped_api_key_created",
+        request_id=getattr(request.state, "request_id", None),
+        project_id=str(project.id),
+        key_id=str(scoped_key.id),
+        key_fingerprint=scoped_key.key_fingerprint,
+        scopes=scopes,
+    )
+
+    metadata = _to_project_api_key_response(scoped_key)
+    return ProjectApiKeyCreateResponse(
+        **metadata.model_dump(),
+        api_key=plaintext_key,
+    )
+
+
+@router.post("/me/keys/{key_id}/revoke", response_model=ProjectApiKeyResponse)
+async def revoke_project_api_key(
+    key_id: UUID,
+    request: Request,
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> ProjectApiKeyResponse:
+    """Revoke a scoped API key for the current project."""
+    scoped_key = (
+        db.query(ProjectApiKey)
+        .filter(
+            ProjectApiKey.id == key_id,
+            ProjectApiKey.project_id == project.id,
+        )
+        .first()
+    )
+    if not scoped_key:
+        raise HTTPException(status_code=404, detail="API key not found.")
+
+    if scoped_key.is_active:
+        scoped_key.is_active = False
+        scoped_key.revoked_at = datetime.now(timezone.utc)
+        scoped_key.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(scoped_key)
+
+    audit_log(
+        "project_scoped_api_key_revoked",
+        request_id=getattr(request.state, "request_id", None),
+        project_id=str(project.id),
+        key_id=str(scoped_key.id),
+        key_fingerprint=scoped_key.key_fingerprint,
+    )
+    return _to_project_api_key_response(scoped_key)
 
 
 @router.get("/me/budget", response_model=ProjectBudgetResponse)

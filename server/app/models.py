@@ -51,6 +51,11 @@ class Project(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
 
     traces = relationship("Trace", back_populates="project", cascade="all, delete-orphan")
+    api_keys = relationship(
+        "ProjectApiKey",
+        back_populates="project",
+        cascade="all, delete-orphan",
+    )
     budget = relationship(
         "ProjectBudget",
         back_populates="project",
@@ -180,6 +185,37 @@ class CuratedLabel(Base):
 
     def __repr__(self) -> str:
         return f"<CuratedLabel(trace_id={self.trace_id}, label='{self.label}')>"
+
+
+class ProjectApiKey(Base):
+    """Additional per-project API keys with scoped permissions."""
+
+    __tablename__ = "project_api_keys"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id"),
+        nullable=False,
+        index=True,
+    )
+    name = Column(String(100), nullable=False)
+    key_hash = Column(String(64), unique=True, index=True, nullable=False)
+    key_fingerprint = Column(String(12), index=True, nullable=False)
+    scopes = Column(JSON, default=list, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
+
+    project = relationship("Project", back_populates="api_keys")
+
+    def __repr__(self) -> str:
+        return (
+            f"<ProjectApiKey(project_id={self.project_id}, "
+            f"fingerprint={self.key_fingerprint}, scopes={self.scopes})>"
+        )
 
 
 class ProjectBudget(Base):

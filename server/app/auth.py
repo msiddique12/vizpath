@@ -3,6 +3,7 @@
 import hashlib
 import logging
 import secrets
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException, Request, Security, status
@@ -13,12 +14,33 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
-from app.models import Project
+from app.models import Project, ProjectApiKey
 from app.security import audit_log
 
 logger = logging.getLogger(__name__)
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+API_KEY_SCOPE_READ = "read"
+API_KEY_SCOPE_INGEST = "ingest"
+API_KEY_SCOPE_CURATE = "curate"
+API_KEY_SCOPE_ADMIN = "admin"
+ALL_API_KEY_SCOPES = frozenset(
+    {
+        API_KEY_SCOPE_READ,
+        API_KEY_SCOPE_INGEST,
+        API_KEY_SCOPE_CURATE,
+        API_KEY_SCOPE_ADMIN,
+    }
+)
+
+
+@dataclass
+class _AuthLookupResult:
+    project: Project
+    scopes: set[str]
+    source: str
+    scoped_key: ProjectApiKey | None = None
 
 
 def hash_api_key(api_key: str) -> str:
@@ -43,9 +65,86 @@ def _to_utc(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
-def get_project_by_api_key(db: Session, api_key: str) -> Project | None:
-    """Look up a project by current key hash or grace-period previous key hash."""
+def normalize_api_key_scopes(scopes: list[str] | tuple[str, ...] | set[str]) -> set[str]:
+    """Normalize and validate API key scopes."""
+    normalized = {str(scope).strip().lower() for scope in scopes if str(scope).strip()}
+    invalid = normalized - ALL_API_KEY_SCOPES
+    if invalid:
+        invalid_list = ", ".join(sorted(invalid))
+        raise ValueError(f"Invalid scopes: {invalid_list}")
+    if API_KEY_SCOPE_ADMIN in normalized:
+        return set(ALL_API_KEY_SCOPES)
+    return normalized
+
+
+def _infer_required_scope(request: Request) -> str | None:
+    """Infer required scope from route path and HTTP method."""
+    method = request.method.upper()
+    path = request.url.path
+
+    if path.startswith("/api/v1/curation"):
+        return API_KEY_SCOPE_CURATE
+
+    if path.startswith("/api/v1/traces/spans/batch"):
+        return API_KEY_SCOPE_INGEST
+
+    if path.startswith("/api/v1/traces"):
+        if method == "GET":
+            return API_KEY_SCOPE_READ
+        if method == "DELETE":
+            return API_KEY_SCOPE_ADMIN
+        return API_KEY_SCOPE_INGEST
+
+    if path.startswith("/api/v1/intelligence"):
+        return API_KEY_SCOPE_READ
+
+    if path.startswith("/api/v1/projects/me/keys"):
+        return API_KEY_SCOPE_ADMIN
+
+    if path.startswith("/api/v1/projects/me/api-key"):
+        return API_KEY_SCOPE_ADMIN
+
+    if path.startswith("/api/v1/projects/me/budget"):
+        if method == "GET":
+            return API_KEY_SCOPE_READ
+        return API_KEY_SCOPE_ADMIN
+
+    if path.startswith("/api/v1/projects/me"):
+        if method == "GET":
+            return API_KEY_SCOPE_READ
+        return API_KEY_SCOPE_ADMIN
+
+    if path.startswith("/api/v1/projects"):
+        if method == "GET":
+            return API_KEY_SCOPE_READ
+
+    return None
+
+
+def _lookup_project_by_key(db: Session, api_key: str) -> _AuthLookupResult | None:
+    """Resolve API key to project plus scopes and auth source."""
     key_hash = hash_api_key(api_key)
+
+    scoped_key = (
+        db.query(ProjectApiKey)
+        .filter(
+            ProjectApiKey.key_hash == key_hash,
+            ProjectApiKey.is_active.is_(True),
+            ProjectApiKey.revoked_at.is_(None),
+        )
+        .first()
+    )
+    if scoped_key:
+        scopes = normalize_api_key_scopes(scoped_key.scopes or [])
+        if not scopes:
+            scopes = {API_KEY_SCOPE_READ}
+        return _AuthLookupResult(
+            project=scoped_key.project,
+            scopes=scopes,
+            source="scoped_key",
+            scoped_key=scoped_key,
+        )
+
     project = (
         db.query(Project)
         .filter(
@@ -63,16 +162,30 @@ def get_project_by_api_key(db: Session, api_key: str) -> Project | None:
         return None
 
     if project.api_key_hash == key_hash:
-        return project
+        return _AuthLookupResult(
+            project=project,
+            scopes=set(ALL_API_KEY_SCOPES),
+            source="legacy_project_key",
+        )
 
     if (
         project.previous_api_key_hash == key_hash
         and project.api_key_grace_expires_at is not None
         and datetime.now(timezone.utc) <= _to_utc(project.api_key_grace_expires_at)
     ):
-        return project
+        return _AuthLookupResult(
+            project=project,
+            scopes=set(ALL_API_KEY_SCOPES),
+            source="legacy_previous_project_key",
+        )
 
     return None
+
+
+def get_project_by_api_key(db: Session, api_key: str) -> Project | None:
+    """Look up a project by current key hash or grace-period previous key hash."""
+    resolved = _lookup_project_by_key(db, api_key)
+    return resolved.project if resolved else None
 
 
 def _get_or_create_default_project(db: Session) -> Project:
@@ -129,8 +242,8 @@ async def verify_api_key(
       ALLOW_UNAUTHENTICATED_DEV_FALLBACK=true.
     """
     if api_key:
-        project = get_project_by_api_key(db, api_key)
-        if not project:
+        resolved = _lookup_project_by_key(db, api_key)
+        if not resolved:
             logger.warning("Invalid API key attempt: fingerprint=%s", api_key_fingerprint(api_key))
             audit_log(
                 "invalid_api_key",
@@ -141,10 +254,30 @@ async def verify_api_key(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid API key.",
             )
-        return project
+        required_scope = _infer_required_scope(request)
+        if required_scope and required_scope not in resolved.scopes:
+            audit_log(
+                "api_key_scope_denied",
+                request_id=getattr(request.state, "request_id", None),
+                project_id=str(resolved.project.id),
+                required_scope=required_scope,
+                api_key_fingerprint=api_key_fingerprint(api_key),
+                auth_source=resolved.source,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"API key missing required scope: {required_scope}",
+            )
+
+        request.state.api_key_scopes = sorted(resolved.scopes)
+        request.state.api_key_auth_source = resolved.source
+        return resolved.project
 
     audit_log("missing_api_key", request_id=getattr(request.state, "request_id", None))
-    return _get_or_create_default_project(db)
+    project = _get_or_create_default_project(db)
+    request.state.api_key_scopes = sorted(ALL_API_KEY_SCOPES)
+    request.state.api_key_auth_source = "unauthenticated_dev_fallback"
+    return project
 
 
 async def optional_api_key(
