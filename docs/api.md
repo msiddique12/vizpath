@@ -26,6 +26,9 @@ Project and key lifecycle endpoints:
 
 - `POST /api/v1/projects/` — create a project and receive an API key
 - `GET /api/v1/projects/me` — get current project metadata
+- `GET /api/v1/projects/me/budget` — get monthly budget configuration
+- `PUT /api/v1/projects/me/budget` — update monthly budget configuration
+- `GET /api/v1/projects/me/budget/status` — get current month usage + alert status
 - `POST /api/v1/projects/me/api-key/rotate` — rotate key (grace period support included)
 - `POST /api/v1/projects/me/api-key/revoke` — revoke current key
 
@@ -52,8 +55,8 @@ curl http://localhost:8000/health/detailed
 
 ## Traces
 
-- `POST /api/v1/traces/ingest`
-  - Batch ingest spans or traces
+- `POST /api/v1/traces/spans/batch`
+  - Batch ingest spans (current SDK/default endpoint)
 - `GET /api/v1/traces/`
   - List traces with pagination + filtering
 - `GET /api/v1/traces/{trace_id}`
@@ -113,6 +116,7 @@ Event payload:
 - `401` unauthorized: missing/invalid API key for protected endpoint
 - `422` validation: request body/path/query invalid
 - `429` rate limited (when enabled)
+- `429` budget hard-stop exceeded (`detail.code = budget_exceeded`)
 - `503` intelligence backend unavailable
 
 ---

@@ -17,6 +17,7 @@ vizpath is an open-source observability and intelligence platform for AI agents.
 - **Real-time Visualization**: Watch agent execution as it happens via WebSocket
 - **Interactive DAG**: Explore execution graphs with D3.js zoom, pan, and drag
 - **Cost Attribution**: Track token usage and costs per operation
+- **Budget Guardrails**: Set monthly token/cost budgets with alerts and optional hard-stop
 - **Framework Support**: Native adapters for LangGraph, LangChain, AutoGen
 - **Nemotron Intelligence**: Auto-analyze traces, detect issues, suggest improvements
 - **Self-Analysis**: Deep agent evaluation for effectiveness, reasoning quality, and tool usage

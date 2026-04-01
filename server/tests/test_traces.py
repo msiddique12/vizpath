@@ -248,6 +248,63 @@ class TestTraceIngestion:
         assert response.json()["ingested"] == 1
 
 
+class TestTraceBudgetGuard:
+    """Tests for budget hard-stop behavior on ingestion."""
+
+    def test_hard_stop_budget_blocks_over_limit_ingestion(self, client):
+        """Ingestion should fail when hard-stop budget would be exceeded."""
+        create_response = client.post("/api/v1/projects/", json={"name": "budget-hard-stop"})
+        api_key = create_response.json()["api_key"]
+        now = datetime.now(timezone.utc).isoformat()
+
+        set_budget = client.put(
+            "/api/v1/projects/me/budget",
+            json={"monthly_token_limit": 100, "hard_stop_enabled": True},
+            headers={"X-API-Key": api_key},
+        )
+        assert set_budget.status_code == 200
+
+        first_ingest = client.post(
+            "/api/v1/traces/spans/batch",
+            json=[
+                {
+                    "span_id": "span-budget-allow-1",
+                    "trace_id": "trace-budget-allow-1",
+                    "name": "within-budget",
+                    "tokens": 80,
+                    "start_time": now,
+                }
+            ],
+            headers={"X-API-Key": api_key},
+        )
+        assert first_ingest.status_code == 201
+
+        blocked_ingest = client.post(
+            "/api/v1/traces/spans/batch",
+            json=[
+                {
+                    "span_id": "span-budget-block-1",
+                    "trace_id": "trace-budget-block-1",
+                    "name": "over-budget",
+                    "tokens": 30,
+                    "start_time": now,
+                }
+            ],
+            headers={"X-API-Key": api_key},
+        )
+        assert blocked_ingest.status_code == 429
+        detail = blocked_ingest.json()["detail"]
+        assert detail["code"] == "budget_exceeded"
+        assert detail["projected_tokens"] == 110
+
+        traces_response = client.get(
+            "/api/v1/traces/",
+            headers={"X-API-Key": api_key},
+        )
+        assert traces_response.status_code == 200
+        assert traces_response.json()["total"] == 1
+
+
 class TestTraceRetrieval:
     def test_list_traces_empty(self, client):
         response = client.get("/api/v1/traces/")

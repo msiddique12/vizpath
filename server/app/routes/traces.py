@@ -11,6 +11,7 @@ from sqlalchemy import case, desc, func, nullslast
 from sqlalchemy.orm import Session
 
 from app.auth import verify_api_key
+from app.budgeting import get_month_window, get_project_budget, get_project_month_usage
 from app.database import get_db
 from app.models import Project, Span, Trace
 from app.routes.ws import notify_span_ingested
@@ -328,6 +329,49 @@ def _percentile(sorted_values: list[float], percentile: float) -> float | None:
     return sorted_values[lower] * (1 - weight) + sorted_values[upper] * weight
 
 
+def _enforce_hard_stop_budget(
+    db: Session,
+    project: Project,
+    payload: list[SpanCreate],
+) -> None:
+    """Block ingestion when project hard-stop budget would be exceeded."""
+    budget = get_project_budget(db, project.id)
+    if budget is None or not budget.hard_stop_enabled:
+        return
+
+    month_start, month_end = get_month_window()
+    month_tokens, month_cost = get_project_month_usage(db, project.id, month_start, month_end)
+    batch_tokens = sum(span.tokens or 0 for span in payload)
+    batch_cost = sum(float(span.cost or 0.0) for span in payload)
+
+    projected_tokens = month_tokens + batch_tokens
+    projected_cost = month_cost + batch_cost
+
+    token_exceeded = (
+        budget.monthly_token_limit is not None
+        and projected_tokens > budget.monthly_token_limit
+    )
+    cost_exceeded = (
+        budget.monthly_cost_limit is not None
+        and projected_cost > budget.monthly_cost_limit
+    )
+
+    if token_exceeded or cost_exceeded:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "budget_exceeded",
+                "message": "Monthly project budget exceeded. Ingestion blocked by hard stop.",
+                "monthly_token_limit": budget.monthly_token_limit,
+                "monthly_cost_limit": budget.monthly_cost_limit,
+                "month_tokens_used": month_tokens,
+                "month_cost_used": month_cost,
+                "projected_tokens": projected_tokens,
+                "projected_cost": projected_cost,
+            },
+        )
+
+
 @router.post("/spans/batch", status_code=201)
 async def ingest_spans(
     payload: list[SpanCreate],
@@ -342,6 +386,8 @@ async def ingest_spans(
     """
     if not payload:
         return {"ingested": 0}
+
+    _enforce_hard_stop_budget(db, project, payload)
 
     # Sort spans so parents come before children (prevents FK violations)
     sorted_payload = _topological_sort_spans(payload)
@@ -417,7 +463,7 @@ async def ingest_spans(
     db.commit()
 
     for trace_id in traces_updated:
-        await notify_span_ingested(str(trace_id), len(payload))
+        await notify_span_ingested(str(trace_id), len(payload), project_id=str(project.id))
 
     return {"ingested": len(payload), "traces": len(traces_updated)}
 

@@ -51,6 +51,12 @@ class Project(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
 
     traces = relationship("Trace", back_populates="project", cascade="all, delete-orphan")
+    budget = relationship(
+        "ProjectBudget",
+        back_populates="project",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self) -> str:
         return f"<Project(id={self.id}, name='{self.name}')>"
@@ -174,3 +180,32 @@ class CuratedLabel(Base):
 
     def __repr__(self) -> str:
         return f"<CuratedLabel(trace_id={self.trace_id}, label='{self.label}')>"
+
+
+class ProjectBudget(Base):
+    """Per-project monthly budget settings."""
+
+    __tablename__ = "project_budgets"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    monthly_token_limit = Column(Integer, nullable=True)
+    monthly_cost_limit = Column(Float, nullable=True)
+    alert_threshold_percent = Column(Float, default=80.0, nullable=False)
+    hard_stop_enabled = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
+
+    project = relationship("Project", back_populates="budget")
+
+    def __repr__(self) -> str:
+        return (
+            f"<ProjectBudget(project_id={self.project_id}, "
+            f"token_limit={self.monthly_token_limit}, cost_limit={self.monthly_cost_limit})>"
+        )
