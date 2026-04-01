@@ -1,4 +1,5 @@
 import { TraceListResponse, TraceDetailResponse, Span } from './types'
+import { getEffectiveApiKey } from './apiKey'
 
 const API_BASE = (() => {
   const configured = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim()
@@ -9,12 +10,18 @@ const API_BASE = (() => {
 })()
 
 async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
+  const headers = new Headers(options?.headers)
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
+  const apiKey = getEffectiveApiKey()
+  if (apiKey && !headers.has('X-API-Key')) {
+    headers.set('X-API-Key', apiKey)
+  }
+
   const response = await fetch(`${API_BASE}${endpoint}`, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
+    headers,
   })
 
   if (!response.ok) {
@@ -25,12 +32,18 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> 
 }
 
 async function fetchRootApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
+  const headers = new Headers(options?.headers)
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
+  const apiKey = getEffectiveApiKey()
+  if (apiKey && !headers.has('X-API-Key')) {
+    headers.set('X-API-Key', apiKey)
+  }
+
   const response = await fetch(endpoint, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
+    headers,
   })
 
   if (!response.ok) {

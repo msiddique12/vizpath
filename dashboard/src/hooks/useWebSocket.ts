@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { getEffectiveApiKey, setStoredApiKey } from '@/lib/apiKey'
 
 interface WebSocketMessage {
   type: string
@@ -72,7 +73,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout>>()
   const reconnectAttemptRef = useRef(0)
   const shouldReconnectRef = useRef(true)
-  const apiKeyRef = useRef<string>(apiKey?.trim() || '')
+  const apiKeyRef = useRef<string>(apiKey?.trim() || getEffectiveApiKey())
   const onMessageRef = useRef<(message: WebSocketMessage) => void>()
   const onConnectRef = useRef<(() => void) | undefined>()
   const onDisconnectRef = useRef<((event: CloseReason | null) => void) | undefined>()
@@ -85,7 +86,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
 
   const resolveWebSocketUrl = () => {
     const configuredBase = import.meta.env.VITE_WS_BASE_URL as string | undefined
-    const configuredApiKey = import.meta.env.VITE_VIZPATH_API_KEY as string | undefined
+    const configuredApiKey = getEffectiveApiKey()
     const runtimeApiKey = apiKeyRef.current?.trim()
 
     return buildWebSocketUrl({
@@ -171,7 +172,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
   }, [])
 
   useEffect(() => {
-    apiKeyRef.current = apiKey?.trim() || ''
+    apiKeyRef.current = apiKey?.trim() || getEffectiveApiKey()
   }, [apiKey])
 
   const resetConnection = useCallback(() => {
@@ -194,7 +195,9 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
 
   const setApiKey = useCallback(
     (nextApiKey: string) => {
-      apiKeyRef.current = nextApiKey.trim()
+      const normalized = nextApiKey.trim()
+      setStoredApiKey(normalized)
+      apiKeyRef.current = normalized || getEffectiveApiKey()
       resetConnection()
       reconnect()
     },

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
 import { CheckCircle2, Circle, Copy, ExternalLink, Loader2, PlayCircle, Server, Sparkles, Wifi, WifiOff } from 'lucide-react'
 import {
@@ -10,6 +10,7 @@ import {
   seedStoryMode,
   type DemoPreflightResponse,
 } from '@/lib/api'
+import { getEffectiveApiKey } from '@/lib/apiKey'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import WebSocketRecoveryPanel from '@/components/WebSocketRecoveryPanel'
 
@@ -22,6 +23,7 @@ function StatusDot({ ok }: { ok: boolean }) {
 }
 
 export default function DemoPage() {
+  const queryClient = useQueryClient()
   const [copiedCmd, setCopiedCmd] = useState<string | null>(null)
   const [lastWsEvent, setLastWsEvent] = useState<string | null>(null)
   const [lastWsTimestamp, setLastWsTimestamp] = useState<string | null>(null)
@@ -81,7 +83,7 @@ export default function DemoPage() {
   const apiReady = healthQuery.data?.status === 'healthy' || healthQuery.data?.status === 'degraded'
   const nimReady = intelligenceQuery.data?.nvidia_api_key_configured ?? false
   const isAuthFailure = lastDisconnect?.code === 4001
-  const authKeyConfigured = Boolean(import.meta.env.VITE_VIZPATH_API_KEY?.trim())
+  const authKeyConfigured = Boolean(getEffectiveApiKey())
   const preflightData: DemoPreflightResponse | undefined = preflightQuery.data
   const canSeedStory = preflightData?.can_seed ?? false
   const demoBlockers = preflightData?.blockers ?? []
@@ -104,6 +106,11 @@ export default function DemoPage() {
     } catch {
       setCopiedCmd(null)
     }
+  }
+
+  const handleSubmitRuntimeApiKey = (apiKey: string) => {
+    setRuntimeWebSocketKey(apiKey)
+    queryClient.invalidateQueries()
   }
 
   return (
@@ -203,7 +210,7 @@ export default function DemoPage() {
           lastDisconnect={lastDisconnect}
           authKeyConfigured={authKeyConfigured}
           onRetry={reconnect}
-          onSubmitApiKey={setRuntimeWebSocketKey}
+          onSubmitApiKey={handleSubmitRuntimeApiKey}
           inputId="demo-ws-auth-key-input"
         />
       </div>

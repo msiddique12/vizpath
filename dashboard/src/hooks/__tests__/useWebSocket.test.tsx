@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { waitFor } from '@testing-library/react'
 import { buildWebSocketUrl, useWebSocket } from '../useWebSocket'
 import { MockWebSocket } from '../../test/mocks/websocket'
+import { getStoredApiKey, setStoredApiKey } from '../../lib/apiKey'
 
 interface CloseReason {
   code: number
@@ -68,6 +69,7 @@ describe('useWebSocket', () => {
     originalWebSocket = globalThis.WebSocket
     globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket
     MockWebSocket.reset()
+    setStoredApiKey('')
   })
 
   afterEach(() => {
@@ -75,6 +77,7 @@ describe('useWebSocket', () => {
       vi.useRealTimers()
     }
     globalThis.WebSocket = originalWebSocket
+    setStoredApiKey('')
   })
 
   it('does not automatically reconnect after unauthorized close', async () => {
@@ -206,6 +209,20 @@ describe('useWebSocket', () => {
       expect(MockWebSocket.instances).toHaveLength(2)
     })
     expect(MockWebSocket.latest().url).toContain('api_key=runtime-test-key')
+    expect(getStoredApiKey()).toBe('runtime-test-key')
+
+    renderResult.unmount()
+  })
+
+  it('uses stored dashboard API key when connecting', async () => {
+    setStoredApiKey('stored-dashboard-key')
+    const onDisconnect = vi.fn()
+    const { renderResult } = createHarness(onDisconnect)
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1)
+      expect(MockWebSocket.latest().url).toContain('api_key=stored-dashboard-key')
+    })
 
     renderResult.unmount()
   })

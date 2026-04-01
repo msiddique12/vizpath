@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import clsx from 'clsx'
 import { createOrUpdateLabel, getCuratedTraces, getLabel, getTraceSummary, getTraces } from '@/lib/api'
+import { getEffectiveApiKey } from '@/lib/apiKey'
 import { Trace, SpanStatus } from '@/lib/types'
 import { getTraceRiskFlags } from '@/lib/traceRisk'
 import { useWebSocket } from '@/hooks/useWebSocket'
@@ -675,6 +676,11 @@ export default function TracesPage() {
     },
   })
 
+  const handleSubmitRuntimeApiKey = (apiKey: string) => {
+    setRuntimeWebSocketKey(apiKey)
+    queryClient.invalidateQueries()
+  }
+
   const traceQueryLimit = pinnedOnly ? 500 : PAGE_SIZE
 
   const { data, isLoading, error } = useQuery({
@@ -764,7 +770,7 @@ export default function TracesPage() {
       : null,
   ].filter(Boolean) as Array<{ key: string; label: string; clear: () => void }>
 
-  const authKeyConfigured = Boolean(import.meta.env.VITE_VIZPATH_API_KEY?.trim())
+  const authKeyConfigured = Boolean(getEffectiveApiKey())
 
   const curatedTracesQuery = useQuery({
     queryKey: ['curated-traces', 'notes-cache'],
@@ -1019,7 +1025,7 @@ export default function TracesPage() {
         lastDisconnect={lastDisconnect}
         authKeyConfigured={authKeyConfigured}
         onRetry={reconnect}
-        onSubmitApiKey={setRuntimeWebSocketKey}
+        onSubmitApiKey={handleSubmitRuntimeApiKey}
         inputId="traces-ws-auth-key-input"
       />
 

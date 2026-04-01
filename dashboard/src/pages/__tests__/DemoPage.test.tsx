@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import DemoPage from '../DemoPage'
 import { MockWebSocket } from '../../test/mocks/websocket'
 import { renderWithProviders } from '../../test/test-utils'
+import { setStoredApiKey } from '../../lib/apiKey'
 
 function createJsonResponse(body: unknown) {
   return new Response(JSON.stringify(body), {
@@ -16,6 +17,7 @@ describe('DemoPage websocket security UX', () => {
   let originalFetch: typeof fetch
 
   beforeEach(() => {
+    setStoredApiKey('')
     originalWebSocket = globalThis.WebSocket
     globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket
     MockWebSocket.reset()
@@ -76,6 +78,7 @@ describe('DemoPage websocket security UX', () => {
   })
 
   afterEach(() => {
+    setStoredApiKey('')
     globalThis.WebSocket = originalWebSocket
     globalThis.fetch = originalFetch
   })

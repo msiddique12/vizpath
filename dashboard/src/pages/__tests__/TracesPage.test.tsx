@@ -32,6 +32,7 @@ describe('TracesPage websocket security UX', () => {
     storage.removeItem?.('traces_filters_v1')
     storage.removeItem?.('traces_filter_presets_v1')
     storage.removeItem?.('traces_pinned_v1')
+    storage.removeItem?.('vizpath_api_key')
   }
 
   beforeEach(() => {
