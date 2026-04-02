@@ -62,6 +62,11 @@ class Project(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
+    alert_rules = relationship(
+        "ProjectAlertRule",
+        back_populates="project",
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self) -> str:
         return f"<Project(id={self.id}, name='{self.name}')>"
@@ -244,4 +249,35 @@ class ProjectBudget(Base):
         return (
             f"<ProjectBudget(project_id={self.project_id}, "
             f"token_limit={self.monthly_token_limit}, cost_limit={self.monthly_cost_limit})>"
+        )
+
+
+class ProjectAlertRule(Base):
+    """Per-project alert rule for quality, reliability, and cost SLOs."""
+
+    __tablename__ = "project_alert_rules"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id"),
+        nullable=False,
+        index=True,
+    )
+    name = Column(String(120), nullable=False)
+    metric = Column(String(40), nullable=False)
+    operator = Column(String(10), nullable=False)
+    threshold = Column(Float, nullable=False)
+    window_days = Column(Integer, default=7, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    last_triggered_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
+
+    project = relationship("Project", back_populates="alert_rules")
+
+    def __repr__(self) -> str:
+        return (
+            f"<ProjectAlertRule(project_id={self.project_id}, metric={self.metric}, "
+            f"operator={self.operator}, threshold={self.threshold})>"
         )

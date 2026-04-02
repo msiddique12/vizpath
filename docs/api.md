@@ -29,6 +29,11 @@ Project and key lifecycle endpoints:
 - `GET /api/v1/projects/me/keys` — list additional scoped API keys
 - `POST /api/v1/projects/me/keys` — create additional scoped API keys
 - `POST /api/v1/projects/me/keys/{key_id}/revoke` — revoke a scoped API key
+- `GET /api/v1/projects/me/alerts` — list SLO/alert rules
+- `POST /api/v1/projects/me/alerts` — create SLO/alert rule
+- `PUT /api/v1/projects/me/alerts/{rule_id}` — update SLO/alert rule
+- `DELETE /api/v1/projects/me/alerts/{rule_id}` — delete SLO/alert rule
+- `GET /api/v1/projects/me/alerts/evaluate` — evaluate alert rules against rolling trace metrics
 - `GET /api/v1/projects/me/budget` — get monthly budget configuration
 - `PUT /api/v1/projects/me/budget` — update monthly budget configuration
 - `GET /api/v1/projects/me/budget/status` — get current month usage + alert status

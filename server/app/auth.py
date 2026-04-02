@@ -104,6 +104,11 @@ def _infer_required_scope(request: Request) -> str | None:
     if path.startswith("/api/v1/projects/me/api-key"):
         return API_KEY_SCOPE_ADMIN
 
+    if path.startswith("/api/v1/projects/me/alerts"):
+        if method == "GET":
+            return API_KEY_SCOPE_READ
+        return API_KEY_SCOPE_ADMIN
+
     if path.startswith("/api/v1/projects/me/budget"):
         if method == "GET":
             return API_KEY_SCOPE_READ
