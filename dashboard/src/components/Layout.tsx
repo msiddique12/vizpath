@@ -1,5 +1,5 @@
 import { Outlet, Link, useLocation } from 'react-router-dom'
-import { Activity, LayoutGrid, GitCompare, DollarSign, Tag, Rocket, FlaskConical, Brain, AlertTriangle } from 'lucide-react'
+import { Activity, LayoutGrid, GitCompare, DollarSign, Tag, Rocket, FlaskConical, Brain, AlertTriangle, BellRing } from 'lucide-react'
 import clsx from 'clsx'
 
 const navigation = [
@@ -9,6 +9,7 @@ const navigation = [
   { name: 'Experiments', href: '/experiments', icon: FlaskConical },
   { name: 'Compare', href: '/compare', icon: GitCompare },
   { name: 'Intelligence', href: '/intelligence', icon: Brain },
+  { name: 'Alerts', href: '/alerts', icon: BellRing },
   { name: 'Costs', href: '/costs', icon: DollarSign },
   { name: 'Curation', href: '/curation', icon: Tag },
 ]

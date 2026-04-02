@@ -1,0 +1,334 @@
+import { FormEvent, useMemo, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { AlertTriangle, BellRing, Loader2, ShieldCheck, Trash2 } from 'lucide-react'
+import clsx from 'clsx'
+import {
+  AlertMetric,
+  AlertOperator,
+  createAlertRule,
+  deleteAlertRule,
+  evaluateAlertRules,
+  getAlertRules,
+  updateAlertRule,
+} from '@/lib/api'
+
+const METRIC_OPTIONS: Array<{ value: AlertMetric; label: string; help: string }> = [
+  { value: 'error_rate_percent', label: 'Error Rate (%)', help: 'Percent of traces with errors' },
+  { value: 'avg_duration_ms', label: 'Avg Duration (ms)', help: 'Average trace runtime' },
+  { value: 'avg_tokens', label: 'Avg Tokens', help: 'Average tokens per trace' },
+  { value: 'avg_cost', label: 'Avg Cost ($)', help: 'Average cost per trace' },
+  { value: 'trace_count', label: 'Trace Count', help: 'Total traces in window' },
+  { value: 'total_tokens', label: 'Total Tokens', help: 'Total tokens in window' },
+  { value: 'total_cost', label: 'Total Cost ($)', help: 'Total cost in window' },
+]
+
+const OPERATOR_OPTIONS: Array<{ value: AlertOperator; label: string }> = [
+  { value: 'gt', label: '>' },
+  { value: 'gte', label: '>=' },
+  { value: 'lt', label: '<' },
+  { value: 'lte', label: '<=' },
+]
+
+function formatMetric(metric: AlertMetric): string {
+  return METRIC_OPTIONS.find((option) => option.value === metric)?.label ?? metric
+}
+
+export default function AlertsPage() {
+  const queryClient = useQueryClient()
+  const [name, setName] = useState('')
+  const [metric, setMetric] = useState<AlertMetric>('error_rate_percent')
+  const [operator, setOperator] = useState<AlertOperator>('gte')
+  const [threshold, setThreshold] = useState('5')
+  const [windowDays, setWindowDays] = useState('7')
+  const [formError, setFormError] = useState<string | null>(null)
+  const [actionStatus, setActionStatus] = useState<string | null>(null)
+
+  const rulesQuery = useQuery({
+    queryKey: ['alerts-rules'],
+    queryFn: getAlertRules,
+  })
+
+  const createRuleMutation = useMutation({
+    mutationFn: createAlertRule,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['alerts-rules'] })
+      setActionStatus('Alert rule created.')
+      setName('')
+      setFormError(null)
+    },
+    onError: () => setActionStatus('Failed to create alert rule.'),
+  })
+
+  const evaluateMutation = useMutation({
+    mutationFn: () => evaluateAlertRules(true),
+    onSuccess: () => setActionStatus('Rules evaluated and trigger timestamps updated.'),
+    onError: () => setActionStatus('Failed to evaluate alert rules.'),
+  })
+
+  const toggleMutation = useMutation({
+    mutationFn: ({ ruleId, isActive }: { ruleId: string; isActive: boolean }) =>
+      updateAlertRule(ruleId, { is_active: isActive }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['alerts-rules'] })
+      setActionStatus('Rule updated.')
+    },
+    onError: () => setActionStatus('Failed to update rule.'),
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteAlertRule,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['alerts-rules'] })
+      setActionStatus('Rule deleted.')
+    },
+    onError: () => setActionStatus('Failed to delete rule.'),
+  })
+
+  const rules = rulesQuery.data ?? []
+  const evaluatedRules = useMemo(
+    () => evaluateMutation.data?.rules ?? [],
+    [evaluateMutation.data?.rules]
+  )
+  const evaluatedById = useMemo(
+    () => new Map(evaluatedRules.map((rule) => [rule.id, rule])),
+    [evaluatedRules]
+  )
+
+  const handleCreateRule = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const thresholdValue = Number(threshold)
+    const windowValue = Number(windowDays)
+    if (!name.trim()) {
+      setFormError('Rule name is required.')
+      return
+    }
+    if (Number.isNaN(thresholdValue)) {
+      setFormError('Threshold must be numeric.')
+      return
+    }
+    if (!Number.isInteger(windowValue) || windowValue < 1 || windowValue > 90) {
+      setFormError('Window days must be an integer between 1 and 90.')
+      return
+    }
+
+    createRuleMutation.mutate({
+      name: name.trim(),
+      metric,
+      operator,
+      threshold: thresholdValue,
+      window_days: windowValue,
+      is_active: true,
+    })
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-semibold text-muted-100 flex items-center gap-2">
+          <BellRing className="h-6 w-6 text-primary-400" />
+          Alerts & SLOs
+        </h1>
+        <p className="mt-1 text-sm text-muted-400">
+          Define per-project guardrails for reliability, latency, and cost.
+        </p>
+      </div>
+
+      <div className="bg-dark-900 rounded-lg border border-dark-700 p-4 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-medium text-muted-200">Create Alert Rule</h2>
+          <button
+            type="button"
+            onClick={() => evaluateMutation.mutate()}
+            disabled={evaluateMutation.isPending || rules.length === 0}
+            className={clsx(
+              'inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm border transition-colors',
+              evaluateMutation.isPending || rules.length === 0
+                ? 'bg-dark-800 border-dark-700 text-muted-500 cursor-not-allowed'
+                : 'bg-dark-800 border-dark-700 text-muted-200 hover:bg-dark-700'
+            )}
+          >
+            {evaluateMutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <ShieldCheck className="h-4 w-4" />
+            )}
+            Evaluate Rules
+          </button>
+        </div>
+
+        <form onSubmit={handleCreateRule} className="grid grid-cols-1 md:grid-cols-5 gap-2">
+          <input
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="Rule name"
+            className="md:col-span-2 rounded-lg border border-dark-700 bg-dark-800 px-3 py-2 text-sm text-muted-100 placeholder:text-muted-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            aria-label="Rule name"
+          />
+          <select
+            value={metric}
+            onChange={(event) => setMetric(event.target.value as AlertMetric)}
+            className="rounded-lg border border-dark-700 bg-dark-800 px-3 py-2 text-sm text-muted-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            aria-label="Alert metric"
+          >
+            {METRIC_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <div className="flex gap-2">
+            <select
+              value={operator}
+              onChange={(event) => setOperator(event.target.value as AlertOperator)}
+              className="w-20 rounded-lg border border-dark-700 bg-dark-800 px-3 py-2 text-sm text-muted-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+              aria-label="Alert operator"
+            >
+              {OPERATOR_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <input
+              value={threshold}
+              onChange={(event) => setThreshold(event.target.value)}
+              className="flex-1 rounded-lg border border-dark-700 bg-dark-800 px-3 py-2 text-sm text-muted-100 placeholder:text-muted-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
+              placeholder="Threshold"
+              aria-label="Threshold"
+            />
+          </div>
+          <div className="flex gap-2">
+            <input
+              value={windowDays}
+              onChange={(event) => setWindowDays(event.target.value)}
+              className="w-24 rounded-lg border border-dark-700 bg-dark-800 px-3 py-2 text-sm text-muted-100 placeholder:text-muted-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
+              placeholder="Days"
+              aria-label="Window days"
+            />
+            <button
+              type="submit"
+              disabled={createRuleMutation.isPending}
+              className={clsx(
+                'flex-1 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                createRuleMutation.isPending
+                  ? 'bg-dark-700 text-muted-500 cursor-not-allowed'
+                  : 'bg-primary-600 text-white hover:bg-primary-700'
+              )}
+            >
+              {createRuleMutation.isPending ? 'Creating...' : 'Add Rule'}
+            </button>
+          </div>
+        </form>
+
+        <p className="text-xs text-muted-400">
+          {METRIC_OPTIONS.find((option) => option.value === metric)?.help}
+        </p>
+        {formError && <p className="text-xs text-red-400">{formError}</p>}
+        {actionStatus && <p className="text-xs text-primary-300">{actionStatus}</p>}
+      </div>
+
+      {evaluateMutation.data && (
+        <div className="bg-dark-900 rounded-lg border border-dark-700 p-4 space-y-2">
+          <h2 className="text-sm font-medium text-muted-200">Latest Evaluation</h2>
+          <p className="text-sm text-muted-300">
+            {evaluateMutation.data.alert_count} active alert
+            {evaluateMutation.data.alert_count === 1 ? '' : 's'} detected.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+            {evaluateMutation.data.window_metrics.map((windowMetric) => (
+              <div key={windowMetric.window_days} className="bg-dark-800 rounded-lg p-3">
+                <p className="text-xs text-muted-400">Window: {windowMetric.window_days}d</p>
+                <p className="text-xs text-muted-300 mt-1">
+                  {windowMetric.trace_count} traces · {windowMetric.error_rate_percent.toFixed(1)}% errors
+                </p>
+                <p className="text-xs text-muted-500 mt-1">
+                  Avg duration {windowMetric.avg_duration_ms.toFixed(1)}ms
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="bg-dark-900 rounded-lg border border-dark-700">
+        <div className="px-4 py-3 border-b border-dark-700">
+          <h2 className="text-sm font-medium text-muted-200">Configured Rules</h2>
+        </div>
+        {rulesQuery.isLoading ? (
+          <div className="flex items-center justify-center h-32">
+            <Loader2 className="h-6 w-6 text-primary-500 animate-spin" />
+          </div>
+        ) : rulesQuery.error ? (
+          <div className="p-4 text-sm text-red-400">Failed to load alert rules.</div>
+        ) : rules.length === 0 ? (
+          <div className="p-4 text-sm text-muted-400">No alert rules yet.</div>
+        ) : (
+          <div className="divide-y divide-dark-700">
+            {rules.map((rule) => {
+              const evaluated = evaluatedById.get(rule.id)
+              const breached = evaluated?.breached ?? false
+              const currentValue = evaluated?.current_value
+
+              return (
+                <div key={rule.id} className="px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm text-muted-100">{rule.name}</p>
+                    <p className="text-xs text-muted-400 mt-1">
+                      {formatMetric(rule.metric)} {rule.operator} {rule.threshold} · {rule.window_days}d window
+                    </p>
+                    <p className="text-xs text-muted-500 mt-1">
+                      Last triggered: {rule.last_triggered_at ? new Date(rule.last_triggered_at).toLocaleString() : 'never'}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {currentValue !== undefined && (
+                      <span
+                        className={clsx(
+                          'inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs border',
+                          breached
+                            ? 'bg-red-900/30 border-red-700 text-red-300'
+                            : 'bg-dark-800 border-dark-700 text-muted-300'
+                        )}
+                      >
+                        {breached && <AlertTriangle className="h-3 w-3" />}
+                        Current: {currentValue.toFixed(2)}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        toggleMutation.mutate({
+                          ruleId: rule.id,
+                          isActive: !rule.is_active,
+                        })
+                      }
+                      disabled={toggleMutation.isPending}
+                      className={clsx(
+                        'px-2.5 py-1 text-xs rounded border',
+                        rule.is_active
+                          ? 'border-emerald-700 text-emerald-300 hover:bg-emerald-900/20'
+                          : 'border-amber-700 text-amber-300 hover:bg-amber-900/20'
+                      )}
+                    >
+                      {rule.is_active ? 'Active' : 'Paused'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deleteMutation.mutate(rule.id)}
+                      disabled={deleteMutation.isPending}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded border border-red-700 text-red-300 hover:bg-red-900/20"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

@@ -1,0 +1,162 @@
+import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import AlertsPage from '../AlertsPage'
+import { renderWithProviders } from '../../test/test-utils'
+
+function createJsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
+function resolveUrl(input: RequestInfo | URL): string {
+  if (typeof input === 'string') return input
+  if (input instanceof URL) return input.toString()
+  return input.url
+}
+
+describe('AlertsPage', () => {
+  let originalFetch: typeof fetch
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch
+  })
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+    vi.restoreAllMocks()
+  })
+
+  it('creates and evaluates alert rules', async () => {
+    let createdBody: Record<string, unknown> | null = null
+    let evaluateCalled = false
+
+    globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = resolveUrl(input)
+      const method = init?.method ?? 'GET'
+
+      if (url.includes('/api/v1/projects/me/alerts/evaluate')) {
+        evaluateCalled = true
+        return createJsonResponse({
+          generated_at: new Date().toISOString(),
+          alert_count: 1,
+          rules: [
+            {
+              id: 'rule-1',
+              name: 'Error guardrail',
+              metric: 'error_rate_percent',
+              operator: 'gte',
+              threshold: 5,
+              window_days: 7,
+              is_active: true,
+              last_triggered_at: new Date().toISOString(),
+              created_at: new Date().toISOString(),
+              updated_at: null,
+              current_value: 50,
+              breached: true,
+            },
+          ],
+          window_metrics: [
+            {
+              window_days: 7,
+              trace_count: 2,
+              error_rate_percent: 50,
+              avg_duration_ms: 150,
+              avg_tokens: 200,
+              avg_cost: 0.02,
+              total_tokens: 400,
+              total_cost: 0.04,
+            },
+          ],
+        })
+      }
+
+      if (url.includes('/api/v1/projects/me/alerts') && method === 'GET') {
+        return createJsonResponse([
+          {
+            id: 'rule-1',
+            name: 'Error guardrail',
+            metric: 'error_rate_percent',
+            operator: 'gte',
+            threshold: 5,
+            window_days: 7,
+            is_active: true,
+            last_triggered_at: null,
+            created_at: new Date().toISOString(),
+            updated_at: null,
+          },
+        ])
+      }
+
+      if (url.includes('/api/v1/projects/me/alerts') && method === 'POST') {
+        createdBody = JSON.parse(String(init?.body ?? '{}'))
+        return createJsonResponse({
+          id: 'rule-2',
+          name: createdBody?.name,
+          metric: createdBody?.metric,
+          operator: createdBody?.operator,
+          threshold: createdBody?.threshold,
+          window_days: createdBody?.window_days,
+          is_active: true,
+          last_triggered_at: null,
+          created_at: new Date().toISOString(),
+          updated_at: null,
+        })
+      }
+
+      if (url.includes('/api/v1/projects/me/alerts/') && method === 'PUT') {
+        return createJsonResponse({
+          id: 'rule-1',
+          name: 'Error guardrail',
+          metric: 'error_rate_percent',
+          operator: 'gte',
+          threshold: 5,
+          window_days: 7,
+          is_active: false,
+          last_triggered_at: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+      }
+
+      if (url.includes('/api/v1/projects/me/alerts/') && method === 'DELETE') {
+        return createJsonResponse({}, 204)
+      }
+
+      throw new Error(`Unexpected fetch call: ${url}`)
+    }) as unknown as typeof fetch
+
+    renderWithProviders(<AlertsPage />, ['/alerts'])
+
+    await waitFor(() => {
+      expect(screen.getByText('Error guardrail')).toBeInTheDocument()
+    })
+
+    fireEvent.change(screen.getByLabelText('Rule name'), { target: { value: 'Cost spike' } })
+    fireEvent.change(screen.getByLabelText('Alert metric'), { target: { value: 'avg_cost' } })
+    fireEvent.change(screen.getByLabelText('Alert operator'), { target: { value: 'gt' } })
+    fireEvent.change(screen.getByLabelText('Threshold'), { target: { value: '0.05' } })
+    fireEvent.change(screen.getByLabelText('Window days'), { target: { value: '14' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add Rule' }))
+
+    await waitFor(() => {
+      expect(createdBody).toEqual({
+        name: 'Cost spike',
+        metric: 'avg_cost',
+        operator: 'gt',
+        threshold: 0.05,
+        window_days: 14,
+        is_active: true,
+      })
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Evaluate Rules' }))
+
+    await waitFor(() => {
+      expect(evaluateCalled).toBe(true)
+      expect(screen.getByText('1 active alert detected.')).toBeInTheDocument()
+      expect(screen.getByText(/Current: 50.00/)).toBeInTheDocument()
+    })
+  })
+})

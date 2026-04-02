@@ -9,6 +9,17 @@ const API_BASE = (() => {
   return configured.endsWith('/') ? configured.slice(0, -1) : configured
 })()
 
+async function parseJsonOrEmpty<T>(response: Response): Promise<T> {
+  if (response.status === 204) {
+    return undefined as T
+  }
+  const text = await response.text()
+  if (!text.trim()) {
+    return undefined as T
+  }
+  return JSON.parse(text) as T
+}
+
 async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const headers = new Headers(options?.headers)
   if (!headers.has('Content-Type')) {
@@ -28,7 +39,7 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> 
     throw new Error(`API error: ${response.status}`)
   }
 
-  return response.json()
+  return parseJsonOrEmpty<T>(response)
 }
 
 async function fetchRootApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
@@ -50,7 +61,7 @@ async function fetchRootApi<T>(endpoint: string, options?: RequestInit): Promise
     throw new Error(`API error: ${response.status}`)
   }
 
-  return response.json()
+  return parseJsonOrEmpty<T>(response)
 }
 
 export async function getTraces(
@@ -172,6 +183,98 @@ export async function getTraceSummary(windowDays = 7): Promise<TraceSummaryRespo
 
 export async function getProjectBudgetStatus(): Promise<ProjectBudgetStatusResponse> {
   return fetchApi('/projects/me/budget/status')
+}
+
+export type AlertMetric =
+  | 'error_rate_percent'
+  | 'avg_duration_ms'
+  | 'avg_tokens'
+  | 'avg_cost'
+  | 'trace_count'
+  | 'total_tokens'
+  | 'total_cost'
+export type AlertOperator = 'gt' | 'gte' | 'lt' | 'lte'
+
+export interface AlertRule {
+  id: string
+  name: string
+  metric: AlertMetric
+  operator: AlertOperator
+  threshold: number
+  window_days: number
+  is_active: boolean
+  last_triggered_at: string | null
+  created_at: string
+  updated_at: string | null
+}
+
+export interface AlertRuleEvaluation extends AlertRule {
+  current_value: number
+  breached: boolean
+}
+
+export interface AlertWindowMetrics {
+  window_days: number
+  trace_count: number
+  error_rate_percent: number
+  avg_duration_ms: number
+  avg_tokens: number
+  avg_cost: number
+  total_tokens: number
+  total_cost: number
+}
+
+export interface AlertEvaluationResponse {
+  generated_at: string
+  alert_count: number
+  rules: AlertRuleEvaluation[]
+  window_metrics: AlertWindowMetrics[]
+}
+
+export async function getAlertRules(): Promise<AlertRule[]> {
+  return fetchApi('/projects/me/alerts')
+}
+
+export async function createAlertRule(payload: {
+  name: string
+  metric: AlertMetric
+  operator: AlertOperator
+  threshold: number
+  window_days: number
+  is_active?: boolean
+}): Promise<AlertRule> {
+  return fetchApi('/projects/me/alerts', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function updateAlertRule(
+  ruleId: string,
+  payload: {
+    name?: string
+    metric?: AlertMetric
+    operator?: AlertOperator
+    threshold?: number
+    window_days?: number
+    is_active?: boolean
+  }
+): Promise<AlertRule> {
+  return fetchApi(`/projects/me/alerts/${ruleId}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function deleteAlertRule(ruleId: string): Promise<void> {
+  await fetchApi(`/projects/me/alerts/${ruleId}`, {
+    method: 'DELETE',
+  })
+}
+
+export async function evaluateAlertRules(persist = true): Promise<AlertEvaluationResponse> {
+  const query = persist ? '?persist=true' : ''
+  return fetchApi(`/projects/me/alerts/evaluate${query}`)
 }
 
 // Curation API
