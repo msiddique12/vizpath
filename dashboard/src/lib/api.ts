@@ -203,7 +203,9 @@ export interface AlertRule {
   threshold: number
   window_days: number
   is_active: boolean
+  notification_cooldown_minutes: number
   last_triggered_at: string | null
+  last_notified_at: string | null
   created_at: string
   updated_at: string | null
 }
@@ -211,6 +213,7 @@ export interface AlertRule {
 export interface AlertRuleEvaluation extends AlertRule {
   current_value: number
   breached: boolean
+  notification_sent: boolean
 }
 
 export interface AlertWindowMetrics {
@@ -227,8 +230,20 @@ export interface AlertWindowMetrics {
 export interface AlertEvaluationResponse {
   generated_at: string
   alert_count: number
+  notifications_sent: number
+  notifications_failed: number
   rules: AlertRuleEvaluation[]
   window_metrics: AlertWindowMetrics[]
+}
+
+export interface AlertDestination {
+  id: string
+  name: string
+  kind: 'webhook'
+  target_url: string
+  is_active: boolean
+  created_at: string
+  updated_at: string | null
 }
 
 export async function getAlertRules(): Promise<AlertRule[]> {
@@ -242,6 +257,7 @@ export async function createAlertRule(payload: {
   threshold: number
   window_days: number
   is_active?: boolean
+  notification_cooldown_minutes?: number
 }): Promise<AlertRule> {
   return fetchApi('/projects/me/alerts', {
     method: 'POST',
@@ -258,6 +274,7 @@ export async function updateAlertRule(
     threshold?: number
     window_days?: number
     is_active?: boolean
+    notification_cooldown_minutes?: number
   }
 ): Promise<AlertRule> {
   return fetchApi(`/projects/me/alerts/${ruleId}`, {
@@ -272,9 +289,58 @@ export async function deleteAlertRule(ruleId: string): Promise<void> {
   })
 }
 
-export async function evaluateAlertRules(persist = true): Promise<AlertEvaluationResponse> {
-  const query = persist ? '?persist=true' : ''
-  return fetchApi(`/projects/me/alerts/evaluate${query}`)
+export async function evaluateAlertRules(options?: {
+  persist?: boolean
+  notify?: boolean
+}): Promise<AlertEvaluationResponse> {
+  const params = new URLSearchParams()
+  if (options?.persist ?? true) {
+    params.set('persist', 'true')
+  }
+  if (options?.notify) {
+    params.set('notify', 'true')
+  }
+  const query = params.toString()
+  return fetchApi(`/projects/me/alerts/evaluate${query ? `?${query}` : ''}`)
+}
+
+export async function getAlertDestinations(): Promise<AlertDestination[]> {
+  return fetchApi('/projects/me/alerts/destinations')
+}
+
+export async function createAlertDestination(payload: {
+  name: string
+  kind?: 'webhook'
+  target_url: string
+  secret_token?: string
+  is_active?: boolean
+}): Promise<AlertDestination> {
+  return fetchApi('/projects/me/alerts/destinations', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function updateAlertDestination(
+  destinationId: string,
+  payload: {
+    name?: string
+    kind?: 'webhook'
+    target_url?: string
+    secret_token?: string | null
+    is_active?: boolean
+  }
+): Promise<AlertDestination> {
+  return fetchApi(`/projects/me/alerts/destinations/${destinationId}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function deleteAlertDestination(destinationId: string): Promise<void> {
+  await fetchApi(`/projects/me/alerts/destinations/${destinationId}`, {
+    method: 'DELETE',
+  })
 }
 
 // Curation API

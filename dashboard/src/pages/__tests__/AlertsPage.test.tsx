@@ -30,6 +30,8 @@ describe('AlertsPage', () => {
 
   it('creates and evaluates alert rules', async () => {
     let createdBody: Record<string, unknown> | null = null
+    let destinationBody: Record<string, unknown> | null = null
+    const destinations: Array<Record<string, unknown>> = []
     let evaluateCalled = false
 
     globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
@@ -41,6 +43,8 @@ describe('AlertsPage', () => {
         return createJsonResponse({
           generated_at: new Date().toISOString(),
           alert_count: 1,
+          notifications_sent: 0,
+          notifications_failed: 0,
           rules: [
             {
               id: 'rule-1',
@@ -50,11 +54,14 @@ describe('AlertsPage', () => {
               threshold: 5,
               window_days: 7,
               is_active: true,
+              notification_cooldown_minutes: 60,
               last_triggered_at: new Date().toISOString(),
+              last_notified_at: null,
               created_at: new Date().toISOString(),
               updated_at: null,
               current_value: 50,
               breached: true,
+              notification_sent: false,
             },
           ],
           window_metrics: [
@@ -72,6 +79,25 @@ describe('AlertsPage', () => {
         })
       }
 
+      if (url.includes('/api/v1/projects/me/alerts/destinations') && method === 'GET') {
+        return createJsonResponse(destinations)
+      }
+
+      if (url.includes('/api/v1/projects/me/alerts/destinations') && method === 'POST') {
+        destinationBody = JSON.parse(String(init?.body ?? '{}'))
+        const createdDestination = {
+          id: 'destination-1',
+          name: destinationBody?.name,
+          kind: 'webhook',
+          target_url: destinationBody?.target_url,
+          is_active: true,
+          created_at: new Date().toISOString(),
+          updated_at: null,
+        }
+        destinations.push(createdDestination)
+        return createJsonResponse(createdDestination, 201)
+      }
+
       if (url.includes('/api/v1/projects/me/alerts') && method === 'GET') {
         return createJsonResponse([
           {
@@ -82,7 +108,9 @@ describe('AlertsPage', () => {
             threshold: 5,
             window_days: 7,
             is_active: true,
+            notification_cooldown_minutes: 60,
             last_triggered_at: null,
+            last_notified_at: null,
             created_at: new Date().toISOString(),
             updated_at: null,
           },
@@ -99,7 +127,9 @@ describe('AlertsPage', () => {
           threshold: createdBody?.threshold,
           window_days: createdBody?.window_days,
           is_active: true,
+          notification_cooldown_minutes: createdBody?.notification_cooldown_minutes,
           last_triggered_at: null,
+          last_notified_at: null,
           created_at: new Date().toISOString(),
           updated_at: null,
         })
@@ -114,7 +144,9 @@ describe('AlertsPage', () => {
           threshold: 5,
           window_days: 7,
           is_active: false,
+          notification_cooldown_minutes: 60,
           last_triggered_at: null,
+          last_notified_at: null,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
@@ -147,6 +179,24 @@ describe('AlertsPage', () => {
         operator: 'gt',
         threshold: 0.05,
         window_days: 14,
+        is_active: true,
+        notification_cooldown_minutes: 60,
+      })
+    })
+
+    fireEvent.change(screen.getByLabelText('Destination name'), { target: { value: 'Ops webhook' } })
+    fireEvent.change(screen.getByLabelText('Webhook URL'), {
+      target: { value: 'https://hooks.example.com/ops' },
+    })
+    fireEvent.change(screen.getByLabelText('Secret token'), { target: { value: 'token-1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add Destination' }))
+
+    await waitFor(() => {
+      expect(destinationBody).toEqual({
+        name: 'Ops webhook',
+        kind: 'webhook',
+        target_url: 'https://hooks.example.com/ops',
+        secret_token: 'token-1',
         is_active: true,
       })
     })

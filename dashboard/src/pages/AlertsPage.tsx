@@ -1,14 +1,18 @@
 import { FormEvent, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, BellRing, Loader2, ShieldCheck, Trash2 } from 'lucide-react'
+import { AlertTriangle, BellRing, Loader2, ShieldCheck, Trash2, Webhook } from 'lucide-react'
 import clsx from 'clsx'
 import {
   AlertMetric,
   AlertOperator,
+  createAlertDestination,
   createAlertRule,
+  deleteAlertDestination,
   deleteAlertRule,
   evaluateAlertRules,
+  getAlertDestinations,
   getAlertRules,
+  updateAlertDestination,
   updateAlertRule,
 } from '@/lib/api'
 
@@ -40,12 +44,24 @@ export default function AlertsPage() {
   const [operator, setOperator] = useState<AlertOperator>('gte')
   const [threshold, setThreshold] = useState('5')
   const [windowDays, setWindowDays] = useState('7')
+  const [cooldownMinutes, setCooldownMinutes] = useState('60')
+
+  const [destinationName, setDestinationName] = useState('')
+  const [destinationUrl, setDestinationUrl] = useState('')
+  const [destinationToken, setDestinationToken] = useState('')
+
   const [formError, setFormError] = useState<string | null>(null)
+  const [destinationError, setDestinationError] = useState<string | null>(null)
   const [actionStatus, setActionStatus] = useState<string | null>(null)
 
   const rulesQuery = useQuery({
     queryKey: ['alerts-rules'],
     queryFn: getAlertRules,
+  })
+
+  const destinationsQuery = useQuery({
+    queryKey: ['alerts-destinations'],
+    queryFn: getAlertDestinations,
   })
 
   const createRuleMutation = useMutation({
@@ -60,9 +76,32 @@ export default function AlertsPage() {
   })
 
   const evaluateMutation = useMutation({
-    mutationFn: () => evaluateAlertRules(true),
-    onSuccess: () => setActionStatus('Rules evaluated and trigger timestamps updated.'),
+    mutationFn: ({ notify }: { notify: boolean }) =>
+      evaluateAlertRules({
+        persist: true,
+        notify,
+      }),
+    onSuccess: (data, variables) => {
+      const notificationSummary = variables.notify
+        ? ` Notifications sent: ${data.notifications_sent}, failed: ${data.notifications_failed}.`
+        : ''
+      setActionStatus(`Rules evaluated.${notificationSummary}`)
+      queryClient.invalidateQueries({ queryKey: ['alerts-rules'] })
+    },
     onError: () => setActionStatus('Failed to evaluate alert rules.'),
+  })
+
+  const createDestinationMutation = useMutation({
+    mutationFn: createAlertDestination,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['alerts-destinations'] })
+      setActionStatus('Alert destination created.')
+      setDestinationName('')
+      setDestinationUrl('')
+      setDestinationToken('')
+      setDestinationError(null)
+    },
+    onError: () => setActionStatus('Failed to create alert destination.'),
   })
 
   const toggleMutation = useMutation({
@@ -84,11 +123,29 @@ export default function AlertsPage() {
     onError: () => setActionStatus('Failed to delete rule.'),
   })
 
+  const toggleDestinationMutation = useMutation({
+    mutationFn: ({ destinationId, isActive }: { destinationId: string; isActive: boolean }) =>
+      updateAlertDestination(destinationId, { is_active: isActive }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['alerts-destinations'] })
+      setActionStatus('Destination updated.')
+    },
+    onError: () => setActionStatus('Failed to update destination.'),
+  })
+
+  const deleteDestinationMutation = useMutation({
+    mutationFn: deleteAlertDestination,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['alerts-destinations'] })
+      setActionStatus('Destination deleted.')
+    },
+    onError: () => setActionStatus('Failed to delete destination.'),
+  })
+
   const rules = rulesQuery.data ?? []
-  const evaluatedRules = useMemo(
-    () => evaluateMutation.data?.rules ?? [],
-    [evaluateMutation.data?.rules]
-  )
+  const destinations = destinationsQuery.data ?? []
+  const activeDestinations = destinations.filter((destination) => destination.is_active)
+  const evaluatedRules = useMemo(() => evaluateMutation.data?.rules ?? [], [evaluateMutation.data?.rules])
   const evaluatedById = useMemo(
     () => new Map(evaluatedRules.map((rule) => [rule.id, rule])),
     [evaluatedRules]
@@ -98,6 +155,7 @@ export default function AlertsPage() {
     event.preventDefault()
     const thresholdValue = Number(threshold)
     const windowValue = Number(windowDays)
+    const cooldownValue = Number(cooldownMinutes)
     if (!name.trim()) {
       setFormError('Rule name is required.')
       return
@@ -110,6 +168,10 @@ export default function AlertsPage() {
       setFormError('Window days must be an integer between 1 and 90.')
       return
     }
+    if (!Number.isInteger(cooldownValue) || cooldownValue < 0 || cooldownValue > 10080) {
+      setFormError('Cooldown must be an integer between 0 and 10080 minutes.')
+      return
+    }
 
     createRuleMutation.mutate({
       name: name.trim(),
@@ -117,6 +179,27 @@ export default function AlertsPage() {
       operator,
       threshold: thresholdValue,
       window_days: windowValue,
+      is_active: true,
+      notification_cooldown_minutes: cooldownValue,
+    })
+  }
+
+  const handleCreateDestination = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!destinationName.trim()) {
+      setDestinationError('Destination name is required.')
+      return
+    }
+    if (!destinationUrl.trim()) {
+      setDestinationError('Webhook URL is required.')
+      return
+    }
+
+    createDestinationMutation.mutate({
+      name: destinationName.trim(),
+      kind: 'webhook',
+      target_url: destinationUrl.trim(),
+      secret_token: destinationToken.trim() || undefined,
       is_active: true,
     })
   }
@@ -134,29 +217,45 @@ export default function AlertsPage() {
       </div>
 
       <div className="bg-dark-900 rounded-lg border border-dark-700 p-4 space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
           <h2 className="text-sm font-medium text-muted-200">Create Alert Rule</h2>
-          <button
-            type="button"
-            onClick={() => evaluateMutation.mutate()}
-            disabled={evaluateMutation.isPending || rules.length === 0}
-            className={clsx(
-              'inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm border transition-colors',
-              evaluateMutation.isPending || rules.length === 0
-                ? 'bg-dark-800 border-dark-700 text-muted-500 cursor-not-allowed'
-                : 'bg-dark-800 border-dark-700 text-muted-200 hover:bg-dark-700'
-            )}
-          >
-            {evaluateMutation.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <ShieldCheck className="h-4 w-4" />
-            )}
-            Evaluate Rules
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => evaluateMutation.mutate({ notify: false })}
+              disabled={evaluateMutation.isPending || rules.length === 0}
+              className={clsx(
+                'inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm border transition-colors',
+                evaluateMutation.isPending || rules.length === 0
+                  ? 'bg-dark-800 border-dark-700 text-muted-500 cursor-not-allowed'
+                  : 'bg-dark-800 border-dark-700 text-muted-200 hover:bg-dark-700'
+              )}
+            >
+              {evaluateMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <ShieldCheck className="h-4 w-4" />
+              )}
+              Evaluate Rules
+            </button>
+            <button
+              type="button"
+              onClick={() => evaluateMutation.mutate({ notify: true })}
+              disabled={evaluateMutation.isPending || rules.length === 0 || activeDestinations.length === 0}
+              className={clsx(
+                'inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm border transition-colors',
+                evaluateMutation.isPending || rules.length === 0 || activeDestinations.length === 0
+                  ? 'bg-dark-800 border-dark-700 text-muted-500 cursor-not-allowed'
+                  : 'bg-primary-600 border-primary-500 text-white hover:bg-primary-700'
+              )}
+            >
+              <Webhook className="h-4 w-4" />
+              Evaluate + Notify
+            </button>
+          </div>
         </div>
 
-        <form onSubmit={handleCreateRule} className="grid grid-cols-1 md:grid-cols-5 gap-2">
+        <form onSubmit={handleCreateRule} className="grid grid-cols-1 md:grid-cols-6 gap-2">
           <input
             value={name}
             onChange={(event) => setName(event.target.value)}
@@ -197,13 +296,20 @@ export default function AlertsPage() {
               aria-label="Threshold"
             />
           </div>
+          <input
+            value={windowDays}
+            onChange={(event) => setWindowDays(event.target.value)}
+            className="rounded-lg border border-dark-700 bg-dark-800 px-3 py-2 text-sm text-muted-100 placeholder:text-muted-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            placeholder="Window days"
+            aria-label="Window days"
+          />
           <div className="flex gap-2">
             <input
-              value={windowDays}
-              onChange={(event) => setWindowDays(event.target.value)}
-              className="w-24 rounded-lg border border-dark-700 bg-dark-800 px-3 py-2 text-sm text-muted-100 placeholder:text-muted-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
-              placeholder="Days"
-              aria-label="Window days"
+              value={cooldownMinutes}
+              onChange={(event) => setCooldownMinutes(event.target.value)}
+              className="w-28 rounded-lg border border-dark-700 bg-dark-800 px-3 py-2 text-sm text-muted-100 placeholder:text-muted-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
+              placeholder="Cooldown"
+              aria-label="Cooldown mins"
             />
             <button
               type="submit"
@@ -227,6 +333,99 @@ export default function AlertsPage() {
         {actionStatus && <p className="text-xs text-primary-300">{actionStatus}</p>}
       </div>
 
+      <div className="bg-dark-900 rounded-lg border border-dark-700 p-4 space-y-4">
+        <h2 className="text-sm font-medium text-muted-200 flex items-center gap-2">
+          <Webhook className="h-4 w-4 text-primary-400" />
+          Alert Destinations
+        </h2>
+        <form onSubmit={handleCreateDestination} className="grid grid-cols-1 md:grid-cols-4 gap-2">
+          <input
+            value={destinationName}
+            onChange={(event) => setDestinationName(event.target.value)}
+            placeholder="Destination name"
+            aria-label="Destination name"
+            className="rounded-lg border border-dark-700 bg-dark-800 px-3 py-2 text-sm text-muted-100 placeholder:text-muted-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
+          />
+          <input
+            value={destinationUrl}
+            onChange={(event) => setDestinationUrl(event.target.value)}
+            placeholder="https://example.com/webhook"
+            aria-label="Webhook URL"
+            className="rounded-lg border border-dark-700 bg-dark-800 px-3 py-2 text-sm text-muted-100 placeholder:text-muted-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
+          />
+          <input
+            value={destinationToken}
+            onChange={(event) => setDestinationToken(event.target.value)}
+            placeholder="Optional bearer token"
+            aria-label="Secret token"
+            className="rounded-lg border border-dark-700 bg-dark-800 px-3 py-2 text-sm text-muted-100 placeholder:text-muted-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
+          />
+          <button
+            type="submit"
+            disabled={createDestinationMutation.isPending}
+            className={clsx(
+              'rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+              createDestinationMutation.isPending
+                ? 'bg-dark-700 text-muted-500 cursor-not-allowed'
+                : 'bg-primary-600 text-white hover:bg-primary-700'
+            )}
+          >
+            {createDestinationMutation.isPending ? 'Creating...' : 'Add Destination'}
+          </button>
+        </form>
+        {destinationError && <p className="text-xs text-red-400">{destinationError}</p>}
+        {destinationsQuery.isLoading ? (
+          <div className="flex items-center justify-center h-16">
+            <Loader2 className="h-5 w-5 text-primary-500 animate-spin" />
+          </div>
+        ) : destinations.length === 0 ? (
+          <p className="text-sm text-muted-400">No alert destinations configured.</p>
+        ) : (
+          <div className="divide-y divide-dark-700 rounded-lg border border-dark-700 bg-dark-800">
+            {destinations.map((destination) => (
+              <div
+                key={destination.id}
+                className="px-3 py-2 flex items-center justify-between gap-2 flex-wrap"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm text-muted-100">{destination.name}</p>
+                  <p className="text-xs text-muted-400 truncate">{destination.target_url}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      toggleDestinationMutation.mutate({
+                        destinationId: destination.id,
+                        isActive: !destination.is_active,
+                      })
+                    }
+                    disabled={toggleDestinationMutation.isPending}
+                    className={clsx(
+                      'px-2.5 py-1 text-xs rounded border',
+                      destination.is_active
+                        ? 'border-emerald-700 text-emerald-300 hover:bg-emerald-900/20'
+                        : 'border-amber-700 text-amber-300 hover:bg-amber-900/20'
+                    )}
+                  >
+                    {destination.is_active ? 'Active' : 'Paused'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteDestinationMutation.mutate(destination.id)}
+                    disabled={deleteDestinationMutation.isPending}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded border border-red-700 text-red-300 hover:bg-red-900/20"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {evaluateMutation.data && (
         <div className="bg-dark-900 rounded-lg border border-dark-700 p-4 space-y-2">
           <h2 className="text-sm font-medium text-muted-200">Latest Evaluation</h2>
@@ -234,6 +433,12 @@ export default function AlertsPage() {
             {evaluateMutation.data.alert_count} active alert
             {evaluateMutation.data.alert_count === 1 ? '' : 's'} detected.
           </p>
+          {(evaluateMutation.data.notifications_sent > 0 || evaluateMutation.data.notifications_failed > 0) && (
+            <p className="text-xs text-muted-400">
+              Notifications: {evaluateMutation.data.notifications_sent} sent,{' '}
+              {evaluateMutation.data.notifications_failed} failed.
+            </p>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
             {evaluateMutation.data.window_metrics.map((windowMetric) => (
               <div key={windowMetric.window_days} className="bg-dark-800 rounded-lg p-3">
@@ -277,7 +482,12 @@ export default function AlertsPage() {
                       {formatMetric(rule.metric)} {rule.operator} {rule.threshold} · {rule.window_days}d window
                     </p>
                     <p className="text-xs text-muted-500 mt-1">
-                      Last triggered: {rule.last_triggered_at ? new Date(rule.last_triggered_at).toLocaleString() : 'never'}
+                      Cooldown: {rule.notification_cooldown_minutes}m · Last triggered:{' '}
+                      {rule.last_triggered_at ? new Date(rule.last_triggered_at).toLocaleString() : 'never'}
+                    </p>
+                    <p className="text-xs text-muted-500 mt-1">
+                      Last notified:{' '}
+                      {rule.last_notified_at ? new Date(rule.last_notified_at).toLocaleString() : 'never'}
                     </p>
                   </div>
 
