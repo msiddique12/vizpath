@@ -56,6 +56,12 @@ class Settings(BaseSettings):
     max_request_body_bytes: int = Field(default=1_048_576, alias="MAX_REQUEST_BODY_BYTES")
 
     trace_retention_days: int = Field(default=7, alias="TRACE_RETENTION_DAYS")
+    alert_scheduler_enabled: bool = Field(default=False, alias="ALERT_SCHEDULER_ENABLED")
+    alert_scheduler_interval_seconds: int = Field(
+        default=300,
+        alias="ALERT_SCHEDULER_INTERVAL_SECONDS",
+    )
+    alert_scheduler_notify: bool = Field(default=False, alias="ALERT_SCHEDULER_NOTIFY")
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -100,6 +106,7 @@ class Settings(BaseSettings):
         "rate_limit_ip_rpm",
         "rate_limit_user_rpm",
         "max_request_body_bytes",
+        "alert_scheduler_interval_seconds",
     )
     @classmethod
     def validate_positive_ints(cls, v: int, info: ValidationInfo) -> int:

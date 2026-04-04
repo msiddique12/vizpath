@@ -1,5 +1,6 @@
 """vizpath server - FastAPI application."""
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -11,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app import __version__
+from app.alert_scheduler import run_alert_scheduler
 from app.config import settings
 from app.database import check_db_connection, engine, init_db
 from app.rate_limit import rate_limit_middleware
@@ -34,6 +36,9 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Handle application startup and shutdown."""
     logger.info("vizpath server starting...")
+    alert_scheduler_task: asyncio.Task[None] | None = None
+    alert_scheduler_stop_event = asyncio.Event()
+
     try:
         init_db()
         logger.info("Database initialized")
@@ -41,9 +46,28 @@ async def lifespan(app: FastAPI):
         logger.critical(f"Database initialization failed: {e}", exc_info=True)
         raise RuntimeError(f"Could not connect to database: {e}") from e
 
+    if settings.alert_scheduler_enabled:
+        alert_scheduler_task = asyncio.create_task(
+            run_alert_scheduler(alert_scheduler_stop_event)
+        )
+        logger.info(
+            "Alert scheduler started: interval_seconds=%d notify=%s",
+            settings.alert_scheduler_interval_seconds,
+            settings.alert_scheduler_notify,
+        )
+
     yield
 
     logger.info("vizpath server shutting down...")
+    if alert_scheduler_task is not None:
+        alert_scheduler_stop_event.set()
+        try:
+            await asyncio.wait_for(alert_scheduler_task, timeout=5.0)
+        except asyncio.TimeoutError:
+            alert_scheduler_task.cancel()
+            logger.warning("Alert scheduler shutdown timed out; task cancelled")
+        else:
+            logger.info("Alert scheduler stopped")
     engine.dispose()
     logger.info("Database connections closed")
 
