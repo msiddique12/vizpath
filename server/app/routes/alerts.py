@@ -1,32 +1,30 @@
-"""Project alert rule endpoints for SLO-style monitoring."""
+"""Project alert rule and destination endpoints."""
 
-from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
 
+from app.alerts import (
+    ALERT_DESTINATION_KINDS,
+    ALERT_METRICS,
+    ALERT_OPERATORS,
+    AlertWindowMetrics,
+    evaluate_project_alerts,
+)
 from app.auth import verify_api_key
 from app.database import get_db
-from app.models import Project, ProjectAlertRule, Trace
+from app.models import Project, ProjectAlertDestination, ProjectAlertRule
 from app.security import audit_log
 from app.validation import normalize_text
 
 router = APIRouter(prefix="/projects/me/alerts", tags=["Alerts"])
 
-ALERT_METRICS = (
-    "error_rate_percent",
-    "avg_duration_ms",
-    "avg_tokens",
-    "avg_cost",
-    "trace_count",
-    "total_tokens",
-    "total_cost",
-)
-ALERT_OPERATORS = ("gt", "gte", "lt", "lte")
 ALERT_METRIC_PATTERN = f"^({'|'.join(ALERT_METRICS)})$"
 ALERT_OPERATOR_PATTERN = f"^({'|'.join(ALERT_OPERATORS)})$"
+ALERT_DESTINATION_KIND_PATTERN = f"^({'|'.join(ALERT_DESTINATION_KINDS)})$"
 
 
 class AlertRuleCreate(BaseModel):
@@ -40,6 +38,7 @@ class AlertRuleCreate(BaseModel):
     threshold: float
     window_days: int = Field(default=7, ge=1, le=90)
     is_active: bool = True
+    notification_cooldown_minutes: int = Field(default=60, ge=0, le=10080)
 
     @field_validator("name", mode="before")
     @classmethod
@@ -61,6 +60,7 @@ class AlertRuleUpdate(BaseModel):
     threshold: float | None = None
     window_days: int | None = Field(default=None, ge=1, le=90)
     is_active: bool | None = None
+    notification_cooldown_minutes: int | None = Field(default=None, ge=0, le=10080)
 
     @field_validator("name", mode="before")
     @classmethod
@@ -78,7 +78,9 @@ class AlertRuleResponse(BaseModel):
     threshold: float
     window_days: int
     is_active: bool
+    notification_cooldown_minutes: int
     last_triggered_at: str | None
+    last_notified_at: str | None
     created_at: str
     updated_at: str | None
 
@@ -88,6 +90,7 @@ class AlertRuleEvaluationResponse(AlertRuleResponse):
 
     current_value: float
     breached: bool
+    notification_sent: bool = False
 
 
 class AlertWindowMetricsResponse(BaseModel):
@@ -108,8 +111,87 @@ class AlertEvaluationResponse(BaseModel):
 
     generated_at: str
     alert_count: int
+    notifications_sent: int
+    notifications_failed: int
     rules: list[AlertRuleEvaluationResponse]
     window_metrics: list[AlertWindowMetricsResponse]
+
+
+class AlertDestinationCreate(BaseModel):
+    """Request schema for creating an alert destination."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=120)
+    kind: str = Field(default="webhook", pattern=ALERT_DESTINATION_KIND_PATTERN)
+    target_url: str = Field(min_length=1, max_length=512)
+    secret_token: str | None = Field(default=None, max_length=255)
+    is_active: bool = True
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def normalize_name(cls, value: str | None) -> str:
+        normalized = normalize_text(value, field_name="name", max_length=120)
+        if normalized is None:
+            raise ValueError("name cannot be null")
+        return normalized
+
+    @field_validator("target_url")
+    @classmethod
+    def validate_target_url(cls, value: str) -> str:
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("target_url must be a valid http(s) URL")
+        return value
+
+    @field_validator("secret_token", mode="before")
+    @classmethod
+    def normalize_secret_token(cls, value: str | None) -> str | None:
+        return normalize_text(value, field_name="secret_token", max_length=255)
+
+
+class AlertDestinationUpdate(BaseModel):
+    """Request schema for updating an alert destination."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    kind: str | None = Field(default=None, pattern=ALERT_DESTINATION_KIND_PATTERN)
+    target_url: str | None = Field(default=None, min_length=1, max_length=512)
+    secret_token: str | None = Field(default=None, max_length=255)
+    is_active: bool | None = None
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def normalize_name(cls, value: str | None) -> str | None:
+        return normalize_text(value, field_name="name", max_length=120)
+
+    @field_validator("target_url")
+    @classmethod
+    def validate_target_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("target_url must be a valid http(s) URL")
+        return value
+
+    @field_validator("secret_token", mode="before")
+    @classmethod
+    def normalize_secret_token(cls, value: str | None) -> str | None:
+        return normalize_text(value, field_name="secret_token", max_length=255)
+
+
+class AlertDestinationResponse(BaseModel):
+    """Serialized project alert destination."""
+
+    id: str
+    name: str
+    kind: str
+    target_url: str
+    is_active: bool
+    created_at: str
+    updated_at: str | None
 
 
 def _to_rule_response(rule: ProjectAlertRule) -> AlertRuleResponse:
@@ -121,79 +203,37 @@ def _to_rule_response(rule: ProjectAlertRule) -> AlertRuleResponse:
         threshold=rule.threshold,
         window_days=rule.window_days,
         is_active=rule.is_active,
+        notification_cooldown_minutes=rule.notification_cooldown_minutes,
         last_triggered_at=rule.last_triggered_at.isoformat() if rule.last_triggered_at else None,
+        last_notified_at=rule.last_notified_at.isoformat() if rule.last_notified_at else None,
         created_at=rule.created_at.isoformat() if rule.created_at else "",
         updated_at=rule.updated_at.isoformat() if rule.updated_at else None,
     )
 
 
-def _evaluate_operator(operator: str, value: float, threshold: float) -> bool:
-    if operator == "gt":
-        return value > threshold
-    if operator == "gte":
-        return value >= threshold
-    if operator == "lt":
-        return value < threshold
-    if operator == "lte":
-        return value <= threshold
-    raise ValueError(f"Unsupported operator: {operator}")
-
-
-def _compute_window_metrics(
-    db: Session,
-    project_id: UUID,
-    window_days: int,
-) -> AlertWindowMetricsResponse:
-    window_start = datetime.now(timezone.utc) - timedelta(days=window_days)
-    traces = (
-        db.query(Trace)
-        .filter(Trace.project_id == project_id, Trace.created_at >= window_start)
-        .all()
+def _to_destination_response(destination: ProjectAlertDestination) -> AlertDestinationResponse:
+    return AlertDestinationResponse(
+        id=str(destination.id),
+        name=destination.name,
+        kind=destination.kind,
+        target_url=destination.target_url,
+        is_active=destination.is_active,
+        created_at=destination.created_at.isoformat() if destination.created_at else "",
+        updated_at=destination.updated_at.isoformat() if destination.updated_at else None,
     )
 
-    trace_count = len(traces)
-    error_trace_count = sum(
-        1
-        for trace in traces
-        if trace.status == "error" or (trace.error_count or 0) > 0
-    )
-    durations = [float(trace.duration_ms) for trace in traces if trace.duration_ms is not None]
-    tokens = [int(trace.total_tokens) for trace in traces if trace.total_tokens is not None]
-    costs = [float(trace.total_cost) for trace in traces if trace.total_cost is not None]
 
-    avg_duration_ms = (sum(durations) / len(durations)) if durations else 0.0
-    avg_tokens = (sum(tokens) / len(tokens)) if tokens else 0.0
-    avg_cost = (sum(costs) / len(costs)) if costs else 0.0
-    error_rate_percent = (error_trace_count / trace_count) * 100 if trace_count else 0.0
-
+def _to_window_metrics_response(metrics: AlertWindowMetrics) -> AlertWindowMetricsResponse:
     return AlertWindowMetricsResponse(
-        window_days=window_days,
-        trace_count=trace_count,
-        error_rate_percent=error_rate_percent,
-        avg_duration_ms=avg_duration_ms,
-        avg_tokens=avg_tokens,
-        avg_cost=avg_cost,
-        total_tokens=sum(tokens),
-        total_cost=sum(costs),
+        window_days=metrics.window_days,
+        trace_count=metrics.trace_count,
+        error_rate_percent=metrics.error_rate_percent,
+        avg_duration_ms=metrics.avg_duration_ms,
+        avg_tokens=metrics.avg_tokens,
+        avg_cost=metrics.avg_cost,
+        total_tokens=metrics.total_tokens,
+        total_cost=metrics.total_cost,
     )
-
-
-def _metric_value(metrics: AlertWindowMetricsResponse, metric: str) -> float:
-    if metric == "trace_count":
-        return float(metrics.trace_count)
-    if metric == "total_tokens":
-        return float(metrics.total_tokens)
-    if metric == "total_cost":
-        return float(metrics.total_cost)
-    if metric == "error_rate_percent":
-        return float(metrics.error_rate_percent)
-    if metric == "avg_duration_ms":
-        return float(metrics.avg_duration_ms)
-    if metric == "avg_tokens":
-        return float(metrics.avg_tokens)
-    if metric == "avg_cost":
-        return float(metrics.avg_cost)
-    raise ValueError(f"Unsupported metric: {metric}")
 
 
 def _get_project_rule_or_404(
@@ -213,6 +253,25 @@ def _get_project_rule_or_404(
     if not rule:
         raise HTTPException(status_code=404, detail="Alert rule not found")
     return rule
+
+
+def _get_project_destination_or_404(
+    db: Session,
+    *,
+    project_id: UUID,
+    destination_id: UUID,
+) -> ProjectAlertDestination:
+    destination = (
+        db.query(ProjectAlertDestination)
+        .filter(
+            ProjectAlertDestination.id == destination_id,
+            ProjectAlertDestination.project_id == project_id,
+        )
+        .first()
+    )
+    if not destination:
+        raise HTTPException(status_code=404, detail="Alert destination not found")
+    return destination
 
 
 @router.get("", response_model=list[AlertRuleResponse])
@@ -246,6 +305,7 @@ def create_alert_rule(
         threshold=payload.threshold,
         window_days=payload.window_days,
         is_active=payload.is_active,
+        notification_cooldown_minutes=payload.notification_cooldown_minutes,
     )
     db.add(rule)
     db.commit()
@@ -275,8 +335,8 @@ def update_alert_rule(
     """Update an existing alert rule."""
     rule = _get_project_rule_or_404(db, project_id=project.id, rule_id=rule_id)
 
-    if "name" in payload.model_fields_set:
-        rule.name = payload.name or rule.name
+    if "name" in payload.model_fields_set and payload.name is not None:
+        rule.name = payload.name
     if "metric" in payload.model_fields_set and payload.metric is not None:
         rule.metric = payload.metric
     if "operator" in payload.model_fields_set and payload.operator is not None:
@@ -287,6 +347,11 @@ def update_alert_rule(
         rule.window_days = payload.window_days
     if "is_active" in payload.model_fields_set and payload.is_active is not None:
         rule.is_active = payload.is_active
+    if (
+        "notification_cooldown_minutes" in payload.model_fields_set
+        and payload.notification_cooldown_minutes is not None
+    ):
+        rule.notification_cooldown_minutes = payload.notification_cooldown_minutes
 
     db.commit()
     db.refresh(rule)
@@ -325,65 +390,161 @@ def delete_alert_rule(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.get("/destinations", response_model=list[AlertDestinationResponse])
+def list_alert_destinations(
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> list[AlertDestinationResponse]:
+    """List alert delivery destinations for the current project."""
+    destinations = (
+        db.query(ProjectAlertDestination)
+        .filter(ProjectAlertDestination.project_id == project.id)
+        .order_by(ProjectAlertDestination.created_at.desc())
+        .all()
+    )
+    return [_to_destination_response(destination) for destination in destinations]
+
+
+@router.post(
+    "/destinations",
+    response_model=AlertDestinationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_alert_destination(
+    payload: AlertDestinationCreate,
+    request: Request,
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> AlertDestinationResponse:
+    """Create a new alert delivery destination for the current project."""
+    destination = ProjectAlertDestination(
+        project_id=project.id,
+        name=payload.name,
+        kind=payload.kind,
+        target_url=payload.target_url,
+        secret_token=payload.secret_token,
+        is_active=payload.is_active,
+    )
+    db.add(destination)
+    db.commit()
+    db.refresh(destination)
+
+    audit_log(
+        "project_alert_destination_created",
+        request_id=getattr(request.state, "request_id", None),
+        project_id=str(project.id),
+        destination_id=str(destination.id),
+        kind=destination.kind,
+    )
+    return _to_destination_response(destination)
+
+
+@router.put("/destinations/{destination_id}", response_model=AlertDestinationResponse)
+def update_alert_destination(
+    destination_id: UUID,
+    payload: AlertDestinationUpdate,
+    request: Request,
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> AlertDestinationResponse:
+    """Update an existing alert delivery destination."""
+    destination = _get_project_destination_or_404(
+        db,
+        project_id=project.id,
+        destination_id=destination_id,
+    )
+
+    if "name" in payload.model_fields_set and payload.name is not None:
+        destination.name = payload.name
+    if "kind" in payload.model_fields_set and payload.kind is not None:
+        destination.kind = payload.kind
+    if "target_url" in payload.model_fields_set and payload.target_url is not None:
+        destination.target_url = payload.target_url
+    if "secret_token" in payload.model_fields_set:
+        destination.secret_token = payload.secret_token
+    if "is_active" in payload.model_fields_set and payload.is_active is not None:
+        destination.is_active = payload.is_active
+
+    db.commit()
+    db.refresh(destination)
+
+    audit_log(
+        "project_alert_destination_updated",
+        request_id=getattr(request.state, "request_id", None),
+        project_id=str(project.id),
+        destination_id=str(destination.id),
+        is_active=destination.is_active,
+    )
+    return _to_destination_response(destination)
+
+
+@router.delete("/destinations/{destination_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_alert_destination(
+    destination_id: UUID,
+    request: Request,
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> Response:
+    """Delete an alert destination."""
+    destination = _get_project_destination_or_404(
+        db,
+        project_id=project.id,
+        destination_id=destination_id,
+    )
+    db.delete(destination)
+    db.commit()
+    audit_log(
+        "project_alert_destination_deleted",
+        request_id=getattr(request.state, "request_id", None),
+        project_id=str(project.id),
+        destination_id=str(destination_id),
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get("/evaluate", response_model=AlertEvaluationResponse)
 def evaluate_alert_rules(
     request: Request,
     persist: bool = Query(default=False),
+    notify: bool = Query(default=False),
     project: Project = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ) -> AlertEvaluationResponse:
     """Evaluate all active rules against rolling trace-window metrics."""
-    rules = (
-        db.query(ProjectAlertRule)
-        .filter(ProjectAlertRule.project_id == project.id)
-        .order_by(ProjectAlertRule.created_at.asc())
-        .all()
+    evaluation = evaluate_project_alerts(
+        db,
+        project,
+        persist=persist,
+        notify=notify,
     )
-
-    window_cache: dict[int, AlertWindowMetricsResponse] = {}
-    evaluated_rules: list[AlertRuleEvaluationResponse] = []
-    breached_count = 0
-    now = datetime.now(timezone.utc)
-
-    for rule in rules:
-        metrics = window_cache.get(rule.window_days)
-        if metrics is None:
-            metrics = _compute_window_metrics(db, project.id, rule.window_days)
-            window_cache[rule.window_days] = metrics
-
-        current_value = _metric_value(metrics, rule.metric)
-        breached = (
-            rule.is_active
-            and _evaluate_operator(rule.operator, current_value, rule.threshold)
-        )
-        if breached:
-            breached_count += 1
-            if persist:
-                rule.last_triggered_at = now
-
-        evaluated_rules.append(
-            AlertRuleEvaluationResponse(
-                **_to_rule_response(rule).model_dump(),
-                current_value=current_value,
-                breached=breached,
-            )
-        )
-
-    if persist:
-        db.commit()
 
     audit_log(
         "project_alert_rules_evaluated",
         request_id=getattr(request.state, "request_id", None),
         project_id=str(project.id),
-        rule_count=len(rules),
-        breached_count=breached_count,
+        rule_count=len(evaluation.rule_results),
+        breached_count=evaluation.alert_count,
         persist=persist,
+        notify=notify,
+        notifications_sent=evaluation.notifications_sent,
+        notifications_failed=evaluation.notifications_failed,
     )
 
     return AlertEvaluationResponse(
-        generated_at=now.isoformat(),
-        alert_count=breached_count,
-        rules=evaluated_rules,
-        window_metrics=sorted(window_cache.values(), key=lambda item: item.window_days),
+        generated_at=evaluation.generated_at.isoformat(),
+        alert_count=evaluation.alert_count,
+        notifications_sent=evaluation.notifications_sent,
+        notifications_failed=evaluation.notifications_failed,
+        rules=[
+            AlertRuleEvaluationResponse(
+                **_to_rule_response(result.rule).model_dump(),
+                current_value=result.current_value,
+                breached=result.breached,
+                notification_sent=result.notification_sent,
+            )
+            for result in evaluation.rule_results
+        ],
+        window_metrics=[
+            _to_window_metrics_response(item) for item in evaluation.window_metrics
+        ],
     )

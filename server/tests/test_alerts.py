@@ -2,6 +2,8 @@
 
 from datetime import datetime, timezone
 
+import app.alerts as alert_service
+
 
 def _create_project(client, name: str) -> str:
     response = client.post("/api/v1/projects/", json={"name": name})
@@ -196,3 +198,125 @@ def test_alert_scopes_allow_read_but_restrict_mutations(client):
         headers={"X-API-Key": read_key},
     )
     assert evaluate_allowed.status_code == 200
+
+
+def test_alert_destination_crud_and_scope_controls(client):
+    """Alert destinations support CRUD and honor key scopes."""
+    admin_key = _create_project(client, "alerts-destinations")
+    read_key = _create_scoped_key(client, admin_key, "alerts-destinations-reader", ["read"])
+
+    create_response = client.post(
+        "/api/v1/projects/me/alerts/destinations",
+        headers={"X-API-Key": admin_key},
+        json={
+            "name": "Primary webhook",
+            "kind": "webhook",
+            "target_url": "https://example.com/alerts",
+            "secret_token": "secret",
+            "is_active": True,
+        },
+    )
+    assert create_response.status_code == 201
+    destination = create_response.json()
+    assert destination["name"] == "Primary webhook"
+    assert destination["kind"] == "webhook"
+
+    list_response = client.get(
+        "/api/v1/projects/me/alerts/destinations",
+        headers={"X-API-Key": read_key},
+    )
+    assert list_response.status_code == 200
+    assert len(list_response.json()) == 1
+
+    create_denied = client.post(
+        "/api/v1/projects/me/alerts/destinations",
+        headers={"X-API-Key": read_key},
+        json={
+            "name": "Nope",
+            "kind": "webhook",
+            "target_url": "https://example.com/blocked",
+        },
+    )
+    assert create_denied.status_code == 403
+
+    destination_id = destination["id"]
+    update_response = client.put(
+        f"/api/v1/projects/me/alerts/destinations/{destination_id}",
+        headers={"X-API-Key": admin_key},
+        json={"is_active": False},
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["is_active"] is False
+
+    delete_response = client.delete(
+        f"/api/v1/projects/me/alerts/destinations/{destination_id}",
+        headers={"X-API-Key": admin_key},
+    )
+    assert delete_response.status_code == 204
+
+
+def test_alert_notify_respects_cooldown_and_does_not_repeat_immediately(client, monkeypatch):
+    """Notification delivery should respect per-rule cooldown."""
+    api_key = _create_project(client, "alerts-notify")
+    headers = {"X-API-Key": api_key}
+
+    _ingest_trace_span(client, api_key=api_key, suffix="notify-err", status="error")
+    client.post(
+        "/api/v1/projects/me/alerts",
+        headers=headers,
+        json={
+            "name": "Error rate >= 50%",
+            "metric": "error_rate_percent",
+            "operator": "gte",
+            "threshold": 50,
+            "window_days": 30,
+            "is_active": True,
+            "notification_cooldown_minutes": 60,
+        },
+    )
+
+    create_destination = client.post(
+        "/api/v1/projects/me/alerts/destinations",
+        headers=headers,
+        json={
+            "name": "Notify webhook",
+            "kind": "webhook",
+            "target_url": "https://example.com/alerts",
+            "is_active": True,
+        },
+    )
+    assert create_destination.status_code == 201
+
+    delivered_payloads = []
+
+    def _mock_post_webhook_json(target_url, payload, secret_token=None):
+        delivered_payloads.append((target_url, payload, secret_token))
+        return True
+
+    monkeypatch.setattr(alert_service, "_post_webhook_json", _mock_post_webhook_json)
+
+    first_eval = client.get(
+        "/api/v1/projects/me/alerts/evaluate",
+        headers=headers,
+        params={"persist": "true", "notify": "true"},
+    )
+    assert first_eval.status_code == 200
+    first_payload = first_eval.json()
+    assert first_payload["alert_count"] == 1
+    assert first_payload["notifications_sent"] == 1
+    assert first_payload["notifications_failed"] == 0
+    assert first_payload["rules"][0]["notification_sent"] is True
+    assert first_payload["rules"][0]["last_notified_at"] is not None
+    assert len(delivered_payloads) == 1
+
+    second_eval = client.get(
+        "/api/v1/projects/me/alerts/evaluate",
+        headers=headers,
+        params={"persist": "true", "notify": "true"},
+    )
+    assert second_eval.status_code == 200
+    second_payload = second_eval.json()
+    assert second_payload["alert_count"] == 1
+    assert second_payload["notifications_sent"] == 0
+    assert second_payload["rules"][0]["notification_sent"] is False
+    assert len(delivered_payloads) == 1

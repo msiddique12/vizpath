@@ -67,6 +67,11 @@ class Project(Base):
         back_populates="project",
         cascade="all, delete-orphan",
     )
+    alert_destinations = relationship(
+        "ProjectAlertDestination",
+        back_populates="project",
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self) -> str:
         return f"<Project(id={self.id}, name='{self.name}')>"
@@ -270,7 +275,9 @@ class ProjectAlertRule(Base):
     threshold = Column(Float, nullable=False)
     window_days = Column(Integer, default=7, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
+    notification_cooldown_minutes = Column(Integer, default=60, nullable=False)
     last_triggered_at = Column(DateTime(timezone=True), nullable=True)
+    last_notified_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -280,4 +287,37 @@ class ProjectAlertRule(Base):
         return (
             f"<ProjectAlertRule(project_id={self.project_id}, metric={self.metric}, "
             f"operator={self.operator}, threshold={self.threshold})>"
+        )
+
+
+class ProjectAlertDestination(Base):
+    """Per-project destination for alert notifications."""
+
+    __tablename__ = "project_alert_destinations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id"),
+        nullable=False,
+        index=True,
+    )
+    name = Column(String(120), nullable=False)
+    kind = Column(String(20), nullable=False, default="webhook")
+    target_url = Column(String(512), nullable=False)
+    secret_token = Column(String(255), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
+
+    project = relationship("Project", back_populates="alert_destinations")
+
+    __table_args__ = (
+        Index("ix_alert_destinations_project_active", "project_id", "is_active"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<ProjectAlertDestination(project_id={self.project_id}, name={self.name}, "
+            f"kind={self.kind}, active={self.is_active})>"
         )
