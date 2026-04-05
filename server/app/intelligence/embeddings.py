@@ -4,8 +4,8 @@ Adapted from engine/intelligence/embeddings.py to work with vizpath
 Trace + Span dicts instead of legacy Trajectory objects.
 """
 
+import json
 import logging
-import pickle
 from typing import Any
 
 import numpy as np
@@ -47,6 +47,17 @@ def _get_redis() -> redis.Redis | None:
 def _get_zero_vector() -> np.ndarray:
     """Return a zero vector of the embedding dimension."""
     return np.zeros(EMBEDDING_DIM, dtype=np.float32)
+
+
+def _serialize_embedding_cache(embedding: np.ndarray) -> bytes:
+    return json.dumps(embedding.tolist()).encode("utf-8")
+
+
+def _deserialize_embedding_cache(raw: bytes) -> np.ndarray:
+    values = json.loads(raw.decode("utf-8"))
+    if not isinstance(values, list):
+        raise ValueError("Cached embedding payload must be a list")
+    return np.array(values, dtype=np.float32)
 
 
 def trace_to_text(trace_data: dict[str, Any]) -> str:
@@ -105,7 +116,7 @@ async def embed_trace(trace_id: str, trace_text: str) -> np.ndarray:
             cached = redis_client.get(cache_key)
             if cached:
                 logger.debug(f"Cache hit for embedding: {trace_id}")
-                return pickle.loads(cached)
+                return _deserialize_embedding_cache(cached)
         except Exception as e:
             logger.warning(f"Redis GET failed for {cache_key}: {e}")
 
@@ -124,7 +135,7 @@ async def embed_trace(trace_id: str, trace_text: str) -> np.ndarray:
     # 3. Cache
     if redis_client:
         try:
-            redis_client.set(cache_key, pickle.dumps(embedding), ex=CACHE_TTL_SECONDS)
+            redis_client.set(cache_key, _serialize_embedding_cache(embedding), ex=CACHE_TTL_SECONDS)
         except Exception as e:
             logger.warning(f"Redis SET failed for {cache_key}: {e}")
 
@@ -155,7 +166,14 @@ async def get_trace_embeddings(traces: dict[str, str]) -> dict[str, np.ndarray]:
 
             for i, cached in enumerate(cached_results):
                 if cached:
-                    results[trace_ids[i]] = pickle.loads(cached)
+                    try:
+                        results[trace_ids[i]] = _deserialize_embedding_cache(cached)
+                    except Exception as decode_error:
+                        logger.warning(
+                            "Redis embedding cache decode failed for %s: %s",
+                            trace_ids[i],
+                            decode_error,
+                        )
 
             logger.debug(f"Cache hit for {len(results)}/{len(trace_ids)} embeddings.")
         except Exception as e:
@@ -185,7 +203,11 @@ async def get_trace_embeddings(traces: dict[str, str]) -> dict[str, np.ndarray]:
                     pipe = redis_client.pipeline()
                     for tid in missed_ids:
                         if tid in results:
-                            pipe.set(f"embedding:{tid}", pickle.dumps(results[tid]), ex=CACHE_TTL_SECONDS)
+                            pipe.set(
+                                f"embedding:{tid}",
+                                _serialize_embedding_cache(results[tid]),
+                                ex=CACHE_TTL_SECONDS,
+                            )
                     pipe.execute()
                 except Exception as e:
                     logger.warning(f"Redis pipeline SET failed: {e}")

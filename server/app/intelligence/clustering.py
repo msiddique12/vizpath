@@ -4,8 +4,8 @@ Adapted from engine/intelligence/clustering.py to work with vizpath
 Trace+Span model using string trace_id keys.
 """
 
+import json
 import logging
-import pickle
 from collections import Counter
 from typing import Any
 
@@ -31,6 +31,27 @@ def _get_redis() -> redis.Redis | None:
         return client
     except Exception:
         return None
+
+
+def _serialize_cluster_cache(result: dict[str, Any]) -> bytes:
+    payload = {
+        "clusters": result["clusters"],
+        "centroids": np.asarray(result["centroids"], dtype=np.float32).tolist(),
+    }
+    return json.dumps(payload).encode("utf-8")
+
+
+def _deserialize_cluster_cache(raw: bytes) -> dict[str, Any]:
+    payload = json.loads(raw.decode("utf-8"))
+    clusters = payload.get("clusters")
+    centroids = payload.get("centroids")
+    if not isinstance(clusters, dict) or not isinstance(centroids, list):
+        raise ValueError("Invalid cluster cache payload")
+    normalized_clusters = {str(k): int(v) for k, v in clusters.items()}
+    return {
+        "clusters": normalized_clusters,
+        "centroids": np.array(centroids, dtype=np.float32),
+    }
 
 
 def optimal_k(embeddings: np.ndarray, max_k: int = 20) -> int:
@@ -86,7 +107,7 @@ def cluster_traces(
         try:
             cached = redis_client.get(cache_key)
             if cached:
-                return pickle.loads(cached)
+                return _deserialize_cluster_cache(cached)
         except Exception as e:
             logger.warning(f"Redis GET failed for {cache_key}: {e}")
 
@@ -113,7 +134,7 @@ def cluster_traces(
 
         if redis_client:
             try:
-                redis_client.set(cache_key, pickle.dumps(result), ex=CACHE_TTL_SECONDS)
+                redis_client.set(cache_key, _serialize_cluster_cache(result), ex=CACHE_TTL_SECONDS)
             except Exception as e:
                 logger.warning(f"Redis SET failed for {cache_key}: {e}")
 

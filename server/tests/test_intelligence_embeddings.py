@@ -1,5 +1,6 @@
 """Tests for intelligence embeddings module."""
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
@@ -114,11 +115,11 @@ class TestEmbedTrace:
     @pytest.mark.asyncio
     async def test_embed_trace_cache_hit(self):
         """Test that cached embeddings are returned without API call."""
-        import pickle
-
         cached_embedding = np.ones(EMBEDDING_DIM, dtype=np.float32)
         mock_redis = MagicMock()
-        mock_redis.get.return_value = pickle.dumps(cached_embedding)
+        mock_redis.get.return_value = json.dumps(cached_embedding.tolist()).encode(
+            "utf-8"
+        )
 
         with (
             patch("app.intelligence.embeddings._get_redis", return_value=mock_redis),
@@ -131,6 +132,27 @@ class TestEmbedTrace:
 
             assert np.array_equal(result, cached_embedding)
             mock_client.embeddings.create.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_embed_trace_invalid_cache_falls_back_to_api(self):
+        """Invalid cached payload should not crash and should regenerate embedding."""
+        mock_redis = MagicMock()
+        mock_redis.get.return_value = b"not-json"
+
+        with (
+            patch("app.intelligence.embeddings._get_redis", return_value=mock_redis),
+            patch("app.intelligence.embeddings._get_client") as mock_get_client,
+        ):
+            mock_client = AsyncMock()
+            mock_client.embeddings.create = AsyncMock(
+                return_value=_mock_embedding_response()
+            )
+            mock_get_client.return_value = mock_client
+
+            result = await embed_trace("trace-001", "some text")
+            assert isinstance(result, np.ndarray)
+            assert result.shape == (EMBEDDING_DIM,)
+            mock_client.embeddings.create.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_embed_trace_api_failure_returns_zero(self):
