@@ -246,6 +246,22 @@ export interface AlertDestination {
   updated_at: string | null
 }
 
+export type AlertEventType = 'breach' | 'notification_sent' | 'notification_failed'
+
+export interface AlertEvent {
+  id: string
+  event_type: AlertEventType
+  rule_id: string | null
+  destination_id: string | null
+  rule_name: string | null
+  metric: AlertMetric | null
+  operator: AlertOperator | null
+  threshold: number | null
+  current_value: number | null
+  message: string | null
+  created_at: string
+}
+
 export async function getAlertRules(): Promise<AlertRule[]> {
   return fetchApi('/projects/me/alerts')
 }
@@ -341,6 +357,20 @@ export async function deleteAlertDestination(destinationId: string): Promise<voi
   await fetchApi(`/projects/me/alerts/destinations/${destinationId}`, {
     method: 'DELETE',
   })
+}
+
+export async function getAlertEvents(params?: {
+  event_type?: AlertEventType
+  rule_id?: string
+  limit?: number
+  offset?: number
+}): Promise<AlertEvent[]> {
+  const searchParams = new URLSearchParams()
+  if (params?.event_type) searchParams.set('event_type', params.event_type)
+  if (params?.rule_id) searchParams.set('rule_id', params.rule_id)
+  if (params?.limit !== undefined) searchParams.set('limit', String(params.limit))
+  if (params?.offset !== undefined) searchParams.set('offset', String(params.offset))
+  return fetchApi(`/projects/me/alerts/events?${searchParams}`)
 }
 
 // Curation API

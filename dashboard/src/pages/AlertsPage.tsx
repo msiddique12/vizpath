@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, BellRing, Loader2, ShieldCheck, Trash2, Webhook } from 'lucide-react'
 import clsx from 'clsx'
 import {
+  AlertEventType,
   AlertMetric,
   AlertOperator,
   createAlertDestination,
@@ -11,6 +12,7 @@ import {
   deleteAlertRule,
   evaluateAlertRules,
   getAlertDestinations,
+  getAlertEvents,
   getAlertRules,
   updateAlertDestination,
   updateAlertRule,
@@ -35,6 +37,12 @@ const OPERATOR_OPTIONS: Array<{ value: AlertOperator; label: string }> = [
 
 function formatMetric(metric: AlertMetric): string {
   return METRIC_OPTIONS.find((option) => option.value === metric)?.label ?? metric
+}
+
+function formatEventType(eventType: AlertEventType): string {
+  if (eventType === 'breach') return 'Rule Breach'
+  if (eventType === 'notification_sent') return 'Notification Sent'
+  return 'Notification Failed'
 }
 
 export default function AlertsPage() {
@@ -64,10 +72,16 @@ export default function AlertsPage() {
     queryFn: getAlertDestinations,
   })
 
+  const eventsQuery = useQuery({
+    queryKey: ['alerts-events'],
+    queryFn: () => getAlertEvents({ limit: 25 }),
+  })
+
   const createRuleMutation = useMutation({
     mutationFn: createAlertRule,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['alerts-rules'] })
+      queryClient.invalidateQueries({ queryKey: ['alerts-events'] })
       setActionStatus('Alert rule created.')
       setName('')
       setFormError(null)
@@ -87,6 +101,7 @@ export default function AlertsPage() {
         : ''
       setActionStatus(`Rules evaluated.${notificationSummary}`)
       queryClient.invalidateQueries({ queryKey: ['alerts-rules'] })
+      queryClient.invalidateQueries({ queryKey: ['alerts-events'] })
     },
     onError: () => setActionStatus('Failed to evaluate alert rules.'),
   })
@@ -95,6 +110,7 @@ export default function AlertsPage() {
     mutationFn: createAlertDestination,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['alerts-destinations'] })
+      queryClient.invalidateQueries({ queryKey: ['alerts-events'] })
       setActionStatus('Alert destination created.')
       setDestinationName('')
       setDestinationUrl('')
@@ -109,6 +125,7 @@ export default function AlertsPage() {
       updateAlertRule(ruleId, { is_active: isActive }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['alerts-rules'] })
+      queryClient.invalidateQueries({ queryKey: ['alerts-events'] })
       setActionStatus('Rule updated.')
     },
     onError: () => setActionStatus('Failed to update rule.'),
@@ -118,6 +135,7 @@ export default function AlertsPage() {
     mutationFn: deleteAlertRule,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['alerts-rules'] })
+      queryClient.invalidateQueries({ queryKey: ['alerts-events'] })
       setActionStatus('Rule deleted.')
     },
     onError: () => setActionStatus('Failed to delete rule.'),
@@ -128,6 +146,7 @@ export default function AlertsPage() {
       updateAlertDestination(destinationId, { is_active: isActive }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['alerts-destinations'] })
+      queryClient.invalidateQueries({ queryKey: ['alerts-events'] })
       setActionStatus('Destination updated.')
     },
     onError: () => setActionStatus('Failed to update destination.'),
@@ -137,6 +156,7 @@ export default function AlertsPage() {
     mutationFn: deleteAlertDestination,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['alerts-destinations'] })
+      queryClient.invalidateQueries({ queryKey: ['alerts-events'] })
       setActionStatus('Destination deleted.')
     },
     onError: () => setActionStatus('Failed to delete destination.'),
@@ -144,6 +164,7 @@ export default function AlertsPage() {
 
   const rules = rulesQuery.data ?? []
   const destinations = destinationsQuery.data ?? []
+  const events = eventsQuery.data ?? []
   const activeDestinations = destinations.filter((destination) => destination.is_active)
   const evaluatedRules = useMemo(() => evaluateMutation.data?.rules ?? [], [evaluateMutation.data?.rules])
   const evaluatedById = useMemo(
@@ -454,6 +475,41 @@ export default function AlertsPage() {
           </div>
         </div>
       )}
+
+      <div className="bg-dark-900 rounded-lg border border-dark-700">
+        <div className="px-4 py-3 border-b border-dark-700">
+          <h2 className="text-sm font-medium text-muted-200">Recent Alert Events</h2>
+        </div>
+        {eventsQuery.isLoading ? (
+          <div className="flex items-center justify-center h-20">
+            <Loader2 className="h-5 w-5 text-primary-500 animate-spin" />
+          </div>
+        ) : eventsQuery.error ? (
+          <div className="p-4 text-sm text-red-400">Failed to load alert events.</div>
+        ) : events.length === 0 ? (
+          <div className="p-4 text-sm text-muted-400">No alert events yet.</div>
+        ) : (
+          <div className="divide-y divide-dark-700">
+            {events.map((event) => (
+              <div key={event.id} className="px-4 py-3 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm text-muted-100">{formatEventType(event.event_type)}</p>
+                  <p className="text-xs text-muted-400 mt-1">
+                    {event.rule_name ?? 'Unknown rule'}
+                    {event.current_value !== null && event.threshold !== null
+                      ? ` · current ${event.current_value.toFixed(2)} vs ${event.threshold.toFixed(2)}`
+                      : ''}
+                  </p>
+                  {event.message && <p className="text-xs text-muted-500 mt-1">{event.message}</p>}
+                </div>
+                <p className="text-xs text-muted-500 whitespace-nowrap">
+                  {new Date(event.created_at).toLocaleString()}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="bg-dark-900 rounded-lg border border-dark-700">
         <div className="px-4 py-3 border-b border-dark-700">

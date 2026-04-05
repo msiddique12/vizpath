@@ -79,6 +79,24 @@ describe('AlertsPage', () => {
         })
       }
 
+      if (url.includes('/api/v1/projects/me/alerts/events') && method === 'GET') {
+        return createJsonResponse([
+          {
+            id: 'event-1',
+            event_type: 'breach',
+            rule_id: 'rule-1',
+            destination_id: null,
+            rule_name: 'Error guardrail',
+            metric: 'error_rate_percent',
+            operator: 'gte',
+            threshold: 5,
+            current_value: 50,
+            message: 'Rule breached',
+            created_at: new Date().toISOString(),
+          },
+        ])
+      }
+
       if (url.includes('/api/v1/projects/me/alerts/destinations') && method === 'GET') {
         return createJsonResponse(destinations)
       }
@@ -207,6 +225,8 @@ describe('AlertsPage', () => {
       expect(evaluateCalled).toBe(true)
       expect(screen.getByText('1 active alert detected.')).toBeInTheDocument()
       expect(screen.getByText(/Current: 50.00/)).toBeInTheDocument()
+      expect(screen.getByText('Recent Alert Events')).toBeInTheDocument()
+      expect(screen.getByText('Rule Breach')).toBeInTheDocument()
     })
   })
 })
