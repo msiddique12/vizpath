@@ -10,7 +10,13 @@ from uuid import UUID
 import httpx
 from sqlalchemy.orm import Session
 
-from app.models import Project, ProjectAlertDestination, ProjectAlertRule, Trace
+from app.models import (
+    Project,
+    ProjectAlertDestination,
+    ProjectAlertEvent,
+    ProjectAlertRule,
+    Trace,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +31,7 @@ ALERT_METRICS = (
 )
 ALERT_OPERATORS = ("gt", "gte", "lt", "lte")
 ALERT_DESTINATION_KINDS = ("webhook",)
+ALERT_EVENT_TYPES = ("breach", "notification_sent", "notification_failed")
 
 
 @dataclass(frozen=True)
@@ -61,6 +68,14 @@ class AlertEvaluationResult:
     window_metrics: list[AlertWindowMetrics]
     notifications_sent: int
     notifications_failed: int
+
+
+@dataclass(frozen=True)
+class AlertDestinationDeliveryResult:
+    """Result of attempting delivery to one destination."""
+
+    destination: ProjectAlertDestination
+    delivered: bool
 
 
 def evaluate_operator(operator: str, value: float, threshold: float) -> bool:
@@ -169,18 +184,25 @@ def _post_webhook_json(
 def _notify_destinations(
     destinations: list[ProjectAlertDestination],
     payload: dict[str, object],
-) -> tuple[int, int]:
-    sent = 0
-    failed = 0
+) -> list[AlertDestinationDeliveryResult]:
+    results: list[AlertDestinationDeliveryResult] = []
     for destination in destinations:
         if destination.kind != "webhook":
-            failed += 1
+            results.append(
+                AlertDestinationDeliveryResult(destination=destination, delivered=False)
+            )
             continue
-        if _post_webhook_json(destination.target_url, payload, destination.secret_token):
-            sent += 1
-        else:
-            failed += 1
-    return sent, failed
+        results.append(
+            AlertDestinationDeliveryResult(
+                destination=destination,
+                delivered=_post_webhook_json(
+                    destination.target_url,
+                    payload,
+                    destination.secret_token,
+                ),
+            )
+        )
+    return results
 
 
 def evaluate_project_alerts(
@@ -216,7 +238,8 @@ def evaluate_project_alerts(
     breached_count = 0
     notifications_sent = 0
     notifications_failed = 0
-    touched_rule_state = False
+    touched_db_state = False
+    should_record_events = persist or notify
 
     for rule in rules:
         metrics = window_cache.get(rule.window_days)
@@ -232,7 +255,27 @@ def evaluate_project_alerts(
             breached_count += 1
             if persist:
                 rule.last_triggered_at = evaluated_at
-                touched_rule_state = True
+                touched_db_state = True
+
+            if should_record_events:
+                db.add(
+                    ProjectAlertEvent(
+                        project_id=project.id,
+                        rule_id=rule.id,
+                        event_type="breach",
+                        rule_name=rule.name,
+                        metric=rule.metric,
+                        operator=rule.operator,
+                        threshold=rule.threshold,
+                        current_value=current_value,
+                        message=(
+                            f"Rule breached: {rule.metric} {rule.operator} {rule.threshold}, "
+                            f"current={current_value}"
+                        ),
+                    )
+                )
+                touched_db_state = True
+
             if notify and destinations and not _is_notification_in_cooldown(rule, evaluated_at):
                 payload = {
                     "type": "alert_breach",
@@ -248,12 +291,40 @@ def evaluate_project_alerts(
                     },
                     "current_value": current_value,
                 }
-                sent, failed = _notify_destinations(destinations, payload)
+                delivery_results = _notify_destinations(destinations, payload)
+                sent = sum(1 for result in delivery_results if result.delivered)
+                failed = len(delivery_results) - sent
                 notifications_sent += sent
                 notifications_failed += failed
+
+                for result in delivery_results:
+                    if should_record_events:
+                        db.add(
+                            ProjectAlertEvent(
+                                project_id=project.id,
+                                rule_id=rule.id,
+                                destination_id=result.destination.id,
+                                event_type=(
+                                    "notification_sent"
+                                    if result.delivered
+                                    else "notification_failed"
+                                ),
+                                rule_name=rule.name,
+                                metric=rule.metric,
+                                operator=rule.operator,
+                                threshold=rule.threshold,
+                                current_value=current_value,
+                                message=(
+                                    f"Alert delivery to {result.destination.kind} "
+                                    f"{'succeeded' if result.delivered else 'failed'}"
+                                ),
+                            )
+                        )
+                        touched_db_state = True
+
                 if sent > 0:
                     rule.last_notified_at = evaluated_at
-                    touched_rule_state = True
+                    touched_db_state = True
                     notification_sent = True
 
         rule_results.append(
@@ -265,7 +336,7 @@ def evaluate_project_alerts(
             )
         )
 
-    if touched_rule_state:
+    if touched_db_state:
         db.commit()
 
     return AlertEvaluationResult(

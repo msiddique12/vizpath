@@ -72,6 +72,11 @@ class Project(Base):
         back_populates="project",
         cascade="all, delete-orphan",
     )
+    alert_events = relationship(
+        "ProjectAlertEvent",
+        back_populates="project",
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self) -> str:
         return f"<Project(id={self.id}, name='{self.name}')>"
@@ -282,6 +287,7 @@ class ProjectAlertRule(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
 
     project = relationship("Project", back_populates="alert_rules")
+    alert_events = relationship("ProjectAlertEvent", back_populates="rule")
 
     def __repr__(self) -> str:
         return (
@@ -311,6 +317,7 @@ class ProjectAlertDestination(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
 
     project = relationship("Project", back_populates="alert_destinations")
+    alert_events = relationship("ProjectAlertEvent", back_populates="destination")
 
     __table_args__ = (
         Index("ix_alert_destinations_project_active", "project_id", "is_active"),
@@ -320,4 +327,54 @@ class ProjectAlertDestination(Base):
         return (
             f"<ProjectAlertDestination(project_id={self.project_id}, name={self.name}, "
             f"kind={self.kind}, active={self.is_active})>"
+        )
+
+
+class ProjectAlertEvent(Base):
+    """Per-project alert event history for rule breaches and deliveries."""
+
+    __tablename__ = "project_alert_events"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id"),
+        nullable=False,
+        index=True,
+    )
+    rule_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("project_alert_rules.id"),
+        nullable=True,
+        index=True,
+    )
+    destination_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("project_alert_destinations.id"),
+        nullable=True,
+        index=True,
+    )
+    event_type = Column(String(40), nullable=False, index=True)
+    rule_name = Column(String(120), nullable=True)
+    metric = Column(String(40), nullable=True)
+    operator = Column(String(10), nullable=True)
+    threshold = Column(Float, nullable=True)
+    current_value = Column(Float, nullable=True)
+    message = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    project = relationship("Project", back_populates="alert_events")
+    rule = relationship("ProjectAlertRule", back_populates="alert_events")
+    destination = relationship("ProjectAlertDestination", back_populates="alert_events")
+
+    __table_args__ = (
+        Index("ix_alert_events_project_created", "project_id", "created_at"),
+        Index("ix_alert_events_project_type_created", "project_id", "event_type", "created_at"),
+        Index("ix_alert_events_project_rule_created", "project_id", "rule_id", "created_at"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<ProjectAlertEvent(project_id={self.project_id}, event_type={self.event_type}, "
+            f"rule_id={self.rule_id}, destination_id={self.destination_id})>"
         )

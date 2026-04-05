@@ -199,6 +199,12 @@ def test_alert_scopes_allow_read_but_restrict_mutations(client):
     )
     assert evaluate_allowed.status_code == 200
 
+    events_allowed = client.get(
+        "/api/v1/projects/me/alerts/events",
+        headers={"X-API-Key": read_key},
+    )
+    assert events_allowed.status_code == 200
+
 
 def test_alert_destination_crud_and_scope_controls(client):
     """Alert destinations support CRUD and honor key scopes."""
@@ -320,3 +326,66 @@ def test_alert_notify_respects_cooldown_and_does_not_repeat_immediately(client, 
     assert second_payload["notifications_sent"] == 0
     assert second_payload["rules"][0]["notification_sent"] is False
     assert len(delivered_payloads) == 1
+
+
+def test_alert_events_endpoint_lists_and_filters_event_history(client, monkeypatch):
+    """Events endpoint should expose breach and delivery history."""
+    api_key = _create_project(client, "alerts-events")
+    headers = {"X-API-Key": api_key}
+
+    _ingest_trace_span(client, api_key=api_key, suffix="events-err", status="error")
+    create_rule = client.post(
+        "/api/v1/projects/me/alerts",
+        headers=headers,
+        json={
+            "name": "Error rate >= 50%",
+            "metric": "error_rate_percent",
+            "operator": "gte",
+            "threshold": 50,
+            "window_days": 30,
+            "is_active": True,
+            "notification_cooldown_minutes": 60,
+        },
+    )
+    assert create_rule.status_code == 201
+    rule_id = create_rule.json()["id"]
+
+    create_destination = client.post(
+        "/api/v1/projects/me/alerts/destinations",
+        headers=headers,
+        json={
+            "name": "Events webhook",
+            "kind": "webhook",
+            "target_url": "https://example.com/alerts",
+            "is_active": True,
+        },
+    )
+    assert create_destination.status_code == 201
+
+    monkeypatch.setattr(alert_service, "_post_webhook_json", lambda *_args, **_kwargs: True)
+
+    evaluate_response = client.get(
+        "/api/v1/projects/me/alerts/evaluate",
+        headers=headers,
+        params={"persist": "true", "notify": "true"},
+    )
+    assert evaluate_response.status_code == 200
+
+    list_events = client.get("/api/v1/projects/me/alerts/events", headers=headers)
+    assert list_events.status_code == 200
+    events = list_events.json()
+    assert len(events) >= 2
+    event_types = {event["event_type"] for event in events}
+    assert "breach" in event_types
+    assert "notification_sent" in event_types
+    assert any(event["rule_id"] == rule_id for event in events)
+
+    filtered = client.get(
+        "/api/v1/projects/me/alerts/events",
+        headers=headers,
+        params={"event_type": "notification_sent"},
+    )
+    assert filtered.status_code == 200
+    filtered_events = filtered.json()
+    assert filtered_events
+    assert all(event["event_type"] == "notification_sent" for event in filtered_events)

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.alerts import (
     ALERT_DESTINATION_KINDS,
+    ALERT_EVENT_TYPES,
     ALERT_METRICS,
     ALERT_OPERATORS,
     AlertWindowMetrics,
@@ -16,7 +17,7 @@ from app.alerts import (
 )
 from app.auth import verify_api_key
 from app.database import get_db
-from app.models import Project, ProjectAlertDestination, ProjectAlertRule
+from app.models import Project, ProjectAlertDestination, ProjectAlertEvent, ProjectAlertRule
 from app.security import audit_log
 from app.validation import normalize_text
 
@@ -25,6 +26,7 @@ router = APIRouter(prefix="/projects/me/alerts", tags=["Alerts"])
 ALERT_METRIC_PATTERN = f"^({'|'.join(ALERT_METRICS)})$"
 ALERT_OPERATOR_PATTERN = f"^({'|'.join(ALERT_OPERATORS)})$"
 ALERT_DESTINATION_KIND_PATTERN = f"^({'|'.join(ALERT_DESTINATION_KINDS)})$"
+ALERT_EVENT_TYPE_PATTERN = f"^({'|'.join(ALERT_EVENT_TYPES)})$"
 
 
 class AlertRuleCreate(BaseModel):
@@ -194,6 +196,22 @@ class AlertDestinationResponse(BaseModel):
     updated_at: str | None
 
 
+class AlertEventResponse(BaseModel):
+    """Serialized project alert event."""
+
+    id: str
+    event_type: str
+    rule_id: str | None
+    destination_id: str | None
+    rule_name: str | None
+    metric: str | None
+    operator: str | None
+    threshold: float | None
+    current_value: float | None
+    message: str | None
+    created_at: str
+
+
 def _to_rule_response(rule: ProjectAlertRule) -> AlertRuleResponse:
     return AlertRuleResponse(
         id=str(rule.id),
@@ -233,6 +251,22 @@ def _to_window_metrics_response(metrics: AlertWindowMetrics) -> AlertWindowMetri
         avg_cost=metrics.avg_cost,
         total_tokens=metrics.total_tokens,
         total_cost=metrics.total_cost,
+    )
+
+
+def _to_event_response(event: ProjectAlertEvent) -> AlertEventResponse:
+    return AlertEventResponse(
+        id=str(event.id),
+        event_type=event.event_type,
+        rule_id=str(event.rule_id) if event.rule_id else None,
+        destination_id=str(event.destination_id) if event.destination_id else None,
+        rule_name=event.rule_name,
+        metric=event.metric,
+        operator=event.operator,
+        threshold=event.threshold,
+        current_value=event.current_value,
+        message=event.message,
+        created_at=event.created_at.isoformat() if event.created_at else "",
     )
 
 
@@ -500,6 +534,31 @@ def delete_alert_destination(
         destination_id=str(destination_id),
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/events", response_model=list[AlertEventResponse])
+def list_alert_events(
+    event_type: str | None = Query(default=None, pattern=ALERT_EVENT_TYPE_PATTERN),
+    rule_id: UUID | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> list[AlertEventResponse]:
+    """List alert event history for the current project."""
+    query = db.query(ProjectAlertEvent).filter(ProjectAlertEvent.project_id == project.id)
+    if event_type:
+        query = query.filter(ProjectAlertEvent.event_type == event_type)
+    if rule_id:
+        query = query.filter(ProjectAlertEvent.rule_id == rule_id)
+
+    events = (
+        query.order_by(ProjectAlertEvent.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+        .all()
+    )
+    return [_to_event_response(event) for event in events]
 
 
 @router.get("/evaluate", response_model=AlertEvaluationResponse)
