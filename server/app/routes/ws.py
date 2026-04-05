@@ -76,8 +76,14 @@ async def traces_websocket(
     Clients receive updates when new spans are ingested.
     Requires valid API key passed as query parameter.
     """
+    header_api_key = websocket.headers.get("x-api-key")
+    effective_api_key = header_api_key or api_key
+
+    if api_key and not header_api_key:
+        logger.info("WebSocket connected using query API key; prefer X-API-Key header")
+
     # Verify API key before accepting connection
-    project = _verify_ws_api_key(api_key, db=db)
+    project = _verify_ws_api_key(effective_api_key, db=db)
 
     # Require API key unless explicit unauthenticated dev fallback is enabled.
     require_auth = (

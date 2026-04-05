@@ -104,6 +104,27 @@ class TestWebSocketAuth:
         finally:
             monkeypatch.setattr(settings, "security_strict_mode", original)
 
+    def test_strict_mode_allows_valid_header_key(self, client, test_db, monkeypatch):
+        """Strict mode should accept API key via X-API-Key header."""
+        from app.auth import generate_api_key, hash_api_key
+
+        api_key = generate_api_key()
+        project = Project(name="strict-header-project", api_key_hash=hash_api_key(api_key))
+        test_db.add(project)
+        test_db.commit()
+
+        original = settings.security_strict_mode
+        monkeypatch.setattr(settings, "security_strict_mode", True)
+        try:
+            with client.websocket_connect(
+                "/ws/traces",
+                headers={"X-API-Key": api_key},
+            ) as socket:
+                socket.send_text("ping")
+                assert socket.receive_text() == "pong"
+        finally:
+            monkeypatch.setattr(settings, "security_strict_mode", original)
+
 
 class TestBroadcastMessage:
     """Tests for broadcast_message function."""

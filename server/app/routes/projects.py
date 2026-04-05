@@ -208,18 +208,15 @@ async def create_project(
 
 @router.get("/", response_model=list[ProjectResponse])
 async def list_projects(
-    db: Session = Depends(get_db),
+    project: Project = Depends(verify_api_key),
 ) -> list[ProjectResponse]:
-    """List all projects."""
-    projects = db.query(Project).order_by(Project.created_at.desc()).all()
-
+    """List projects visible to the current API key (tenant-scoped)."""
     return [
         ProjectResponse(
-            id=str(p.id),
-            name=p.name,
-            created_at=p.created_at.isoformat(),
+            id=str(project.id),
+            name=project.name,
+            created_at=project.created_at.isoformat(),
         )
-        for p in projects
     ]
 
 
