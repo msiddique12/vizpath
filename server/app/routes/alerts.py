@@ -1,6 +1,5 @@
 """Project alert rule and destination endpoints."""
 
-from urllib.parse import urlparse
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -16,10 +15,13 @@ from app.alerts import (
     evaluate_project_alerts,
 )
 from app.auth import verify_api_key
+from app.config import settings
 from app.database import get_db
 from app.models import Project, ProjectAlertDestination, ProjectAlertEvent, ProjectAlertRule
+from app.secret_crypto import encrypt_secret_token
 from app.security import audit_log
 from app.validation import normalize_text
+from app.webhook_security import validate_webhook_target_url
 
 router = APIRouter(prefix="/projects/me/alerts", tags=["Alerts"])
 
@@ -141,10 +143,11 @@ class AlertDestinationCreate(BaseModel):
     @field_validator("target_url")
     @classmethod
     def validate_target_url(cls, value: str) -> str:
-        parsed = urlparse(value)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise ValueError("target_url must be a valid http(s) URL")
-        return value
+        return validate_webhook_target_url(
+            value,
+            allow_private_targets=settings.alert_webhook_allow_private_targets,
+            resolve_dns=False,
+        )
 
     @field_validator("secret_token", mode="before")
     @classmethod
@@ -173,10 +176,11 @@ class AlertDestinationUpdate(BaseModel):
     def validate_target_url(cls, value: str | None) -> str | None:
         if value is None:
             return value
-        parsed = urlparse(value)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise ValueError("target_url must be a valid http(s) URL")
-        return value
+        return validate_webhook_target_url(
+            value,
+            allow_private_targets=settings.alert_webhook_allow_private_targets,
+            resolve_dns=False,
+        )
 
     @field_validator("secret_token", mode="before")
     @classmethod
@@ -451,12 +455,17 @@ def create_alert_destination(
     db: Session = Depends(get_db),
 ) -> AlertDestinationResponse:
     """Create a new alert delivery destination for the current project."""
+    try:
+        encrypted_secret_token = encrypt_secret_token(payload.secret_token)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     destination = ProjectAlertDestination(
         project_id=project.id,
         name=payload.name,
         kind=payload.kind,
         target_url=payload.target_url,
-        secret_token=payload.secret_token,
+        secret_token=encrypted_secret_token,
         is_active=payload.is_active,
     )
     db.add(destination)
@@ -495,7 +504,13 @@ def update_alert_destination(
     if "target_url" in payload.model_fields_set and payload.target_url is not None:
         destination.target_url = payload.target_url
     if "secret_token" in payload.model_fields_set:
-        destination.secret_token = payload.secret_token
+        if payload.secret_token is None:
+            destination.secret_token = None
+        else:
+            try:
+                destination.secret_token = encrypt_secret_token(payload.secret_token)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
     if "is_active" in payload.model_fields_set and payload.is_active is not None:
         destination.is_active = payload.is_active
 

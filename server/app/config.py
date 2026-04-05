@@ -62,6 +62,14 @@ class Settings(BaseSettings):
         alias="ALERT_SCHEDULER_INTERVAL_SECONDS",
     )
     alert_scheduler_notify: bool = Field(default=False, alias="ALERT_SCHEDULER_NOTIFY")
+    alert_webhook_allow_private_targets: bool = Field(
+        default=False,
+        alias="ALERT_WEBHOOK_ALLOW_PRIVATE_TARGETS",
+    )
+    alert_secret_encryption_key: str | None = Field(
+        default=None,
+        alias="ALERT_SECRET_ENCRYPTION_KEY",
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",

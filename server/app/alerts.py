@@ -11,6 +11,7 @@ import httpx
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.models import (
     Project,
     ProjectAlertDestination,
@@ -18,6 +19,8 @@ from app.models import (
     ProjectAlertRule,
     Trace,
 )
+from app.secret_crypto import decrypt_secret_token
+from app.webhook_security import validate_webhook_target_url
 
 logger = logging.getLogger(__name__)
 
@@ -165,16 +168,27 @@ def _post_webhook_json(
     payload: dict[str, object],
     secret_token: str | None = None,
 ) -> bool:
+    try:
+        safe_target_url = validate_webhook_target_url(
+            target_url,
+            allow_private_targets=settings.alert_webhook_allow_private_targets,
+            resolve_dns=True,
+        )
+    except ValueError:
+        logger.warning("Alert webhook target rejected by security policy")
+        return False
+
     headers: dict[str, str] = {}
     if secret_token:
         headers["Authorization"] = f"Bearer {secret_token}"
     try:
         response = httpx.post(
-            target_url,
+            safe_target_url,
             json=payload,
             headers=headers or None,
             timeout=5.0,
             follow_redirects=False,
+            trust_env=False,
         )
         return 200 <= response.status_code < 300
     except Exception:
@@ -193,13 +207,24 @@ def _notify_destinations(
                 AlertDestinationDeliveryResult(destination=destination, delivered=False)
             )
             continue
+        try:
+            secret_token = decrypt_secret_token(destination.secret_token)
+        except ValueError:
+            logger.warning(
+                "Alert destination secret token is invalid for destination=%s",
+                destination.id,
+            )
+            results.append(
+                AlertDestinationDeliveryResult(destination=destination, delivered=False)
+            )
+            continue
         results.append(
             AlertDestinationDeliveryResult(
                 destination=destination,
                 delivered=_post_webhook_json(
                     destination.target_url,
                     payload,
-                    destination.secret_token,
+                    secret_token,
                 ),
             )
         )

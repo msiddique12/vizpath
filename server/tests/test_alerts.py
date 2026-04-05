@@ -3,6 +3,8 @@
 from datetime import datetime, timezone
 
 import app.alerts as alert_service
+from app.models import ProjectAlertDestination
+from app.secret_crypto import ENCRYPTED_SECRET_PREFIX
 
 
 def _create_project(client, name: str) -> str:
@@ -261,6 +263,65 @@ def test_alert_destination_crud_and_scope_controls(client):
     assert delete_response.status_code == 204
 
 
+def test_alert_destination_rejects_disallowed_webhook_targets(client):
+    """Webhook destination validation should reject SSRF-prone targets."""
+    api_key = _create_project(client, "alerts-destination-security")
+    headers = {"X-API-Key": api_key}
+
+    localhost_response = client.post(
+        "/api/v1/projects/me/alerts/destinations",
+        headers=headers,
+        json={
+            "name": "Localhost webhook",
+            "kind": "webhook",
+            "target_url": "http://localhost:8080/hook",
+            "is_active": True,
+        },
+    )
+    assert localhost_response.status_code == 422
+
+    credentialed_response = client.post(
+        "/api/v1/projects/me/alerts/destinations",
+        headers=headers,
+        json={
+            "name": "Credentialed webhook",
+            "kind": "webhook",
+            "target_url": "https://user:pass@example.com/hook",
+            "is_active": True,
+        },
+    )
+    assert credentialed_response.status_code == 422
+
+
+def test_alert_destination_secret_is_encrypted_at_rest(client, test_db):
+    """Destination secret tokens should be stored encrypted in DB."""
+    api_key = _create_project(client, "alerts-destination-encryption")
+    headers = {"X-API-Key": api_key}
+
+    create_response = client.post(
+        "/api/v1/projects/me/alerts/destinations",
+        headers=headers,
+        json={
+            "name": "Encrypted secret destination",
+            "kind": "webhook",
+            "target_url": "https://example.com/alerts",
+            "secret_token": "very-secret-token",
+            "is_active": True,
+        },
+    )
+    assert create_response.status_code == 201
+    destination_name = create_response.json()["name"]
+
+    destination = (
+        test_db.query(ProjectAlertDestination)
+        .filter(ProjectAlertDestination.name == destination_name)
+        .first()
+    )
+    assert destination is not None
+    assert destination.secret_token != "very-secret-token"
+    assert destination.secret_token.startswith(ENCRYPTED_SECRET_PREFIX)
+
+
 def test_alert_notify_respects_cooldown_and_does_not_repeat_immediately(client, monkeypatch):
     """Notification delivery should respect per-rule cooldown."""
     api_key = _create_project(client, "alerts-notify")
@@ -288,6 +349,7 @@ def test_alert_notify_respects_cooldown_and_does_not_repeat_immediately(client, 
             "name": "Notify webhook",
             "kind": "webhook",
             "target_url": "https://example.com/alerts",
+            "secret_token": "notify-secret-token",
             "is_active": True,
         },
     )
@@ -314,6 +376,7 @@ def test_alert_notify_respects_cooldown_and_does_not_repeat_immediately(client, 
     assert first_payload["rules"][0]["notification_sent"] is True
     assert first_payload["rules"][0]["last_notified_at"] is not None
     assert len(delivered_payloads) == 1
+    assert delivered_payloads[0][2] == "notify-secret-token"
 
     second_eval = client.get(
         "/api/v1/projects/me/alerts/evaluate",

@@ -11,6 +11,7 @@ from app.config import settings
 from app.database import Base, get_db
 from app.main import app
 from app.routes.intelligence import _clear_intelligence_summary_cache
+from app.secret_crypto import _get_fernet
 
 
 @pytest.fixture(scope="function")
@@ -52,6 +53,12 @@ def _disable_rate_limiting_for_test_suite(monkeypatch):
     # Most existing tests exercise business logic and use unauthenticated requests.
     # Keep that behavior in tests while production defaults stay locked down.
     monkeypatch.setattr(settings, "allow_unauthenticated_dev_fallback", True)
+    monkeypatch.setattr(
+        settings,
+        "alert_secret_encryption_key",
+        "HYtktxNlD7VQViyVVC29J3m3jBPr04i5pijVjhz9Qss=",
+    )
+    _get_fernet.cache_clear()
     monkeypatch.setattr(
         rate_limit,
         "_limiter",
