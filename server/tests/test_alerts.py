@@ -389,3 +389,20 @@ def test_alert_events_endpoint_lists_and_filters_event_history(client, monkeypat
     filtered_events = filtered.json()
     assert filtered_events
     assert all(event["event_type"] == "notification_sent" for event in filtered_events)
+
+    evaluate_again = client.get(
+        "/api/v1/projects/me/alerts/evaluate",
+        headers=headers,
+        params={"persist": "true", "notify": "true"},
+    )
+    assert evaluate_again.status_code == 200
+
+    events_after_second_eval = client.get(
+        "/api/v1/projects/me/alerts/events",
+        headers=headers,
+        params={"event_type": "breach"},
+    )
+    assert events_after_second_eval.status_code == 200
+    breach_events = events_after_second_eval.json()
+    # Breach events are deduplicated within cooldown windows to avoid event spam.
+    assert len(breach_events) == 1

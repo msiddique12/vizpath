@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 import httpx
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -240,6 +241,28 @@ def evaluate_project_alerts(
     notifications_failed = 0
     touched_db_state = False
     should_record_events = persist or notify
+    latest_breach_event_by_rule: dict[UUID, datetime] = {}
+
+    if should_record_events and rules:
+        rule_ids = [rule.id for rule in rules]
+        latest_breach_rows = (
+            db.query(
+                ProjectAlertEvent.rule_id,
+                func.max(ProjectAlertEvent.created_at),
+            )
+            .filter(
+                ProjectAlertEvent.project_id == project.id,
+                ProjectAlertEvent.event_type == "breach",
+                ProjectAlertEvent.rule_id.in_(rule_ids),
+            )
+            .group_by(ProjectAlertEvent.rule_id)
+            .all()
+        )
+        latest_breach_event_by_rule = {
+            rule_id: created_at
+            for rule_id, created_at in latest_breach_rows
+            if rule_id is not None and created_at is not None
+        }
 
     for rule in rules:
         metrics = window_cache.get(rule.window_days)
@@ -258,23 +281,33 @@ def evaluate_project_alerts(
                 touched_db_state = True
 
             if should_record_events:
-                db.add(
-                    ProjectAlertEvent(
-                        project_id=project.id,
-                        rule_id=rule.id,
-                        event_type="breach",
-                        rule_name=rule.name,
-                        metric=rule.metric,
-                        operator=rule.operator,
-                        threshold=rule.threshold,
-                        current_value=current_value,
-                        message=(
-                            f"Rule breached: {rule.metric} {rule.operator} {rule.threshold}, "
-                            f"current={current_value}"
-                        ),
-                    )
+                breach_event_cooldown = timedelta(
+                    minutes=max(int(rule.notification_cooldown_minutes or 0), 1)
                 )
-                touched_db_state = True
+                last_breach_event_at = latest_breach_event_by_rule.get(rule.id)
+                should_emit_breach_event = (
+                    last_breach_event_at is None
+                    or (evaluated_at - _to_utc(last_breach_event_at)) >= breach_event_cooldown
+                )
+                if should_emit_breach_event:
+                    db.add(
+                        ProjectAlertEvent(
+                            project_id=project.id,
+                            rule_id=rule.id,
+                            event_type="breach",
+                            rule_name=rule.name,
+                            metric=rule.metric,
+                            operator=rule.operator,
+                            threshold=rule.threshold,
+                            current_value=current_value,
+                            message=(
+                                f"Rule breached: {rule.metric} {rule.operator} {rule.threshold}, "
+                                f"current={current_value}"
+                            ),
+                        )
+                    )
+                    touched_db_state = True
+                    latest_breach_event_by_rule[rule.id] = evaluated_at
 
             if notify and destinations and not _is_notification_in_cooldown(rule, evaluated_at):
                 payload = {
