@@ -1,4 +1,4 @@
-.PHONY: help install install-dev lint format typecheck test test-sdk test-server test-dashboard build bootstrap bootstrap-env bootstrap-deps check-env ci-check ci test-cov build-sdk build-dashboard clean
+.PHONY: help install install-dev lint format typecheck test test-sdk test-server test-dashboard build bootstrap bootstrap-env bootstrap-deps check-env ci-check ci test-cov build-sdk build-dashboard db-migrate db-revision clean
 
 # Default target
 help:
@@ -23,6 +23,10 @@ help:
 	@echo "  make test-sdk     Run SDK tests only"
 	@echo "  make test-server  Run server tests only"
 	@echo "  make test-dashboard Run dashboard tests only"
+	@echo ""
+	@echo "Database:"
+	@echo "  make db-migrate   Apply Alembic migrations (server)"
+	@echo "  make db-revision  Create Alembic migration (set MSG='...')"
 	@echo "  make ci-check     Run CI guard + lint + env checks"
 	@echo "  make ci           Run full CI parity checks"
 	@echo ""
@@ -145,6 +149,12 @@ dev-server:
 
 dev-dashboard:
 	cd dashboard && npm run dev
+
+db-migrate:
+	cd server && uv run alembic upgrade head
+
+db-revision:
+	cd server && uv run alembic revision --autogenerate -m "$(MSG)"
 
 # Cleaning
 clean:

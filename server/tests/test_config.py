@@ -62,3 +62,8 @@ def test_max_request_body_bytes_must_be_non_negative():
 def test_allow_unauthenticated_dev_fallback_defaults_to_false():
     settings = Settings(**BASE_SETTINGS)
     assert settings.allow_unauthenticated_dev_fallback is False
+
+
+def test_enforce_migration_head_defaults_to_false():
+    settings = Settings(**BASE_SETTINGS)
+    assert settings.enforce_migration_head is False

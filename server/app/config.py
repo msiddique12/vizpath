@@ -62,6 +62,7 @@ class Settings(BaseSettings):
         alias="ALERT_SCHEDULER_INTERVAL_SECONDS",
     )
     alert_scheduler_notify: bool = Field(default=False, alias="ALERT_SCHEDULER_NOTIFY")
+    enforce_migration_head: bool = Field(default=False, alias="ENFORCE_MIGRATION_HEAD")
     alert_webhook_allow_private_targets: bool = Field(
         default=False,
         alias="ALERT_WEBHOOK_ALLOW_PRIVATE_TARGETS",

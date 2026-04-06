@@ -14,11 +14,28 @@ pip install -e ".[dev]"
 uvicorn app.main:app --reload
 ```
 
+## Database Migrations
+
+```bash
+# Apply latest schema migrations
+alembic upgrade head
+
+# Create a new migration from model changes
+alembic revision --autogenerate -m "describe change"
+```
+
+For existing local databases created before Alembic was added, stamp the current schema once:
+
+```bash
+alembic stamp head
+```
+
 ## Environment Variables
 
 - `DATABASE_URL`: PostgreSQL connection string
 - `REDIS_URL`: Redis connection string
 - `OPENAI_API_KEY`: Optional, for AI features
+- `ENFORCE_MIGRATION_HEAD`: `true` to fail startup when DB revision is not at Alembic head
 
 ## API Docs
 
