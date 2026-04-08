@@ -67,3 +67,8 @@ def test_allow_unauthenticated_dev_fallback_defaults_to_false():
 def test_enforce_migration_head_defaults_to_false():
     settings = Settings(**BASE_SETTINGS)
     assert settings.enforce_migration_head is False
+
+
+def test_alert_notification_async_enabled_defaults_to_true():
+    settings = Settings(**BASE_SETTINGS)
+    assert settings.alert_notification_async_enabled is True

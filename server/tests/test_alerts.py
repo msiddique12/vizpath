@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 
 import app.alerts as alert_service
+from app.config import settings
 from app.models import ProjectAlertDestination
 from app.secret_crypto import ENCRYPTED_SECRET_PREFIX
 
@@ -389,6 +390,72 @@ def test_alert_notify_respects_cooldown_and_does_not_repeat_immediately(client, 
     assert second_payload["notifications_sent"] == 0
     assert second_payload["rules"][0]["notification_sent"] is False
     assert len(delivered_payloads) == 1
+
+
+def test_alert_notify_async_enqueues_jobs(client, monkeypatch):
+    """Async mode should queue notifications instead of sending in-request."""
+    api_key = _create_project(client, "alerts-notify-async")
+    headers = {"X-API-Key": api_key}
+
+    _ingest_trace_span(client, api_key=api_key, suffix="async-err", status="error")
+    client.post(
+        "/api/v1/projects/me/alerts",
+        headers=headers,
+        json={
+            "name": "Error rate >= 50%",
+            "metric": "error_rate_percent",
+            "operator": "gte",
+            "threshold": 50,
+            "window_days": 30,
+            "is_active": True,
+            "notification_cooldown_minutes": 60,
+        },
+    )
+
+    client.post(
+        "/api/v1/projects/me/alerts/destinations",
+        headers=headers,
+        json={
+            "name": "Async webhook",
+            "kind": "webhook",
+            "target_url": "https://example.com/alerts",
+            "is_active": True,
+        },
+    )
+
+    queued_jobs = []
+
+    def _mock_enqueue_alert_notification_job(job):
+        queued_jobs.append(job)
+        return True
+
+    monkeypatch.setattr(settings, "alert_notification_async_enabled", True)
+    monkeypatch.setattr(
+        alert_service,
+        "enqueue_alert_notification_job",
+        _mock_enqueue_alert_notification_job,
+    )
+
+    evaluate_response = client.get(
+        "/api/v1/projects/me/alerts/evaluate",
+        headers=headers,
+        params={"persist": "true", "notify": "true"},
+    )
+    assert evaluate_response.status_code == 200
+    payload = evaluate_response.json()
+    assert payload["alert_count"] == 1
+    assert payload["notifications_queued"] == 1
+    assert payload["notifications_sent"] == 0
+    assert payload["rules"][0]["notification_queued"] is True
+    assert len(queued_jobs) == 1
+
+    queued_events = client.get(
+        "/api/v1/projects/me/alerts/events",
+        headers=headers,
+        params={"event_type": "notification_queued"},
+    )
+    assert queued_events.status_code == 200
+    assert len(queued_events.json()) >= 1
 
 
 def test_alert_events_endpoint_lists_and_filters_event_history(client, monkeypatch):

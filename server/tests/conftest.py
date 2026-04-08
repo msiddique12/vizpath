@@ -58,6 +58,7 @@ def _disable_rate_limiting_for_test_suite(monkeypatch):
         "alert_secret_encryption_key",
         "HYtktxNlD7VQViyVVC29J3m3jBPr04i5pijVjhz9Qss=",
     )
+    monkeypatch.setattr(settings, "alert_notification_async_enabled", False)
     _get_fernet.cache_clear()
     monkeypatch.setattr(
         rate_limit,

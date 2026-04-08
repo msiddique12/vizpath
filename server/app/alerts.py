@@ -11,6 +11,7 @@ import httpx
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.alert_dispatcher import AlertNotificationJob, enqueue_alert_notification_job
 from app.config import settings
 from app.models import (
     Project,
@@ -35,7 +36,12 @@ ALERT_METRICS = (
 )
 ALERT_OPERATORS = ("gt", "gte", "lt", "lte")
 ALERT_DESTINATION_KINDS = ("webhook",)
-ALERT_EVENT_TYPES = ("breach", "notification_sent", "notification_failed")
+ALERT_EVENT_TYPES = (
+    "breach",
+    "notification_queued",
+    "notification_sent",
+    "notification_failed",
+)
 
 
 @dataclass(frozen=True)
@@ -60,6 +66,7 @@ class AlertRuleEvaluationResult:
     current_value: float
     breached: bool
     notification_sent: bool = False
+    notification_queued: bool = False
 
 
 @dataclass(frozen=True)
@@ -70,6 +77,7 @@ class AlertEvaluationResult:
     alert_count: int
     rule_results: list[AlertRuleEvaluationResult]
     window_metrics: list[AlertWindowMetrics]
+    notifications_queued: int
     notifications_sent: int
     notifications_failed: int
 
@@ -262,6 +270,7 @@ def evaluate_project_alerts(
     window_cache: dict[int, AlertWindowMetrics] = {}
     rule_results: list[AlertRuleEvaluationResult] = []
     breached_count = 0
+    notifications_queued = 0
     notifications_sent = 0
     notifications_failed = 0
     touched_db_state = False
@@ -298,6 +307,7 @@ def evaluate_project_alerts(
         current_value = metric_value(metrics, rule.metric)
         breached = rule.is_active and evaluate_operator(rule.operator, current_value, rule.threshold)
         notification_sent = False
+        notification_queued = False
 
         if breached:
             breached_count += 1
@@ -349,41 +359,119 @@ def evaluate_project_alerts(
                     },
                     "current_value": current_value,
                 }
-                delivery_results = _notify_destinations(destinations, payload)
-                sent = sum(1 for result in delivery_results if result.delivered)
-                failed = len(delivery_results) - sent
-                notifications_sent += sent
-                notifications_failed += failed
-
-                for result in delivery_results:
-                    if should_record_events:
-                        db.add(
-                            ProjectAlertEvent(
-                                project_id=project.id,
-                                rule_id=rule.id,
-                                destination_id=result.destination.id,
-                                event_type=(
-                                    "notification_sent"
-                                    if result.delivered
-                                    else "notification_failed"
-                                ),
-                                rule_name=rule.name,
-                                metric=rule.metric,
-                                operator=rule.operator,
-                                threshold=rule.threshold,
-                                current_value=current_value,
-                                message=(
-                                    f"Alert delivery to {result.destination.kind} "
-                                    f"{'succeeded' if result.delivered else 'failed'}"
-                                ),
-                            )
+                if settings.alert_notification_async_enabled:
+                    for destination in destinations:
+                        try:
+                            secret_token = decrypt_secret_token(destination.secret_token)
+                        except ValueError:
+                            notifications_failed += 1
+                            if should_record_events:
+                                db.add(
+                                    ProjectAlertEvent(
+                                        project_id=project.id,
+                                        rule_id=rule.id,
+                                        destination_id=destination.id,
+                                        event_type="notification_failed",
+                                        rule_name=rule.name,
+                                        metric=rule.metric,
+                                        operator=rule.operator,
+                                        threshold=rule.threshold,
+                                        current_value=current_value,
+                                        message="Destination secret token could not be decrypted",
+                                    )
+                                )
+                                touched_db_state = True
+                            continue
+                        job = AlertNotificationJob(
+                            project_id=str(project.id),
+                            rule_id=str(rule.id),
+                            destination_id=str(destination.id),
+                            destination_kind=destination.kind,
+                            target_url=destination.target_url,
+                            secret_token=secret_token,
+                            rule_name=rule.name,
+                            metric=rule.metric,
+                            operator=rule.operator,
+                            threshold=rule.threshold,
+                            current_value=current_value,
+                            generated_at=evaluated_at.isoformat(),
                         )
-                        touched_db_state = True
+                        queued = enqueue_alert_notification_job(job)
+                        if queued:
+                            notifications_queued += 1
+                            notification_queued = True
+                            if should_record_events:
+                                db.add(
+                                    ProjectAlertEvent(
+                                        project_id=project.id,
+                                        rule_id=rule.id,
+                                        destination_id=destination.id,
+                                        event_type="notification_queued",
+                                        rule_name=rule.name,
+                                        metric=rule.metric,
+                                        operator=rule.operator,
+                                        threshold=rule.threshold,
+                                        current_value=current_value,
+                                        message=(
+                                            f"Alert delivery queued for {destination.kind}"
+                                        ),
+                                    )
+                                )
+                                touched_db_state = True
+                        else:
+                            notifications_failed += 1
+                            if should_record_events:
+                                db.add(
+                                    ProjectAlertEvent(
+                                        project_id=project.id,
+                                        rule_id=rule.id,
+                                        destination_id=destination.id,
+                                        event_type="notification_failed",
+                                        rule_name=rule.name,
+                                        metric=rule.metric,
+                                        operator=rule.operator,
+                                        threshold=rule.threshold,
+                                        current_value=current_value,
+                                        message="Alert notification queue is unavailable or full",
+                                    )
+                                )
+                                touched_db_state = True
+                else:
+                    delivery_results = _notify_destinations(destinations, payload)
+                    sent = sum(1 for result in delivery_results if result.delivered)
+                    failed = len(delivery_results) - sent
+                    notifications_sent += sent
+                    notifications_failed += failed
 
-                if sent > 0:
-                    rule.last_notified_at = evaluated_at
-                    touched_db_state = True
-                    notification_sent = True
+                    for result in delivery_results:
+                        if should_record_events:
+                            db.add(
+                                ProjectAlertEvent(
+                                    project_id=project.id,
+                                    rule_id=rule.id,
+                                    destination_id=result.destination.id,
+                                    event_type=(
+                                        "notification_sent"
+                                        if result.delivered
+                                        else "notification_failed"
+                                    ),
+                                    rule_name=rule.name,
+                                    metric=rule.metric,
+                                    operator=rule.operator,
+                                    threshold=rule.threshold,
+                                    current_value=current_value,
+                                    message=(
+                                        f"Alert delivery to {result.destination.kind} "
+                                        f"{'succeeded' if result.delivered else 'failed'}"
+                                    ),
+                                )
+                            )
+                            touched_db_state = True
+
+                    if sent > 0:
+                        rule.last_notified_at = evaluated_at
+                        touched_db_state = True
+                        notification_sent = True
 
         rule_results.append(
             AlertRuleEvaluationResult(
@@ -391,6 +479,7 @@ def evaluate_project_alerts(
                 current_value=current_value,
                 breached=breached,
                 notification_sent=notification_sent,
+                notification_queued=notification_queued,
             )
         )
 
@@ -402,6 +491,7 @@ def evaluate_project_alerts(
         alert_count=breached_count,
         rule_results=rule_results,
         window_metrics=sorted(window_cache.values(), key=lambda item: item.window_days),
+        notifications_queued=notifications_queued,
         notifications_sent=notifications_sent,
         notifications_failed=notifications_failed,
     )

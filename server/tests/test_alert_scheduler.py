@@ -50,6 +50,7 @@ def test_run_alert_scheduler_tick_aggregates_results(monkeypatch):
                 alert_count=1,
                 rule_results=[object(), object()],
                 window_metrics=[],
+                notifications_queued=0,
                 notifications_sent=0,
                 notifications_failed=0,
             )
@@ -58,6 +59,7 @@ def test_run_alert_scheduler_tick_aggregates_results(monkeypatch):
             alert_count=2,
             rule_results=[object()],
             window_metrics=[],
+            notifications_queued=0,
             notifications_sent=0,
             notifications_failed=0,
         )
@@ -90,6 +92,7 @@ def test_run_alert_scheduler_tick_continues_on_project_failure(monkeypatch):
             alert_count=1,
             rule_results=[object()],
             window_metrics=[],
+            notifications_queued=0,
             notifications_sent=0,
             notifications_failed=0,
         )

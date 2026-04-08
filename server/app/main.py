@@ -12,6 +12,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app import __version__
+from app.alert_dispatcher import (
+    start_alert_notification_dispatcher,
+    stop_alert_notification_dispatcher,
+)
 from app.alert_scheduler import run_alert_scheduler
 from app.config import settings
 from app.database import check_db_connection, engine, init_db
@@ -56,6 +60,8 @@ async def lifespan(app: FastAPI):
             settings.alert_scheduler_notify,
         )
 
+    start_alert_notification_dispatcher()
+
     yield
 
     logger.info("vizpath server shutting down...")
@@ -68,6 +74,7 @@ async def lifespan(app: FastAPI):
             logger.warning("Alert scheduler shutdown timed out; task cancelled")
         else:
             logger.info("Alert scheduler stopped")
+    stop_alert_notification_dispatcher()
     engine.dispose()
     logger.info("Database connections closed")
 

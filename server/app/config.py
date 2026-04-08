@@ -62,6 +62,22 @@ class Settings(BaseSettings):
         alias="ALERT_SCHEDULER_INTERVAL_SECONDS",
     )
     alert_scheduler_notify: bool = Field(default=False, alias="ALERT_SCHEDULER_NOTIFY")
+    alert_notification_async_enabled: bool = Field(
+        default=True,
+        alias="ALERT_NOTIFICATION_ASYNC_ENABLED",
+    )
+    alert_notification_queue_maxsize: int = Field(
+        default=1000,
+        alias="ALERT_NOTIFICATION_QUEUE_MAXSIZE",
+    )
+    alert_notification_max_retries: int = Field(
+        default=3,
+        alias="ALERT_NOTIFICATION_MAX_RETRIES",
+    )
+    alert_notification_retry_backoff_seconds: float = Field(
+        default=0.5,
+        alias="ALERT_NOTIFICATION_RETRY_BACKOFF_SECONDS",
+    )
     enforce_migration_head: bool = Field(default=False, alias="ENFORCE_MIGRATION_HEAD")
     alert_webhook_allow_private_targets: bool = Field(
         default=False,
@@ -116,6 +132,8 @@ class Settings(BaseSettings):
         "rate_limit_user_rpm",
         "max_request_body_bytes",
         "alert_scheduler_interval_seconds",
+        "alert_notification_queue_maxsize",
+        "alert_notification_max_retries",
     )
     @classmethod
     def validate_positive_ints(cls, v: int, info: ValidationInfo) -> int:
@@ -135,6 +153,13 @@ class Settings(BaseSettings):
     def validate_rate_limit_burst_multiplier(cls, v: float) -> float:
         if v <= 0:
             raise ValueError("RATE_LIMIT_BURST_MULTIPLIER must be greater than 0")
+        return v
+
+    @field_validator("alert_notification_retry_backoff_seconds")
+    @classmethod
+    def validate_retry_backoff_seconds(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("ALERT_NOTIFICATION_RETRY_BACKOFF_SECONDS must be greater than 0")
         return v
 
     @field_validator("redis_url")

@@ -94,6 +94,7 @@ class AlertRuleEvaluationResponse(AlertRuleResponse):
 
     current_value: float
     breached: bool
+    notification_queued: bool = False
     notification_sent: bool = False
 
 
@@ -115,6 +116,7 @@ class AlertEvaluationResponse(BaseModel):
 
     generated_at: str
     alert_count: int
+    notifications_queued: int
     notifications_sent: int
     notifications_failed: int
     rules: list[AlertRuleEvaluationResponse]
@@ -600,6 +602,7 @@ def evaluate_alert_rules(
         breached_count=evaluation.alert_count,
         persist=persist,
         notify=notify,
+        notifications_queued=evaluation.notifications_queued,
         notifications_sent=evaluation.notifications_sent,
         notifications_failed=evaluation.notifications_failed,
     )
@@ -607,6 +610,7 @@ def evaluate_alert_rules(
     return AlertEvaluationResponse(
         generated_at=evaluation.generated_at.isoformat(),
         alert_count=evaluation.alert_count,
+        notifications_queued=evaluation.notifications_queued,
         notifications_sent=evaluation.notifications_sent,
         notifications_failed=evaluation.notifications_failed,
         rules=[
@@ -614,6 +618,7 @@ def evaluate_alert_rules(
                 **_to_rule_response(result.rule).model_dump(),
                 current_value=result.current_value,
                 breached=result.breached,
+                notification_queued=result.notification_queued,
                 notification_sent=result.notification_sent,
             )
             for result in evaluation.rule_results
