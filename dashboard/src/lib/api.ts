@@ -213,6 +213,7 @@ export interface AlertRule {
 export interface AlertRuleEvaluation extends AlertRule {
   current_value: number
   breached: boolean
+  notification_queued: boolean
   notification_sent: boolean
 }
 
@@ -230,6 +231,7 @@ export interface AlertWindowMetrics {
 export interface AlertEvaluationResponse {
   generated_at: string
   alert_count: number
+  notifications_queued: number
   notifications_sent: number
   notifications_failed: number
   rules: AlertRuleEvaluation[]
@@ -246,7 +248,11 @@ export interface AlertDestination {
   updated_at: string | null
 }
 
-export type AlertEventType = 'breach' | 'notification_sent' | 'notification_failed'
+export type AlertEventType =
+  | 'breach'
+  | 'notification_queued'
+  | 'notification_sent'
+  | 'notification_failed'
 
 export interface AlertEvent {
   id: string

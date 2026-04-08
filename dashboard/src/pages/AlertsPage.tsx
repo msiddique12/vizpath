@@ -41,6 +41,7 @@ function formatMetric(metric: AlertMetric): string {
 
 function formatEventType(eventType: AlertEventType): string {
   if (eventType === 'breach') return 'Rule Breach'
+  if (eventType === 'notification_queued') return 'Notification Queued'
   if (eventType === 'notification_sent') return 'Notification Sent'
   return 'Notification Failed'
 }
@@ -97,7 +98,7 @@ export default function AlertsPage() {
       }),
     onSuccess: (data, variables) => {
       const notificationSummary = variables.notify
-        ? ` Notifications sent: ${data.notifications_sent}, failed: ${data.notifications_failed}.`
+        ? ` Notifications queued: ${data.notifications_queued}, sent: ${data.notifications_sent}, failed: ${data.notifications_failed}.`
         : ''
       setActionStatus(`Rules evaluated.${notificationSummary}`)
       queryClient.invalidateQueries({ queryKey: ['alerts-rules'] })
@@ -454,9 +455,12 @@ export default function AlertsPage() {
             {evaluateMutation.data.alert_count} active alert
             {evaluateMutation.data.alert_count === 1 ? '' : 's'} detected.
           </p>
-          {(evaluateMutation.data.notifications_sent > 0 || evaluateMutation.data.notifications_failed > 0) && (
+          {(evaluateMutation.data.notifications_queued > 0 ||
+            evaluateMutation.data.notifications_sent > 0 ||
+            evaluateMutation.data.notifications_failed > 0) && (
             <p className="text-xs text-muted-400">
-              Notifications: {evaluateMutation.data.notifications_sent} sent,{' '}
+              Notifications: {evaluateMutation.data.notifications_queued} queued,{' '}
+              {evaluateMutation.data.notifications_sent} sent,{' '}
               {evaluateMutation.data.notifications_failed} failed.
             </p>
           )}

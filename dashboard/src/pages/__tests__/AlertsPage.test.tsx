@@ -43,6 +43,7 @@ describe('AlertsPage', () => {
         return createJsonResponse({
           generated_at: new Date().toISOString(),
           alert_count: 1,
+          notifications_queued: 0,
           notifications_sent: 0,
           notifications_failed: 0,
           rules: [
@@ -61,6 +62,7 @@ describe('AlertsPage', () => {
               updated_at: null,
               current_value: 50,
               breached: true,
+              notification_queued: false,
               notification_sent: false,
             },
           ],
