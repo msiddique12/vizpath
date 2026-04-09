@@ -642,6 +642,51 @@ export interface IntelligenceSummaryResult {
   cache_ttl_seconds: number
 }
 
+export interface TraceCopilotRootCause {
+  title: string
+  detail: string
+  source: 'regression_explain' | 'failure_modes' | 'anomaly_detect' | 'safety_scan' | 'summary'
+  confidence: number
+}
+
+export interface TraceCopilotFix {
+  id: string
+  title: string
+  priority: 'high' | 'medium' | 'low'
+  rationale: string
+  expected_gain: string
+  linked_span_ids: string[]
+}
+
+export interface TraceCopilotSpanReference {
+  span_id: string
+  span_name: string
+  span_type: string
+  status: string
+  duration_ms: number
+  tokens: number
+  reason: string
+}
+
+export interface TraceCopilotResult {
+  trace_id: string
+  baseline_trace_id: string | null
+  triage_score: number
+  triage_status: 'high_risk' | 'review' | 'stable'
+  confidence: number
+  summary: string
+  root_cause: TraceCopilotRootCause
+  next_fixes: TraceCopilotFix[]
+  span_references: TraceCopilotSpanReference[]
+  candidate_failure: IntelligenceSummaryResult['candidate_failure']
+  candidate_anomaly: IntelligenceSummaryResult['candidate_anomaly']
+  candidate_safety: IntelligenceSummaryResult['candidate_safety']
+  compare_summary: IntelligenceSummaryResult['compare_summary']
+  generated_at: string
+  cached: boolean
+  cache_ttl_seconds: number
+}
+
 export async function analyzeTrace(traceId: string): Promise<TraceAnalysis> {
   return fetchApi('/intelligence/analyze', {
     method: 'POST',
@@ -690,6 +735,25 @@ export async function getIntelligenceSummary(
   }
 ): Promise<IntelligenceSummaryResult> {
   return fetchApi('/intelligence/summary', {
+    method: 'POST',
+    body: JSON.stringify({
+      trace_id: traceId,
+      baseline_trace_id: options?.baselineTraceId,
+      history_limit: options?.historyLimit ?? 20,
+      refresh_cache: options?.refreshCache ?? false,
+    }),
+  })
+}
+
+export async function getTraceCopilot(
+  traceId: string,
+  options?: {
+    baselineTraceId?: string
+    historyLimit?: number
+    refreshCache?: boolean
+  }
+): Promise<TraceCopilotResult> {
+  return fetchApi('/intelligence/copilot', {
     method: 'POST',
     body: JSON.stringify({
       trace_id: traceId,

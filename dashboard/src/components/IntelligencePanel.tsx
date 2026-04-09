@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Brain, Sparkles, Loader2, Star, Tag, Lightbulb, CheckCircle2, Wand2, ShieldAlert, AlertTriangle } from 'lucide-react'
+import { Brain, Sparkles, Loader2, Star, Tag, Lightbulb, CheckCircle2, Wand2, ShieldAlert, AlertTriangle, RefreshCw } from 'lucide-react'
 import clsx from 'clsx'
 import {
   analyzeTrace,
   getFailureModes,
+  getTraceCopilot,
   selfAnalyzeTrace,
   getIntelligenceStatus,
   getRegressionExplain,
@@ -28,6 +29,13 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
   const [regressionExplain, setRegressionExplain] = useState<RegressionExplainResult | null>(null)
   const [baselineTraceId, setBaselineTraceId] = useState<string>('')
   const [actionStatus, setActionStatus] = useState<string | null>(null)
+
+  const copilotQuery = useQuery({
+    queryKey: ['trace-copilot', traceId],
+    queryFn: () => getTraceCopilot(traceId),
+    staleTime: 30000,
+  })
+
   const intelligenceStatus = useQuery({
     queryKey: ['intelligence-status'],
     queryFn: getIntelligenceStatus,
@@ -86,20 +94,26 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
   })
 
   const qualityScore = analysis?.analysis.quality_score ?? 0
-  const primaryAction = qualityScore >= 80
-    ? 'Promote this trace for training export.'
-    : qualityScore >= 60
-      ? 'Label as good/needs improvement and keep for review.'
-      : 'Label as failure and generate corrections.'
+  const copilotTopFix = copilotQuery.data?.next_fixes[0]
+  const primaryAction = copilotTopFix?.title ?? (
+    qualityScore >= 80
+      ? 'Promote this trace for training export.'
+      : qualityScore >= 60
+        ? 'Label as good/needs improvement and keep for review.'
+        : 'Label as failure and generate corrections.'
+  )
 
-  const likelyIssue = analysis?.analysis.suggestions[0]
+  const likelyIssue = copilotQuery.data?.root_cause.detail
+    || analysis?.analysis.suggestions[0]
     || selfAnalysis?.analysis.weaknesses[0]
     || 'No major issue detected.'
-  const expectedGain = qualityScore >= 80
-    ? 'Higher quality examples with minimal rework.'
-    : qualityScore >= 60
-      ? 'Moderate quality lift by applying top suggestions.'
-      : 'Significant reliability gain from corrections.'
+  const expectedGain = copilotTopFix?.expected_gain ?? (
+    qualityScore >= 80
+      ? 'Higher quality examples with minimal rework.'
+      : qualityScore >= 60
+        ? 'Moderate quality lift by applying top suggestions.'
+        : 'Significant reliability gain from corrections.'
+  )
   const isIntelligenceReady = intelligenceStatus.data?.nvidia_api_key_configured === true
   const isAnalyzeDisabled =
     analyzeMutation.isPending || selfAnalyzeMutation.isPending || !isIntelligenceReady
@@ -174,6 +188,98 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
           </p>
         </div>
       )}
+
+      <div className="bg-dark-900 border border-dark-700 rounded-lg p-3 space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-xs uppercase tracking-wide text-muted-400">Trace Copilot</p>
+          <button
+            onClick={() => copilotQuery.refetch()}
+            disabled={copilotQuery.isFetching}
+            className={clsx(
+              'inline-flex items-center gap-1 rounded border px-2 py-1 text-xs transition-colors',
+              copilotQuery.isFetching
+                ? 'border-dark-600 text-muted-500'
+                : 'border-dark-600 text-muted-300 hover:text-muted-100'
+            )}
+          >
+            <RefreshCw className={clsx('h-3 w-3', copilotQuery.isFetching && 'animate-spin')} />
+            Refresh
+          </button>
+        </div>
+
+        {copilotQuery.isLoading && (
+          <div className="flex items-center gap-2 text-xs text-muted-400">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Building deterministic copilot brief...
+          </div>
+        )}
+
+        {copilotQuery.isError && (
+          <div className="bg-red-900/30 border border-red-800 rounded-lg px-3 py-2">
+            <p className="text-xs text-red-400">
+              {copilotQuery.error?.message || 'Could not load copilot brief.'}
+            </p>
+          </div>
+        )}
+
+        {copilotQuery.data && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <span
+                className={clsx(
+                  'inline-flex rounded-full border px-2 py-0.5 text-xs',
+                  copilotQuery.data.triage_status === 'high_risk'
+                    ? 'border-red-700 text-red-300'
+                    : copilotQuery.data.triage_status === 'review'
+                      ? 'border-amber-700 text-amber-300'
+                      : 'border-green-700 text-green-300'
+                )}
+              >
+                {copilotQuery.data.triage_status.replace('_', ' ')}
+              </span>
+              <span className="text-xs text-muted-400">
+                score {copilotQuery.data.triage_score} · confidence {Math.round(copilotQuery.data.confidence * 100)}%
+              </span>
+            </div>
+
+            <div className="bg-dark-800 rounded-lg p-2">
+              <p className="text-xs text-muted-400">Root Cause</p>
+              <p className="text-sm text-muted-100">{copilotQuery.data.root_cause.title}</p>
+              <p className="text-xs text-muted-300 mt-1">{copilotQuery.data.root_cause.detail}</p>
+            </div>
+
+            <div className="space-y-1">
+              <p className="text-xs text-muted-400">Top Fixes</p>
+              {copilotQuery.data.next_fixes.map((fix) => (
+                <div key={fix.id} className="rounded border border-dark-700 bg-dark-800 px-2 py-2">
+                  <p className="text-xs text-muted-100">
+                    {fix.title} <span className="text-muted-500">({fix.priority})</span>
+                  </p>
+                  <p className="text-xs text-muted-400 mt-1">{fix.rationale}</p>
+                </div>
+              ))}
+            </div>
+
+            {copilotQuery.data.span_references.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs text-muted-400">Span References</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {copilotQuery.data.span_references.map((reference) => (
+                    <a
+                      key={reference.span_id}
+                      href={`?view=timeline&span_name=${encodeURIComponent(reference.span_name)}`}
+                      className="inline-flex items-center rounded border border-dark-600 bg-dark-900 px-2 py-1 text-xs text-muted-300 hover:text-muted-100"
+                      title={reference.reason}
+                    >
+                      {reference.span_name}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       <div className="bg-dark-900 border border-dark-700 rounded-lg p-3 space-y-3">
         <p className="text-xs uppercase tracking-wide text-muted-400">Deterministic Diagnostics</p>
