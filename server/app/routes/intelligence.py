@@ -994,6 +994,16 @@ def _summary_cache_key(
     return f"{project_id}:{trace_id}:{baseline}:{history_limit}"
 
 
+def _copilot_cache_key(
+    project_id: Any,
+    trace_id: str,
+    baseline_trace_id: str | None,
+    history_limit: int,
+) -> str:
+    """Cache key namespace for trace copilot responses."""
+    return f"copilot:{_summary_cache_key(project_id, trace_id, baseline_trace_id, history_limit)}"
+
+
 def _get_cached_intelligence_summary(cache_key: str) -> dict[str, Any] | None:
     now_ts = time.time()
     with _intelligence_summary_cache_lock:
@@ -1012,6 +1022,386 @@ def _set_cached_intelligence_summary(cache_key: str, payload: dict[str, Any]) ->
     expires_at = time.time() + _INTELLIGENCE_SUMMARY_CACHE_TTL_SECONDS
     with _intelligence_summary_cache_lock:
         _intelligence_summary_cache[cache_key] = (expires_at, cache_payload)
+
+
+def _extract_span_ids_from_failure_result(failure_result: dict[str, Any]) -> list[str]:
+    """Extract referenced span IDs from failure evidence locations."""
+    span_ids: list[str] = []
+    for mode in failure_result.get("modes", []):
+        for evidence in mode.get("evidence", []):
+            location = str(evidence.get("location", ""))
+            if not location.startswith("span:"):
+                continue
+            span_id = location.split(":", 1)[1].strip()
+            if span_id:
+                span_ids.append(span_id)
+    return span_ids
+
+
+def _build_copilot_span_references(
+    spans: list[Span],
+    failure_result: dict[str, Any],
+    anomaly_result: dict[str, Any],
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    """Rank and serialize the most relevant spans for diagnostics."""
+    if not spans:
+        return []
+
+    by_id: dict[str, Span] = {str(span.id): span for span in spans}
+    ranked: list[dict[str, Any]] = []
+    seen_ids = set[str]()
+
+    def _append(span: Span, reason: str) -> None:
+        span_id = str(span.id)
+        if span_id in seen_ids:
+            return
+        seen_ids.add(span_id)
+        ranked.append(
+            {
+                "span_id": span_id,
+                "span_name": span.name,
+                "span_type": span.span_type or "custom",
+                "status": span.status or "unknown",
+                "duration_ms": _safe_number(span.duration_ms),
+                "tokens": int(span.tokens or 0),
+                "reason": reason,
+            }
+        )
+
+    for span_id in _extract_span_ids_from_failure_result(failure_result):
+        span = by_id.get(span_id)
+        if span is not None:
+            _append(span, "Referenced by failure-mode evidence")
+            if len(ranked) >= limit:
+                return ranked
+
+    error_spans = sorted(
+        [span for span in spans if str(span.status).lower() == "error"],
+        key=lambda item: (_safe_number(item.duration_ms), int(item.tokens or 0)),
+        reverse=True,
+    )
+    for span in error_spans:
+        _append(span, "Span ended with error status")
+        if len(ranked) >= limit:
+            return ranked
+
+    outlier_metrics = {
+        str(item.get("metric"))
+        for item in anomaly_result.get("outlier_metrics", [])
+        if isinstance(item, dict)
+    }
+    if "duration_ms" in outlier_metrics:
+        longest = max(spans, key=lambda item: _safe_number(item.duration_ms))
+        _append(longest, "Longest span in anomalous duration trace")
+    if "total_tokens" in outlier_metrics:
+        heaviest = max(spans, key=lambda item: int(item.tokens or 0))
+        _append(heaviest, "Highest-token span in anomalous token trace")
+
+    for span in sorted(
+        spans,
+        key=lambda item: (_safe_number(item.duration_ms), int(item.tokens or 0)),
+        reverse=True,
+    ):
+        _append(span, "High execution cost span")
+        if len(ranked) >= limit:
+            break
+
+    return ranked[:limit]
+
+
+def _build_copilot_root_cause(
+    explanation: dict[str, Any] | None,
+    failure_result: dict[str, Any],
+    anomaly_result: dict[str, Any],
+    safety_result: dict[str, Any],
+) -> dict[str, Any]:
+    """Select a primary root-cause hypothesis from deterministic signals."""
+    hypotheses = (explanation or {}).get("hypotheses") or []
+    if hypotheses:
+        top = hypotheses[0]
+        detail = str(top.get("recommendation") or "")
+        if not detail:
+            evidence = top.get("evidence") or []
+            detail = str(evidence[0]) if evidence else ""
+        return {
+            "title": str(top.get("title") or "Likely regression cause identified"),
+            "detail": detail or "Top regression hypothesis selected from deterministic signals.",
+            "source": "regression_explain",
+            "confidence": round(float(top.get("confidence", 0.0)), 4),
+        }
+
+    if failure_result.get("status") == "issue_detected":
+        primary_mode = str(failure_result.get("primary_mode") or "unknown")
+        recommendation = ""
+        modes = failure_result.get("modes") or []
+        if modes:
+            recommendations = modes[0].get("recommendations") or []
+            if recommendations:
+                recommendation = str(recommendations[0])
+        return {
+            "title": f"Failure signals point to {primary_mode} instability",
+            "detail": recommendation or "Deterministic failure mode classifier detected issue signals.",
+            "source": "failure_modes",
+            "confidence": round(float(failure_result.get("confidence", 0.0)), 4),
+        }
+
+    anomaly_status = str(anomaly_result.get("status") or "normal")
+    if anomaly_status in {"outlier", "degraded", "watch"}:
+        anomaly_score = int(anomaly_result.get("anomaly_score", 0))
+        confidence = max(0.1, min(0.9, anomaly_score / 100))
+        return {
+            "title": "Behavior drift from recent baseline",
+            "detail": str(anomaly_result.get("summary") or "Trace behaves differently than recent runs."),
+            "source": "anomaly_detect",
+            "confidence": round(confidence, 4),
+        }
+
+    safety_score = int(safety_result.get("risk_score", 0))
+    if safety_score >= 40:
+        return {
+            "title": "Safety/policy exposure in trace payloads",
+            "detail": str(safety_result.get("summary") or ""),
+            "source": "safety_scan",
+            "confidence": round(min(0.95, max(0.2, safety_score / 100)), 4),
+        }
+
+    return {
+        "title": "No strong root-cause signal detected",
+        "detail": "This trace looks stable relative to current deterministic checks.",
+        "source": "summary",
+        "confidence": 0.0,
+    }
+
+
+def _build_copilot_fixes(
+    root_cause: dict[str, Any],
+    failure_result: dict[str, Any],
+    anomaly_result: dict[str, Any],
+    safety_result: dict[str, Any],
+    explanation: dict[str, Any] | None,
+    span_references: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Generate an ordered short list of actionable fixes."""
+    fixes: list[dict[str, Any]] = []
+    seen_titles = set[str]()
+    linked_span_ids = [item["span_id"] for item in span_references[:3] if "span_id" in item]
+
+    def _add_fix(
+        title: str,
+        rationale: str,
+        priority: str,
+        expected_gain: str,
+    ) -> None:
+        normalized_title = title.strip()
+        if not normalized_title or normalized_title in seen_titles:
+            return
+        seen_titles.add(normalized_title)
+        fixes.append(
+            {
+                "id": f"fix-{len(fixes) + 1}",
+                "title": normalized_title,
+                "priority": priority,
+                "rationale": rationale.strip() or "Deterministic diagnostics recommended this action.",
+                "expected_gain": expected_gain,
+                "linked_span_ids": linked_span_ids,
+            }
+        )
+
+    if root_cause.get("detail"):
+        _add_fix(
+            title="Address primary root-cause recommendation",
+            rationale=str(root_cause["detail"]),
+            priority="high",
+            expected_gain="Reduce recurrence of the top failure signal.",
+        )
+
+    if failure_result.get("status") == "issue_detected":
+        for mode in failure_result.get("modes", [])[:2]:
+            recommendations = mode.get("recommendations") or []
+            if not recommendations:
+                continue
+            _add_fix(
+                title=f"Mitigate {mode.get('mode', 'system')} failure mode",
+                rationale=str(recommendations[0]),
+                priority="high" if str(mode.get("severity")) == "high" else "medium",
+                expected_gain="Improve trace reliability and reduce failed spans.",
+            )
+
+    anomaly_recommendations = anomaly_result.get("recommendations") or []
+    if anomaly_recommendations:
+        _add_fix(
+            title="Stabilize anomalous execution path",
+            rationale=str(anomaly_recommendations[0]),
+            priority="medium",
+            expected_gain="Bring latency/cost behavior closer to historical baseline.",
+        )
+
+    safety_recommendations = safety_result.get("recommendations") or []
+    if int(safety_result.get("risk_score", 0)) >= 40 and safety_recommendations:
+        _add_fix(
+            title="Harden safety and secret handling",
+            rationale=str(safety_recommendations[0]),
+            priority="high",
+            expected_gain="Lower policy risk and prevent sensitive data exposure.",
+        )
+
+    if explanation and explanation.get("hypotheses"):
+        for hypothesis in explanation["hypotheses"][:2]:
+            recommendation = str(hypothesis.get("recommendation") or "").strip()
+            if not recommendation:
+                continue
+            _add_fix(
+                title=f"Follow hypothesis: {hypothesis.get('title', 'root-cause fix')}",
+                rationale=recommendation,
+                priority="medium",
+                expected_gain="Validate and close likely regression path quickly.",
+            )
+
+    if not fixes:
+        _add_fix(
+            title="Continue monitoring this trace pattern",
+            rationale="No high-confidence failure vectors were detected by deterministic checks.",
+            priority="low",
+            expected_gain="Maintain baseline quality while collecting more data.",
+        )
+
+    return fixes[:3]
+
+
+def _build_trace_copilot(
+    trace: Trace,
+    spans: list[Span],
+    project_id: Any,
+    db: Session,
+    *,
+    baseline_trace_id: str | None,
+    history_limit: int,
+) -> dict[str, Any]:
+    """Build deterministic trace copilot brief used in trace detail UX."""
+    trace_data = _trace_to_data(trace, spans)
+    failure_result = _classify_failure_modes(trace_data)
+    safety_result = _scan_trace_for_risk(trace_data)
+
+    historical_query = db.query(Trace).filter(Trace.id != trace.id, Trace.project_id == project_id)
+    if baseline_trace_id:
+        historical_query = historical_query.filter(Trace.id != baseline_trace_id)
+    historical_traces = (
+        historical_query.order_by(Trace.created_at.desc()).limit(history_limit).all()
+    )
+    historical_spans = [
+        db.query(Span).filter(Span.trace_id == historical_trace.id).all()
+        for historical_trace in historical_traces
+    ]
+    anomaly_result = _analyze_anomaly(
+        trace,
+        spans,
+        historical_traces,
+        historical_spans,
+        z_threshold=1.5,
+    )
+
+    compare_summary: dict[str, Any] | None = None
+    explanation: dict[str, Any] | None = None
+    if baseline_trace_id:
+        baseline_trace = (
+            db.query(Trace)
+            .filter(Trace.id == baseline_trace_id, Trace.project_id == project_id)
+            .first()
+        )
+        if not baseline_trace:
+            raise HTTPException(status_code=404, detail="Trace not found")
+        baseline_spans = db.query(Span).filter(Span.trace_id == baseline_trace_id).all()
+        compare_result = _compare_trace_metrics(baseline_trace, baseline_spans, trace, spans)
+        compare_summary = compare_result.get("summary", {})
+        explanation = _explain_regression(
+            compare_result,
+            failure_result,
+            anomaly_result,
+            safety_result,
+        )
+
+    failure_top_score = 0
+    if failure_result.get("status") == "issue_detected":
+        top_mode = (failure_result.get("modes") or [{}])[0]
+        failure_top_score = int(top_mode.get("score", 0))
+
+    compare_regression_score = int((compare_summary or {}).get("regression_score", 0))
+    anomaly_score = int(anomaly_result.get("anomaly_score", 0))
+    safety_score = int(safety_result.get("risk_score", 0))
+    if compare_summary:
+        triage_score = min(
+            100,
+            int(
+                compare_regression_score * 0.45
+                + anomaly_score * 0.3
+                + safety_score * 0.15
+                + failure_top_score * 0.1
+            ),
+        )
+    else:
+        triage_score = min(
+            100,
+            int(failure_top_score * 0.5 + anomaly_score * 0.35 + safety_score * 0.15),
+        )
+
+    if triage_score >= 70:
+        triage_status = "high_risk"
+    elif triage_score >= 40:
+        triage_status = "review"
+    else:
+        triage_status = "stable"
+
+    root_cause = _build_copilot_root_cause(
+        explanation,
+        failure_result,
+        anomaly_result,
+        safety_result,
+    )
+    span_references = _build_copilot_span_references(
+        spans,
+        failure_result,
+        anomaly_result,
+    )
+    next_fixes = _build_copilot_fixes(
+        root_cause,
+        failure_result,
+        anomaly_result,
+        safety_result,
+        explanation,
+        span_references,
+    )
+
+    confidence = round(float(root_cause.get("confidence", 0.0)), 4)
+    summary = f"{root_cause['title']} ({int(confidence * 100)}% confidence)."
+
+    return {
+        "trace_id": str(trace.id),
+        "baseline_trace_id": baseline_trace_id,
+        "triage_score": triage_score,
+        "triage_status": triage_status,
+        "confidence": confidence,
+        "summary": summary,
+        "root_cause": root_cause,
+        "next_fixes": next_fixes,
+        "span_references": span_references,
+        "candidate_failure": {
+            "status": failure_result.get("status"),
+            "primary_mode": failure_result.get("primary_mode"),
+            "confidence": failure_result.get("confidence", 0.0),
+        },
+        "candidate_anomaly": {
+            "status": anomaly_result.get("status"),
+            "anomaly_score": anomaly_result.get("anomaly_score"),
+            "anomaly_count": anomaly_result.get("anomaly_count"),
+        },
+        "candidate_safety": {
+            "risk_level": safety_result.get("risk_level"),
+            "risk_score": safety_result.get("risk_score"),
+        },
+        "compare_summary": compare_summary,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 def _build_intelligence_summary(
@@ -1347,6 +1737,15 @@ class IntelligenceSummaryRequest(BaseModel):
     refresh_cache: bool = False
 
 
+class TraceCopilotRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    trace_id: str = Field(min_length=1, max_length=128, pattern=ID_PATTERN)
+    baseline_trace_id: str | None = Field(default=None, min_length=1, max_length=128, pattern=ID_PATTERN)
+    history_limit: int = Field(default=20, ge=3, le=100)
+    refresh_cache: bool = False
+
+
 # --- Endpoints ---
 
 
@@ -1556,6 +1955,48 @@ async def intelligence_summary(
         db,
         req.baseline_trace_id,
         req.history_limit,
+    )
+    result["cache_ttl_seconds"] = _INTELLIGENCE_SUMMARY_CACHE_TTL_SECONDS
+    _set_cached_intelligence_summary(cache_key, result)
+    result["cached"] = False
+    return result
+
+
+@router.post("/copilot")
+async def trace_copilot(
+    req: TraceCopilotRequest,
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Return deterministic copilot brief for trace detail workflows."""
+    trace = (
+        db.query(Trace)
+        .filter(Trace.id == req.trace_id, Trace.project_id == project.id)
+        .first()
+    )
+    if not trace:
+        raise HTTPException(status_code=404, detail="Trace not found")
+
+    spans = db.query(Span).filter(Span.trace_id == req.trace_id).all()
+    cache_key = _copilot_cache_key(
+        project.id,
+        req.trace_id,
+        req.baseline_trace_id,
+        req.history_limit,
+    )
+    if not req.refresh_cache:
+        cached = _get_cached_intelligence_summary(cache_key)
+        if cached is not None:
+            cached["cached"] = True
+            return cached
+
+    result = _build_trace_copilot(
+        trace,
+        spans,
+        project.id,
+        db,
+        baseline_trace_id=req.baseline_trace_id,
+        history_limit=req.history_limit,
     )
     result["cache_ttl_seconds"] = _INTELLIGENCE_SUMMARY_CACHE_TTL_SECONDS
     _set_cached_intelligence_summary(cache_key, result)

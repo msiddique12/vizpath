@@ -567,6 +567,71 @@ class TestIntelligenceSummaryEndpoint:
         assert response.status_code == 404
 
 
+class TestTraceCopilotEndpoint:
+    def test_copilot_returns_cached_brief_with_span_references(self, client, test_db):
+        suffix = str(int(datetime.now(timezone.utc).timestamp() * 1000000))
+        baseline_id = f"copilot-base-{suffix}"
+        candidate_id = f"copilot-candidate-{suffix}"
+
+        _post_trace_spans(client, baseline_id, 120.0, status="success")
+        _post_trace_spans(client, candidate_id, 650.0, status="error", llm_calls=2)
+        _post_trace_spans(client, f"copilot-h1-{suffix}", 90.0, status="success")
+        _post_trace_spans(client, f"copilot-h2-{suffix}", 110.0, status="success")
+        _post_trace_spans(client, f"copilot-h3-{suffix}", 100.0, status="success")
+
+        first_response = client.post(
+            "/api/v1/intelligence/copilot",
+            json={"trace_id": candidate_id, "baseline_trace_id": baseline_id, "history_limit": 10},
+        )
+        assert first_response.status_code == 200
+        first = first_response.json()
+        assert first["cached"] is False
+        assert first["trace_id"] == candidate_id
+        assert first["baseline_trace_id"] == baseline_id
+        assert first["triage_status"] in {"high_risk", "review", "stable"}
+        assert first["confidence"] >= 0
+        assert first["root_cause"]["title"]
+        assert len(first["next_fixes"]) >= 1
+        assert len(first["span_references"]) >= 1
+        generated_at = first["generated_at"]
+
+        second_response = client.post(
+            "/api/v1/intelligence/copilot",
+            json={"trace_id": candidate_id, "baseline_trace_id": baseline_id, "history_limit": 10},
+        )
+        assert second_response.status_code == 200
+        second = second_response.json()
+        assert second["cached"] is True
+        assert second["generated_at"] == generated_at
+
+    def test_copilot_without_baseline_returns_summary(self, client, test_db):
+        suffix = str(int(datetime.now(timezone.utc).timestamp() * 1000000))
+        candidate_id = f"copilot-solo-{suffix}"
+        _post_trace_spans(client, candidate_id, 250.0, status="success")
+        _post_trace_spans(client, f"copilot-solo-h1-{suffix}", 90.0, status="success")
+        _post_trace_spans(client, f"copilot-solo-h2-{suffix}", 95.0, status="success")
+        _post_trace_spans(client, f"copilot-solo-h3-{suffix}", 100.0, status="success")
+
+        response = client.post(
+            "/api/v1/intelligence/copilot",
+            json={"trace_id": candidate_id},
+        )
+        assert response.status_code == 200
+        result = response.json()
+        assert result["trace_id"] == candidate_id
+        assert result["compare_summary"] is None
+        assert "candidate_failure" in result
+        assert "candidate_anomaly" in result
+        assert "candidate_safety" in result
+
+    def test_copilot_trace_not_found(self, client, test_db):
+        response = client.post(
+            "/api/v1/intelligence/copilot",
+            json={"trace_id": "missing-trace"},
+        )
+        assert response.status_code == 404
+
+
 class TestSelfAnalyzeEndpoint:
     def test_self_analyze_no_key(self, client, test_db):
         with patch("app.routes.intelligence.settings") as mock_settings:
