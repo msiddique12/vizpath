@@ -295,6 +295,22 @@ export interface AlertReplayResponse {
   message: string
 }
 
+export interface AlertOpsSummary {
+  window_days: number
+  generated_at: string
+  queue_depth: number
+  total_delivery_attempts: number
+  notifications_sent: number
+  notifications_failed: number
+  notifications_queued: number
+  delivery_success_rate: number
+  replay_attempts: number
+  replay_successes: number
+  replay_failures: number
+  replay_success_rate: number
+  median_replay_seconds: number | null
+}
+
 export async function getAlertRules(): Promise<AlertRule[]> {
   return fetchApi('/projects/me/alerts')
 }
@@ -423,6 +439,11 @@ export async function replayAlertDeadLetter(eventId: string): Promise<AlertRepla
   return fetchApi(`/projects/me/alerts/dead-letter/${eventId}/replay`, {
     method: 'POST',
   })
+}
+
+export async function getAlertOpsSummary(windowDays = 7): Promise<AlertOpsSummary> {
+  const params = new URLSearchParams({ window_days: String(windowDays) })
+  return fetchApi(`/projects/me/alerts/ops-summary?${params}`)
 }
 
 // Curation API

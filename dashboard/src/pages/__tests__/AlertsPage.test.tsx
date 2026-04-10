@@ -81,6 +81,24 @@ describe('AlertsPage', () => {
         })
       }
 
+      if (url.includes('/api/v1/projects/me/alerts/ops-summary') && method === 'GET') {
+        return createJsonResponse({
+          window_days: 7,
+          generated_at: new Date().toISOString(),
+          queue_depth: 0,
+          total_delivery_attempts: 1,
+          notifications_sent: 1,
+          notifications_failed: 0,
+          notifications_queued: 0,
+          delivery_success_rate: 100,
+          replay_attempts: 0,
+          replay_successes: 0,
+          replay_failures: 0,
+          replay_success_rate: 0,
+          median_replay_seconds: null,
+        })
+      }
+
       if (url.includes('/api/v1/projects/me/alerts/events') && method === 'GET') {
         return createJsonResponse([
           {

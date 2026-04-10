@@ -14,6 +14,7 @@ import {
   getAlertDeadLetters,
   getAlertDestinations,
   getAlertEvents,
+  getAlertOpsSummary,
   getAlertRules,
   replayAlertDeadLetter,
   updateAlertDestination,
@@ -85,6 +86,11 @@ export default function AlertsPage() {
   const deadLettersQuery = useQuery({
     queryKey: ['alerts-dead-letter'],
     queryFn: () => getAlertDeadLetters({ limit: 25 }),
+  })
+
+  const opsSummaryQuery = useQuery({
+    queryKey: ['alerts-ops-summary'],
+    queryFn: () => getAlertOpsSummary(7),
   })
 
   const createRuleMutation = useMutation({
@@ -186,6 +192,7 @@ export default function AlertsPage() {
   const destinations = destinationsQuery.data ?? []
   const events = eventsQuery.data ?? []
   const deadLetters = deadLettersQuery.data ?? []
+  const opsSummary = opsSummaryQuery.data
   const activeDestinations = destinations.filter((destination) => destination.is_active)
   const evaluatedRules = useMemo(() => evaluateMutation.data?.rules ?? [], [evaluateMutation.data?.rules])
   const evaluatedById = useMemo(
@@ -256,6 +263,47 @@ export default function AlertsPage() {
         <p className="mt-1 text-sm text-muted-400">
           Define per-project guardrails for reliability, latency, and cost.
         </p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="bg-dark-900 rounded-lg border border-dark-700 p-3">
+          <p className="text-xs text-muted-400">Delivery Success (7d)</p>
+          <p className="text-lg font-semibold text-muted-100 mt-1">
+            {opsSummary ? `${opsSummary.delivery_success_rate.toFixed(1)}%` : '...'}
+          </p>
+          <p className="text-xs text-muted-500 mt-1">
+            {opsSummary
+              ? `${opsSummary.notifications_sent} sent / ${opsSummary.total_delivery_attempts} attempts`
+              : 'Loading'}
+          </p>
+        </div>
+        <div className="bg-dark-900 rounded-lg border border-dark-700 p-3">
+          <p className="text-xs text-muted-400">Replay Success (7d)</p>
+          <p className="text-lg font-semibold text-muted-100 mt-1">
+            {opsSummary ? `${opsSummary.replay_success_rate.toFixed(1)}%` : '...'}
+          </p>
+          <p className="text-xs text-muted-500 mt-1">
+            {opsSummary
+              ? `${opsSummary.replay_successes} success / ${opsSummary.replay_attempts} replays`
+              : 'Loading'}
+          </p>
+        </div>
+        <div className="bg-dark-900 rounded-lg border border-dark-700 p-3">
+          <p className="text-xs text-muted-400">Queue Depth</p>
+          <p className="text-lg font-semibold text-muted-100 mt-1">
+            {opsSummary ? opsSummary.queue_depth : '...'}
+          </p>
+          <p className="text-xs text-muted-500 mt-1">Current async notification queue size</p>
+        </div>
+        <div className="bg-dark-900 rounded-lg border border-dark-700 p-3">
+          <p className="text-xs text-muted-400">Median Replay Latency</p>
+          <p className="text-lg font-semibold text-muted-100 mt-1">
+            {opsSummary && opsSummary.median_replay_seconds !== null
+              ? `${opsSummary.median_replay_seconds.toFixed(1)}s`
+              : 'n/a'}
+          </p>
+          <p className="text-xs text-muted-500 mt-1">Time from failure event to replay attempt</p>
+        </div>
       </div>
 
       <div className="bg-dark-900 rounded-lg border border-dark-700 p-4 space-y-4">
