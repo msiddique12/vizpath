@@ -41,6 +41,8 @@ ALERT_EVENT_TYPES = (
     "notification_queued",
     "notification_sent",
     "notification_failed",
+    "notification_replayed",
+    "notification_replay_failed",
 )
 
 
@@ -88,6 +90,16 @@ class AlertDestinationDeliveryResult:
 
     destination: ProjectAlertDestination
     delivered: bool
+
+
+@dataclass(frozen=True)
+class AlertReplayResult:
+    """Result of replaying a dead-letter alert event."""
+
+    replayed: bool
+    queued: bool
+    delivered: bool
+    message: str
 
 
 def evaluate_operator(operator: str, value: float, threshold: float) -> bool:
@@ -494,4 +506,241 @@ def evaluate_project_alerts(
         notifications_queued=notifications_queued,
         notifications_sent=notifications_sent,
         notifications_failed=notifications_failed,
+    )
+
+
+def replay_failed_alert_event(
+    db: Session,
+    *,
+    project: Project,
+    failed_event: ProjectAlertEvent,
+    now: datetime | None = None,
+) -> AlertReplayResult:
+    """Replay a failed alert notification event safely."""
+    if failed_event.destination_id is None or failed_event.rule_id is None:
+        return AlertReplayResult(
+            replayed=False,
+            queued=False,
+            delivered=False,
+            message="Failed event is missing destination or rule context.",
+        )
+
+    destination = (
+        db.query(ProjectAlertDestination)
+        .filter(
+            ProjectAlertDestination.id == failed_event.destination_id,
+            ProjectAlertDestination.project_id == project.id,
+        )
+        .first()
+    )
+    if destination is None:
+        return AlertReplayResult(
+            replayed=False,
+            queued=False,
+            delivered=False,
+            message="Destination no longer exists for replay.",
+        )
+    if not destination.is_active:
+        return AlertReplayResult(
+            replayed=False,
+            queued=False,
+            delivered=False,
+            message="Destination is inactive; enable it before replay.",
+        )
+    if destination.kind != "webhook":
+        return AlertReplayResult(
+            replayed=False,
+            queued=False,
+            delivered=False,
+            message="Only webhook destinations are replayable.",
+        )
+
+    rule = (
+        db.query(ProjectAlertRule)
+        .filter(
+            ProjectAlertRule.id == failed_event.rule_id,
+            ProjectAlertRule.project_id == project.id,
+        )
+        .first()
+    )
+    if rule is None:
+        return AlertReplayResult(
+            replayed=False,
+            queued=False,
+            delivered=False,
+            message="Alert rule no longer exists for replay.",
+        )
+
+    try:
+        secret_token = decrypt_secret_token(destination.secret_token)
+    except ValueError:
+        db.add(
+            ProjectAlertEvent(
+                project_id=project.id,
+                rule_id=rule.id,
+                destination_id=destination.id,
+                event_type="notification_replay_failed",
+                rule_name=rule.name,
+                metric=rule.metric,
+                operator=rule.operator,
+                threshold=rule.threshold,
+                current_value=failed_event.current_value,
+                message="Destination secret token could not be decrypted during replay",
+            )
+        )
+        db.commit()
+        return AlertReplayResult(
+            replayed=False,
+            queued=False,
+            delivered=False,
+            message="Destination secret token could not be decrypted.",
+        )
+
+    replayed_at = now or datetime.now(timezone.utc)
+    current_value = float(
+        failed_event.current_value
+        if failed_event.current_value is not None
+        else rule.threshold
+    )
+    payload = {
+        "type": "alert_breach",
+        "generated_at": replayed_at.isoformat(),
+        "project_id": str(project.id),
+        "rule": {
+            "id": str(rule.id),
+            "name": rule.name,
+            "metric": rule.metric,
+            "operator": rule.operator,
+            "threshold": rule.threshold,
+            "window_days": rule.window_days,
+        },
+        "current_value": current_value,
+    }
+
+    if settings.alert_notification_async_enabled:
+        queued = enqueue_alert_notification_job(
+            AlertNotificationJob(
+                project_id=str(project.id),
+                rule_id=str(rule.id),
+                destination_id=str(destination.id),
+                destination_kind=destination.kind,
+                target_url=destination.target_url,
+                secret_token=secret_token,
+                rule_name=rule.name,
+                metric=rule.metric,
+                operator=rule.operator,
+                threshold=rule.threshold,
+                current_value=current_value,
+                generated_at=replayed_at.isoformat(),
+            )
+        )
+        if queued:
+            db.add(
+                ProjectAlertEvent(
+                    project_id=project.id,
+                    rule_id=rule.id,
+                    destination_id=destination.id,
+                    event_type="notification_replayed",
+                    rule_name=rule.name,
+                    metric=rule.metric,
+                    operator=rule.operator,
+                    threshold=rule.threshold,
+                    current_value=current_value,
+                    message="Failed alert notification queued for replay",
+                )
+            )
+            db.add(
+                ProjectAlertEvent(
+                    project_id=project.id,
+                    rule_id=rule.id,
+                    destination_id=destination.id,
+                    event_type="notification_queued",
+                    rule_name=rule.name,
+                    metric=rule.metric,
+                    operator=rule.operator,
+                    threshold=rule.threshold,
+                    current_value=current_value,
+                    message="Replay delivery queued for webhook destination",
+                )
+            )
+            db.commit()
+            return AlertReplayResult(
+                replayed=True,
+                queued=True,
+                delivered=False,
+                message="Replay queued for asynchronous delivery.",
+            )
+
+        db.add(
+            ProjectAlertEvent(
+                project_id=project.id,
+                rule_id=rule.id,
+                destination_id=destination.id,
+                event_type="notification_replay_failed",
+                rule_name=rule.name,
+                metric=rule.metric,
+                operator=rule.operator,
+                threshold=rule.threshold,
+                current_value=current_value,
+                message="Replay queue unavailable or full",
+            )
+        )
+        db.commit()
+        return AlertReplayResult(
+            replayed=False,
+            queued=False,
+            delivered=False,
+            message="Replay queue unavailable or full.",
+        )
+
+    delivered = _post_webhook_json(
+        destination.target_url,
+        payload,
+        secret_token,
+    )
+    db.add(
+        ProjectAlertEvent(
+            project_id=project.id,
+            rule_id=rule.id,
+            destination_id=destination.id,
+            event_type="notification_replayed" if delivered else "notification_replay_failed",
+            rule_name=rule.name,
+            metric=rule.metric,
+            operator=rule.operator,
+            threshold=rule.threshold,
+            current_value=current_value,
+            message=(
+                "Replay delivered successfully"
+                if delivered
+                else "Replay delivery failed"
+            ),
+        )
+    )
+    if delivered:
+        db.add(
+            ProjectAlertEvent(
+                project_id=project.id,
+                rule_id=rule.id,
+                destination_id=destination.id,
+                event_type="notification_sent",
+                rule_name=rule.name,
+                metric=rule.metric,
+                operator=rule.operator,
+                threshold=rule.threshold,
+                current_value=current_value,
+                message="Replay delivery to webhook succeeded",
+            )
+        )
+        rule.last_notified_at = replayed_at
+    db.commit()
+
+    return AlertReplayResult(
+        replayed=delivered,
+        queued=False,
+        delivered=delivered,
+        message=(
+            "Replay delivered successfully."
+            if delivered
+            else "Replay delivery failed."
+        ),
     )

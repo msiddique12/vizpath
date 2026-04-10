@@ -536,3 +536,127 @@ def test_alert_events_endpoint_lists_and_filters_event_history(client, monkeypat
     breach_events = events_after_second_eval.json()
     # Breach events are deduplicated within cooldown windows to avoid event spam.
     assert len(breach_events) == 1
+
+
+def test_alert_dead_letter_list_and_replay(client, monkeypatch):
+    """Failed notifications should appear in dead-letter and support replay."""
+    api_key = _create_project(client, "alerts-dead-letter")
+    headers = {"X-API-Key": api_key}
+
+    _ingest_trace_span(client, api_key=api_key, suffix="dead-letter-err", status="error")
+    create_rule = client.post(
+        "/api/v1/projects/me/alerts",
+        headers=headers,
+        json={
+            "name": "Dead-letter rule",
+            "metric": "error_rate_percent",
+            "operator": "gte",
+            "threshold": 50,
+            "window_days": 30,
+            "is_active": True,
+            "notification_cooldown_minutes": 5,
+        },
+    )
+    assert create_rule.status_code == 201
+
+    create_destination = client.post(
+        "/api/v1/projects/me/alerts/destinations",
+        headers=headers,
+        json={
+            "name": "Dead-letter webhook",
+            "kind": "webhook",
+            "target_url": "https://example.com/alerts",
+            "secret_token": "dead-letter-secret",
+            "is_active": True,
+        },
+    )
+    assert create_destination.status_code == 201
+
+    delivery_calls = {"count": 0}
+
+    def _mock_post_webhook_json(_target_url, _payload, _secret_token=None):
+        delivery_calls["count"] += 1
+        # First attempt fails (dead-letter), replay succeeds.
+        return delivery_calls["count"] >= 2
+
+    monkeypatch.setattr(alert_service, "_post_webhook_json", _mock_post_webhook_json)
+
+    first_evaluation = client.get(
+        "/api/v1/projects/me/alerts/evaluate",
+        headers=headers,
+        params={"persist": "true", "notify": "true"},
+    )
+    assert first_evaluation.status_code == 200
+    first_payload = first_evaluation.json()
+    assert first_payload["notifications_failed"] == 1
+
+    dead_letter_response = client.get(
+        "/api/v1/projects/me/alerts/dead-letter",
+        headers=headers,
+    )
+    assert dead_letter_response.status_code == 200
+    dead_letters = dead_letter_response.json()
+    assert len(dead_letters) >= 1
+    failed_event = dead_letters[0]
+    assert failed_event["event_type"] == "notification_failed"
+    assert failed_event["replayable"] is True
+
+    replay_response = client.post(
+        f"/api/v1/projects/me/alerts/dead-letter/{failed_event['id']}/replay",
+        headers=headers,
+    )
+    assert replay_response.status_code == 200
+    replay_payload = replay_response.json()
+    assert replay_payload["replayed"] is True
+    assert replay_payload["queued"] is False
+    assert replay_payload["delivered"] is True
+
+    replayed_events = client.get(
+        "/api/v1/projects/me/alerts/events",
+        headers=headers,
+        params={"event_type": "notification_replayed"},
+    )
+    assert replayed_events.status_code == 200
+    assert len(replayed_events.json()) >= 1
+
+
+def test_alert_dead_letter_replay_rejects_non_failed_events(client):
+    """Replay endpoint should reject non-dead-letter events."""
+    api_key = _create_project(client, "alerts-dead-letter-guard")
+    headers = {"X-API-Key": api_key}
+
+    _ingest_trace_span(client, api_key=api_key, suffix="dead-letter-guard-err", status="error")
+    create_rule = client.post(
+        "/api/v1/projects/me/alerts",
+        headers=headers,
+        json={
+            "name": "Replay guard rule",
+            "metric": "error_rate_percent",
+            "operator": "gte",
+            "threshold": 50,
+            "window_days": 30,
+            "is_active": True,
+        },
+    )
+    assert create_rule.status_code == 201
+
+    evaluate_response = client.get(
+        "/api/v1/projects/me/alerts/evaluate",
+        headers=headers,
+        params={"persist": "true", "notify": "false"},
+    )
+    assert evaluate_response.status_code == 200
+
+    breach_events = client.get(
+        "/api/v1/projects/me/alerts/events",
+        headers=headers,
+        params={"event_type": "breach"},
+    )
+    assert breach_events.status_code == 200
+    breach_event_id = breach_events.json()[0]["id"]
+
+    replay_response = client.post(
+        f"/api/v1/projects/me/alerts/dead-letter/{breach_event_id}/replay",
+        headers=headers,
+    )
+    assert replay_response.status_code == 409

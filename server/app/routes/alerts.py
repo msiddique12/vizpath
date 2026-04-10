@@ -13,6 +13,7 @@ from app.alerts import (
     ALERT_OPERATORS,
     AlertWindowMetrics,
     evaluate_project_alerts,
+    replay_failed_alert_event,
 )
 from app.auth import verify_api_key
 from app.config import settings
@@ -218,6 +219,31 @@ class AlertEventResponse(BaseModel):
     created_at: str
 
 
+class AlertDeadLetterResponse(BaseModel):
+    """Serialized failed notification event that can be replayed."""
+
+    id: str
+    event_type: str
+    rule_id: str | None
+    destination_id: str | None
+    rule_name: str | None
+    destination_name: str | None
+    current_value: float | None
+    message: str | None
+    replayable: bool
+    created_at: str
+
+
+class AlertReplayResponse(BaseModel):
+    """Replay response payload."""
+
+    event_id: str
+    replayed: bool
+    queued: bool
+    delivered: bool
+    message: str
+
+
 def _to_rule_response(rule: ProjectAlertRule) -> AlertRuleResponse:
     return AlertRuleResponse(
         id=str(rule.id),
@@ -276,6 +302,26 @@ def _to_event_response(event: ProjectAlertEvent) -> AlertEventResponse:
     )
 
 
+def _to_dead_letter_response(
+    event: ProjectAlertEvent,
+    *,
+    destination: ProjectAlertDestination | None,
+    replayable: bool,
+) -> AlertDeadLetterResponse:
+    return AlertDeadLetterResponse(
+        id=str(event.id),
+        event_type=event.event_type,
+        rule_id=str(event.rule_id) if event.rule_id else None,
+        destination_id=str(event.destination_id) if event.destination_id else None,
+        rule_name=event.rule_name,
+        destination_name=destination.name if destination else None,
+        current_value=event.current_value,
+        message=event.message,
+        replayable=replayable,
+        created_at=event.created_at.isoformat() if event.created_at else "",
+    )
+
+
 def _get_project_rule_or_404(
     db: Session,
     *,
@@ -312,6 +358,25 @@ def _get_project_destination_or_404(
     if not destination:
         raise HTTPException(status_code=404, detail="Alert destination not found")
     return destination
+
+
+def _get_project_event_or_404(
+    db: Session,
+    *,
+    project_id: UUID,
+    event_id: UUID,
+) -> ProjectAlertEvent:
+    event = (
+        db.query(ProjectAlertEvent)
+        .filter(
+            ProjectAlertEvent.id == event_id,
+            ProjectAlertEvent.project_id == project_id,
+        )
+        .first()
+    )
+    if not event:
+        raise HTTPException(status_code=404, detail="Alert event not found")
+    return event
 
 
 @router.get("", response_model=list[AlertRuleResponse])
@@ -576,6 +641,94 @@ def list_alert_events(
         .all()
     )
     return [_to_event_response(event) for event in events]
+
+
+@router.get("/dead-letter", response_model=list[AlertDeadLetterResponse])
+def list_dead_letter_alerts(
+    replayable_only: bool = Query(default=False),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> list[AlertDeadLetterResponse]:
+    """List failed notification events that can be replayed."""
+    dead_letter_event_types = ("notification_failed", "notification_replay_failed")
+    events = (
+        db.query(ProjectAlertEvent)
+        .filter(
+            ProjectAlertEvent.project_id == project.id,
+            ProjectAlertEvent.event_type.in_(dead_letter_event_types),
+        )
+        .order_by(ProjectAlertEvent.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+        .all()
+    )
+    destination_ids = [
+        event.destination_id
+        for event in events
+        if event.destination_id is not None
+    ]
+    destinations = (
+        db.query(ProjectAlertDestination)
+        .filter(ProjectAlertDestination.id.in_(destination_ids))
+        .all()
+        if destination_ids
+        else []
+    )
+    destination_by_id = {destination.id: destination for destination in destinations}
+
+    dead_letters: list[AlertDeadLetterResponse] = []
+    for event in events:
+        destination = destination_by_id.get(event.destination_id)
+        replayable = destination is not None and destination.is_active
+        if replayable_only and not replayable:
+            continue
+        dead_letters.append(
+            _to_dead_letter_response(
+                event,
+                destination=destination,
+                replayable=replayable,
+            )
+        )
+    return dead_letters
+
+
+@router.post("/dead-letter/{event_id}/replay", response_model=AlertReplayResponse)
+def replay_dead_letter_alert(
+    event_id: UUID,
+    request: Request,
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> AlertReplayResponse:
+    """Replay a failed notification event."""
+    event = _get_project_event_or_404(db, project_id=project.id, event_id=event_id)
+    if event.event_type not in {"notification_failed", "notification_replay_failed"}:
+        raise HTTPException(status_code=409, detail="Only failed notification events are replayable")
+
+    replay_result = replay_failed_alert_event(
+        db,
+        project=project,
+        failed_event=event,
+    )
+
+    audit_log(
+        "project_alert_dead_letter_replay",
+        request_id=getattr(request.state, "request_id", None),
+        project_id=str(project.id),
+        event_id=str(event_id),
+        replayed=replay_result.replayed,
+        queued=replay_result.queued,
+        delivered=replay_result.delivered,
+    )
+
+    return AlertReplayResponse(
+        event_id=str(event.id),
+        replayed=replay_result.replayed,
+        queued=replay_result.queued,
+        delivered=replay_result.delivered,
+        message=replay_result.message,
+    )
 
 
 @router.get("/evaluate", response_model=AlertEvaluationResponse)
