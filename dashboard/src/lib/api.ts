@@ -280,6 +280,10 @@ export interface AlertDeadLetter {
   current_value: number | null
   message: string | null
   replayable: boolean
+  replay_attempts: number
+  replay_attempts_remaining: number
+  next_replay_at: string | null
+  replay_blocked_reason: string | null
   created_at: string
 }
 

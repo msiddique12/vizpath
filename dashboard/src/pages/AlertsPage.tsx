@@ -563,6 +563,12 @@ export default function AlertsPage() {
                     <p className="text-xs text-muted-500 mt-1">{deadLetter.message}</p>
                   )}
                   <p className="text-xs text-muted-500 mt-1">
+                    Attempts: {deadLetter.replay_attempts} · Remaining: {deadLetter.replay_attempts_remaining}
+                  </p>
+                  {deadLetter.replay_blocked_reason && (
+                    <p className="text-xs text-amber-400 mt-1">{deadLetter.replay_blocked_reason}</p>
+                  )}
+                  <p className="text-xs text-muted-500 mt-1">
                     {new Date(deadLetter.created_at).toLocaleString()}
                   </p>
                 </div>
