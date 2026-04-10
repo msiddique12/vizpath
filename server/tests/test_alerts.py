@@ -796,3 +796,83 @@ def test_alert_dead_letter_replay_respects_max_attempts(client, monkeypatch):
     second_payload = second_replay.json()
     assert second_payload["replayed"] is False
     assert "maximum replay attempts" in second_payload["message"].lower()
+
+
+def test_alert_ops_summary_reports_delivery_and_replay_kpis(client, monkeypatch):
+    """Ops summary should aggregate delivery/replay KPIs for alert operations."""
+    api_key = _create_project(client, "alerts-ops-summary")
+    headers = {"X-API-Key": api_key}
+
+    _ingest_trace_span(client, api_key=api_key, suffix="ops-summary-err", status="error")
+    create_rule = client.post(
+        "/api/v1/projects/me/alerts",
+        headers=headers,
+        json={
+            "name": "Ops summary rule",
+            "metric": "error_rate_percent",
+            "operator": "gte",
+            "threshold": 50,
+            "window_days": 30,
+            "is_active": True,
+        },
+    )
+    assert create_rule.status_code == 201
+    create_destination = client.post(
+        "/api/v1/projects/me/alerts/destinations",
+        headers=headers,
+        json={
+            "name": "Ops summary webhook",
+            "kind": "webhook",
+            "target_url": "https://example.com/alerts",
+            "secret_token": "ops-summary-secret",
+            "is_active": True,
+        },
+    )
+    assert create_destination.status_code == 201
+
+    delivery_calls = {"count": 0}
+
+    def _mock_post_webhook_json(_target_url, _payload, _secret_token=None):
+        delivery_calls["count"] += 1
+        return delivery_calls["count"] >= 2
+
+    monkeypatch.setattr(alert_service, "_post_webhook_json", _mock_post_webhook_json)
+
+    first_evaluation = client.get(
+        "/api/v1/projects/me/alerts/evaluate",
+        headers=headers,
+        params={"persist": "true", "notify": "true"},
+    )
+    assert first_evaluation.status_code == 200
+    assert first_evaluation.json()["notifications_failed"] == 1
+
+    dead_letters = client.get("/api/v1/projects/me/alerts/dead-letter", headers=headers)
+    assert dead_letters.status_code == 200
+    dead_letter_id = dead_letters.json()[0]["id"]
+
+    replay_response = client.post(
+        f"/api/v1/projects/me/alerts/dead-letter/{dead_letter_id}/replay",
+        headers=headers,
+    )
+    assert replay_response.status_code == 200
+    assert replay_response.json()["replayed"] is True
+
+    summary_response = client.get(
+        "/api/v1/projects/me/alerts/ops-summary",
+        headers=headers,
+        params={"window_days": 30},
+    )
+    assert summary_response.status_code == 200
+    summary = summary_response.json()
+    assert summary["window_days"] == 30
+    assert summary["total_delivery_attempts"] == 2
+    assert summary["notifications_sent"] == 1
+    assert summary["notifications_failed"] == 1
+    assert summary["delivery_success_rate"] == 50.0
+    assert summary["replay_attempts"] == 1
+    assert summary["replay_successes"] == 1
+    assert summary["replay_failures"] == 0
+    assert summary["replay_success_rate"] == 100.0
+    assert summary["median_replay_seconds"] is not None
+    assert summary["median_replay_seconds"] >= 0
+    assert isinstance(summary["queue_depth"], int)

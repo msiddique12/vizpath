@@ -1,12 +1,14 @@
 """Project alert rule and destination endpoints."""
 
 from datetime import datetime, timedelta, timezone
+from statistics import median
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
 
+from app.alert_dispatcher import get_alert_notification_queue_size
 from app.alerts import (
     ALERT_DESTINATION_KINDS,
     ALERT_EVENT_TYPES,
@@ -251,6 +253,24 @@ class AlertReplayResponse(BaseModel):
     message: str
 
 
+class AlertOpsSummaryResponse(BaseModel):
+    """Operational health summary for alert delivery and replay."""
+
+    window_days: int
+    generated_at: str
+    queue_depth: int
+    total_delivery_attempts: int
+    notifications_sent: int
+    notifications_failed: int
+    notifications_queued: int
+    delivery_success_rate: float
+    replay_attempts: int
+    replay_successes: int
+    replay_failures: int
+    replay_success_rate: float
+    median_replay_seconds: float | None
+
+
 def _to_rule_response(rule: ProjectAlertRule) -> AlertRuleResponse:
     return AlertRuleResponse(
         id=str(rule.id),
@@ -307,6 +327,12 @@ def _to_event_response(event: ProjectAlertEvent) -> AlertEventResponse:
         message=event.message,
         created_at=event.created_at.isoformat() if event.created_at else "",
     )
+
+
+def _as_utc(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 def _to_dead_letter_response(
@@ -714,14 +740,14 @@ def list_dead_letter_alerts(
         elif latest_attempt_at is not None and cooldown_seconds > 0:
             elapsed_seconds = int(
                 (
-                    datetime.now(timezone.utc) - latest_attempt_at.astimezone(timezone.utc)
+                    datetime.now(timezone.utc) - _as_utc(latest_attempt_at)
                 ).total_seconds()
             )
             remaining = cooldown_seconds - elapsed_seconds
             if remaining > 0:
                 replayable = False
                 next_replay_at = (
-                    latest_attempt_at.astimezone(timezone.utc)
+                    _as_utc(latest_attempt_at)
                     + timedelta(seconds=cooldown_seconds)
                 ).isoformat()
                 replay_blocked_reason = f"Replay cooldown active ({remaining}s remaining)."
@@ -790,6 +816,105 @@ def replay_dead_letter_alert(
         queued=replay_result.queued,
         delivered=replay_result.delivered,
         message=replay_result.message,
+    )
+
+
+@router.get("/ops-summary", response_model=AlertOpsSummaryResponse)
+def alert_ops_summary(
+    window_days: int = Query(default=7, ge=1, le=90),
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> AlertOpsSummaryResponse:
+    """Summarize alert delivery/replay operational health for the project."""
+    now = datetime.now(timezone.utc)
+    window_start = now - timedelta(days=window_days)
+    events = (
+        db.query(ProjectAlertEvent)
+        .filter(
+            ProjectAlertEvent.project_id == project.id,
+            ProjectAlertEvent.created_at >= window_start,
+        )
+        .all()
+    )
+
+    notifications_sent = sum(1 for event in events if event.event_type == "notification_sent")
+    notifications_failed = sum(
+        1
+        for event in events
+        if event.event_type in {"notification_failed", "notification_replay_failed"}
+    )
+    notifications_queued = sum(1 for event in events if event.event_type == "notification_queued")
+    total_delivery_attempts = notifications_sent + notifications_failed
+    delivery_success_rate = (
+        round((notifications_sent / total_delivery_attempts) * 100, 2)
+        if total_delivery_attempts > 0
+        else 0.0
+    )
+
+    replay_events = [
+        event
+        for event in events
+        if event.event_type in {"notification_replayed", "notification_replay_failed"}
+    ]
+    replay_attempts = len(replay_events)
+    replay_successes = sum(1 for event in replay_events if event.event_type == "notification_replayed")
+    replay_failures = replay_attempts - replay_successes
+    replay_success_rate = (
+        round((replay_successes / replay_attempts) * 100, 2)
+        if replay_attempts > 0
+        else 0.0
+    )
+
+    replay_source_ids = {
+        event.replay_source_event_id
+        for event in replay_events
+        if event.replay_source_event_id is not None
+    }
+    source_events = (
+        db.query(ProjectAlertEvent)
+        .filter(ProjectAlertEvent.id.in_(replay_source_ids))
+        .all()
+        if replay_source_ids
+        else []
+    )
+    source_event_created_at = {
+        event.id: event.created_at
+        for event in source_events
+        if event.id is not None and event.created_at is not None
+    }
+    replay_delays_seconds: list[float] = []
+    for replay_event in replay_events:
+        source_created_at = source_event_created_at.get(replay_event.replay_source_event_id)
+        if source_created_at is None or replay_event.created_at is None:
+            continue
+        delay = (
+            _as_utc(replay_event.created_at)
+            - _as_utc(source_created_at)
+        ).total_seconds()
+        if delay >= 0:
+            replay_delays_seconds.append(delay)
+    median_replay_seconds = (
+        round(float(median(replay_delays_seconds)), 3)
+        if replay_delays_seconds
+        else None
+    )
+
+    queue_depth = get_alert_notification_queue_size() if settings.alert_notification_async_enabled else 0
+
+    return AlertOpsSummaryResponse(
+        window_days=window_days,
+        generated_at=now.isoformat(),
+        queue_depth=queue_depth,
+        total_delivery_attempts=total_delivery_attempts,
+        notifications_sent=notifications_sent,
+        notifications_failed=notifications_failed,
+        notifications_queued=notifications_queued,
+        delivery_success_rate=delivery_success_rate,
+        replay_attempts=replay_attempts,
+        replay_successes=replay_successes,
+        replay_failures=replay_failures,
+        replay_success_rate=replay_success_rate,
+        median_replay_seconds=median_replay_seconds,
     )
 
 
