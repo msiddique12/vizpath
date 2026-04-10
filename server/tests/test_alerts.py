@@ -600,6 +600,8 @@ def test_alert_dead_letter_list_and_replay(client, monkeypatch):
     failed_event = dead_letters[0]
     assert failed_event["event_type"] == "notification_failed"
     assert failed_event["replayable"] is True
+    assert failed_event["replay_attempts"] == 0
+    assert failed_event["replay_attempts_remaining"] == settings.alert_dead_letter_replay_max_attempts
 
     replay_response = client.post(
         f"/api/v1/projects/me/alerts/dead-letter/{failed_event['id']}/replay",
@@ -610,6 +612,15 @@ def test_alert_dead_letter_list_and_replay(client, monkeypatch):
     assert replay_payload["replayed"] is True
     assert replay_payload["queued"] is False
     assert replay_payload["delivered"] is True
+
+    dead_letter_after_replay = client.get(
+        "/api/v1/projects/me/alerts/dead-letter",
+        headers=headers,
+    )
+    assert dead_letter_after_replay.status_code == 200
+    latest = dead_letter_after_replay.json()[0]
+    assert latest["replay_attempts"] >= 1
+    assert latest["replay_attempts_remaining"] == settings.alert_dead_letter_replay_max_attempts - 1
 
     replayed_events = client.get(
         "/api/v1/projects/me/alerts/events",
@@ -660,3 +671,128 @@ def test_alert_dead_letter_replay_rejects_non_failed_events(client):
         headers=headers,
     )
     assert replay_response.status_code == 409
+
+
+def test_alert_dead_letter_replay_respects_cooldown(client, monkeypatch):
+    """Replay should be blocked inside cooldown window for same dead-letter event."""
+    monkeypatch.setattr(settings, "alert_dead_letter_replay_cooldown_seconds", 3600)
+
+    api_key = _create_project(client, "alerts-dead-letter-cooldown")
+    headers = {"X-API-Key": api_key}
+
+    _ingest_trace_span(client, api_key=api_key, suffix="dead-letter-cooldown-err", status="error")
+    client.post(
+        "/api/v1/projects/me/alerts",
+        headers=headers,
+        json={
+            "name": "Cooldown rule",
+            "metric": "error_rate_percent",
+            "operator": "gte",
+            "threshold": 50,
+            "window_days": 30,
+            "is_active": True,
+            "notification_cooldown_minutes": 1,
+        },
+    )
+    client.post(
+        "/api/v1/projects/me/alerts/destinations",
+        headers=headers,
+        json={
+            "name": "Cooldown webhook",
+            "kind": "webhook",
+            "target_url": "https://example.com/alerts",
+            "secret_token": "cooldown-secret",
+            "is_active": True,
+        },
+    )
+
+    monkeypatch.setattr(alert_service, "_post_webhook_json", lambda *_args, **_kwargs: False)
+
+    evaluate = client.get(
+        "/api/v1/projects/me/alerts/evaluate",
+        headers=headers,
+        params={"persist": "true", "notify": "true"},
+    )
+    assert evaluate.status_code == 200
+
+    dead_letters = client.get("/api/v1/projects/me/alerts/dead-letter", headers=headers)
+    assert dead_letters.status_code == 200
+    event_id = dead_letters.json()[0]["id"]
+
+    first_replay = client.post(
+        f"/api/v1/projects/me/alerts/dead-letter/{event_id}/replay",
+        headers=headers,
+    )
+    assert first_replay.status_code == 200
+    assert first_replay.json()["replayed"] is False
+
+    second_replay = client.post(
+        f"/api/v1/projects/me/alerts/dead-letter/{event_id}/replay",
+        headers=headers,
+    )
+    assert second_replay.status_code == 200
+    second_payload = second_replay.json()
+    assert second_payload["replayed"] is False
+    assert "cooldown" in second_payload["message"].lower()
+
+
+def test_alert_dead_letter_replay_respects_max_attempts(client, monkeypatch):
+    """Replay should stop after configured max attempts."""
+    monkeypatch.setattr(settings, "alert_dead_letter_replay_max_attempts", 1)
+    monkeypatch.setattr(settings, "alert_dead_letter_replay_cooldown_seconds", 0)
+
+    api_key = _create_project(client, "alerts-dead-letter-max-attempts")
+    headers = {"X-API-Key": api_key}
+
+    _ingest_trace_span(client, api_key=api_key, suffix="dead-letter-max-err", status="error")
+    client.post(
+        "/api/v1/projects/me/alerts",
+        headers=headers,
+        json={
+            "name": "Max attempts rule",
+            "metric": "error_rate_percent",
+            "operator": "gte",
+            "threshold": 50,
+            "window_days": 30,
+            "is_active": True,
+        },
+    )
+    client.post(
+        "/api/v1/projects/me/alerts/destinations",
+        headers=headers,
+        json={
+            "name": "Max attempts webhook",
+            "kind": "webhook",
+            "target_url": "https://example.com/alerts",
+            "secret_token": "max-attempts-secret",
+            "is_active": True,
+        },
+    )
+
+    monkeypatch.setattr(alert_service, "_post_webhook_json", lambda *_args, **_kwargs: False)
+
+    evaluate = client.get(
+        "/api/v1/projects/me/alerts/evaluate",
+        headers=headers,
+        params={"persist": "true", "notify": "true"},
+    )
+    assert evaluate.status_code == 200
+
+    dead_letters = client.get("/api/v1/projects/me/alerts/dead-letter", headers=headers)
+    assert dead_letters.status_code == 200
+    event_id = dead_letters.json()[0]["id"]
+
+    first_replay = client.post(
+        f"/api/v1/projects/me/alerts/dead-letter/{event_id}/replay",
+        headers=headers,
+    )
+    assert first_replay.status_code == 200
+
+    second_replay = client.post(
+        f"/api/v1/projects/me/alerts/dead-letter/{event_id}/replay",
+        headers=headers,
+    )
+    assert second_replay.status_code == 200
+    second_payload = second_replay.json()
+    assert second_payload["replayed"] is False
+    assert "maximum replay attempts" in second_payload["message"].lower()

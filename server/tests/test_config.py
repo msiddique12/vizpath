@@ -72,3 +72,15 @@ def test_enforce_migration_head_defaults_to_false():
 def test_alert_notification_async_enabled_defaults_to_true():
     settings = Settings(**BASE_SETTINGS)
     assert settings.alert_notification_async_enabled is True
+
+
+def test_dead_letter_replay_controls_have_safe_defaults():
+    settings = Settings(**BASE_SETTINGS)
+    assert settings.alert_dead_letter_replay_max_attempts == 3
+    assert settings.alert_dead_letter_replay_cooldown_seconds == 60
+
+
+def test_dead_letter_replay_max_attempts_must_be_positive():
+    with pytest.raises(ValidationError) as exc:
+        Settings(**BASE_SETTINGS, ALERT_DEAD_LETTER_REPLAY_MAX_ATTEMPTS=0)
+    assert "ALERT_DEAD_LETTER_REPLAY_MAX_ATTEMPTS must be at least 1" in str(exc.value)

@@ -78,6 +78,14 @@ class Settings(BaseSettings):
         default=0.5,
         alias="ALERT_NOTIFICATION_RETRY_BACKOFF_SECONDS",
     )
+    alert_dead_letter_replay_max_attempts: int = Field(
+        default=3,
+        alias="ALERT_DEAD_LETTER_REPLAY_MAX_ATTEMPTS",
+    )
+    alert_dead_letter_replay_cooldown_seconds: int = Field(
+        default=60,
+        alias="ALERT_DEAD_LETTER_REPLAY_COOLDOWN_SECONDS",
+    )
     enforce_migration_head: bool = Field(default=False, alias="ENFORCE_MIGRATION_HEAD")
     alert_webhook_allow_private_targets: bool = Field(
         default=False,
@@ -134,6 +142,7 @@ class Settings(BaseSettings):
         "alert_scheduler_interval_seconds",
         "alert_notification_queue_maxsize",
         "alert_notification_max_retries",
+        "alert_dead_letter_replay_cooldown_seconds",
     )
     @classmethod
     def validate_positive_ints(cls, v: int, info: ValidationInfo) -> int:
@@ -160,6 +169,13 @@ class Settings(BaseSettings):
     def validate_retry_backoff_seconds(cls, v: float) -> float:
         if v <= 0:
             raise ValueError("ALERT_NOTIFICATION_RETRY_BACKOFF_SECONDS must be greater than 0")
+        return v
+
+    @field_validator("alert_dead_letter_replay_max_attempts")
+    @classmethod
+    def validate_replay_max_attempts(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("ALERT_DEAD_LETTER_REPLAY_MAX_ATTEMPTS must be at least 1")
         return v
 
     @field_validator("redis_url")

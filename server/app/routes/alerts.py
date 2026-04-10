@@ -1,5 +1,6 @@
 """Project alert rule and destination endpoints."""
 
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -13,7 +14,9 @@ from app.alerts import (
     ALERT_OPERATORS,
     AlertWindowMetrics,
     evaluate_project_alerts,
+    replay_attempt_state,
     replay_failed_alert_event,
+    replay_source_event_id_for,
 )
 from app.auth import verify_api_key
 from app.config import settings
@@ -231,6 +234,10 @@ class AlertDeadLetterResponse(BaseModel):
     current_value: float | None
     message: str | None
     replayable: bool
+    replay_attempts: int
+    replay_attempts_remaining: int
+    next_replay_at: str | None
+    replay_blocked_reason: str | None
     created_at: str
 
 
@@ -307,6 +314,10 @@ def _to_dead_letter_response(
     *,
     destination: ProjectAlertDestination | None,
     replayable: bool,
+    replay_attempts: int,
+    replay_attempts_remaining: int,
+    next_replay_at: str | None,
+    replay_blocked_reason: str | None,
 ) -> AlertDeadLetterResponse:
     return AlertDeadLetterResponse(
         id=str(event.id),
@@ -318,6 +329,10 @@ def _to_dead_letter_response(
         current_value=event.current_value,
         message=event.message,
         replayable=replayable,
+        replay_attempts=replay_attempts,
+        replay_attempts_remaining=replay_attempts_remaining,
+        next_replay_at=next_replay_at,
+        replay_blocked_reason=replay_blocked_reason,
         created_at=event.created_at.isoformat() if event.created_at else "",
     )
 
@@ -679,9 +694,44 @@ def list_dead_letter_alerts(
     destination_by_id = {destination.id: destination for destination in destinations}
 
     dead_letters: list[AlertDeadLetterResponse] = []
+    max_attempts = settings.alert_dead_letter_replay_max_attempts
+    cooldown_seconds = max(int(settings.alert_dead_letter_replay_cooldown_seconds or 0), 0)
     for event in events:
+        source_event_id = replay_source_event_id_for(event)
+        replay_attempts, latest_attempt_at = replay_attempt_state(
+            db,
+            project_id=project.id,
+            source_event_id=source_event_id,
+        )
         destination = destination_by_id.get(event.destination_id)
+        replay_attempts_remaining = max(0, max_attempts - replay_attempts)
+        replay_blocked_reason: str | None = None
+        next_replay_at: str | None = None
         replayable = destination is not None and destination.is_active
+        if replay_attempts_remaining <= 0:
+            replayable = False
+            replay_blocked_reason = "Maximum replay attempts reached."
+        elif latest_attempt_at is not None and cooldown_seconds > 0:
+            elapsed_seconds = int(
+                (
+                    datetime.now(timezone.utc) - latest_attempt_at.astimezone(timezone.utc)
+                ).total_seconds()
+            )
+            remaining = cooldown_seconds - elapsed_seconds
+            if remaining > 0:
+                replayable = False
+                next_replay_at = (
+                    latest_attempt_at.astimezone(timezone.utc)
+                    + timedelta(seconds=cooldown_seconds)
+                ).isoformat()
+                replay_blocked_reason = f"Replay cooldown active ({remaining}s remaining)."
+        if destination is None:
+            replayable = False
+            replay_blocked_reason = "Destination no longer exists."
+        elif not destination.is_active:
+            replayable = False
+            replay_blocked_reason = "Destination is inactive."
+
         if replayable_only and not replayable:
             continue
         dead_letters.append(
@@ -689,6 +739,10 @@ def list_dead_letter_alerts(
                 event,
                 destination=destination,
                 replayable=replayable,
+                replay_attempts=replay_attempts,
+                replay_attempts_remaining=replay_attempts_remaining,
+                next_replay_at=next_replay_at,
+                replay_blocked_reason=replay_blocked_reason,
             )
         )
     return dead_letters
@@ -706,10 +760,18 @@ def replay_dead_letter_alert(
     if event.event_type not in {"notification_failed", "notification_replay_failed"}:
         raise HTTPException(status_code=409, detail="Only failed notification events are replayable")
 
+    source_event_id = replay_source_event_id_for(event)
+    source_event = (
+        _get_project_event_or_404(db, project_id=project.id, event_id=source_event_id)
+        if source_event_id != event.id
+        else event
+    )
+
     replay_result = replay_failed_alert_event(
         db,
         project=project,
         failed_event=event,
+        source_event_id=source_event.id,
     )
 
     audit_log(

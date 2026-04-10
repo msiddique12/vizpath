@@ -102,6 +102,35 @@ class AlertReplayResult:
     message: str
 
 
+def replay_source_event_id_for(event: ProjectAlertEvent) -> UUID:
+    """Return canonical source event id for replay tracking."""
+    return event.replay_source_event_id or event.id
+
+
+def replay_attempt_state(
+    db: Session,
+    *,
+    project_id: UUID,
+    source_event_id: UUID,
+) -> tuple[int, datetime | None]:
+    """Return replay attempt count and most recent attempt timestamp for source event."""
+    attempt_rows = (
+        db.query(ProjectAlertEvent.created_at)
+        .filter(
+            ProjectAlertEvent.project_id == project_id,
+            ProjectAlertEvent.replay_source_event_id == source_event_id,
+            ProjectAlertEvent.event_type.in_(
+                ("notification_replayed", "notification_replay_failed")
+            ),
+        )
+        .order_by(ProjectAlertEvent.created_at.desc())
+        .all()
+    )
+    attempts = len(attempt_rows)
+    latest = attempt_rows[0][0] if attempts > 0 else None
+    return attempts, latest
+
+
 def evaluate_operator(operator: str, value: float, threshold: float) -> bool:
     """Compare value with threshold using a supported operator."""
     if operator == "gt":
@@ -514,9 +543,46 @@ def replay_failed_alert_event(
     *,
     project: Project,
     failed_event: ProjectAlertEvent,
+    source_event_id: UUID | None = None,
     now: datetime | None = None,
 ) -> AlertReplayResult:
     """Replay a failed alert notification event safely."""
+    replayed_at = now or datetime.now(timezone.utc)
+    canonical_source_event_id = source_event_id or replay_source_event_id_for(failed_event)
+
+    replay_attempts, latest_attempt_at = replay_attempt_state(
+        db,
+        project_id=project.id,
+        source_event_id=canonical_source_event_id,
+    )
+    if replay_attempts >= settings.alert_dead_letter_replay_max_attempts:
+        return AlertReplayResult(
+            replayed=False,
+            queued=False,
+            delivered=False,
+            message=(
+                "Replay blocked: maximum replay attempts reached for this dead-letter event."
+            ),
+        )
+    replay_cooldown_seconds = max(
+        int(settings.alert_dead_letter_replay_cooldown_seconds or 0),
+        0,
+    )
+    if latest_attempt_at is not None and replay_cooldown_seconds > 0:
+        remaining_seconds = replay_cooldown_seconds - int(
+            (replayed_at - _to_utc(latest_attempt_at)).total_seconds()
+        )
+        if remaining_seconds > 0:
+            return AlertReplayResult(
+                replayed=False,
+                queued=False,
+                delivered=False,
+                message=(
+                    "Replay blocked by cooldown. "
+                    f"Try again in {remaining_seconds}s."
+                ),
+            )
+
     if failed_event.destination_id is None or failed_event.rule_id is None:
         return AlertReplayResult(
             replayed=False,
@@ -579,6 +645,7 @@ def replay_failed_alert_event(
                 project_id=project.id,
                 rule_id=rule.id,
                 destination_id=destination.id,
+                replay_source_event_id=canonical_source_event_id,
                 event_type="notification_replay_failed",
                 rule_name=rule.name,
                 metric=rule.metric,
@@ -596,7 +663,6 @@ def replay_failed_alert_event(
             message="Destination secret token could not be decrypted.",
         )
 
-    replayed_at = now or datetime.now(timezone.utc)
     current_value = float(
         failed_event.current_value
         if failed_event.current_value is not None
@@ -640,6 +706,7 @@ def replay_failed_alert_event(
                     project_id=project.id,
                     rule_id=rule.id,
                     destination_id=destination.id,
+                    replay_source_event_id=canonical_source_event_id,
                     event_type="notification_replayed",
                     rule_name=rule.name,
                     metric=rule.metric,
@@ -654,6 +721,7 @@ def replay_failed_alert_event(
                     project_id=project.id,
                     rule_id=rule.id,
                     destination_id=destination.id,
+                    replay_source_event_id=canonical_source_event_id,
                     event_type="notification_queued",
                     rule_name=rule.name,
                     metric=rule.metric,
@@ -676,6 +744,7 @@ def replay_failed_alert_event(
                 project_id=project.id,
                 rule_id=rule.id,
                 destination_id=destination.id,
+                replay_source_event_id=canonical_source_event_id,
                 event_type="notification_replay_failed",
                 rule_name=rule.name,
                 metric=rule.metric,
@@ -703,6 +772,7 @@ def replay_failed_alert_event(
             project_id=project.id,
             rule_id=rule.id,
             destination_id=destination.id,
+            replay_source_event_id=canonical_source_event_id,
             event_type="notification_replayed" if delivered else "notification_replay_failed",
             rule_name=rule.name,
             metric=rule.metric,
@@ -722,6 +792,7 @@ def replay_failed_alert_event(
                 project_id=project.id,
                 rule_id=rule.id,
                 destination_id=destination.id,
+                replay_source_event_id=canonical_source_event_id,
                 event_type="notification_sent",
                 rule_name=rule.name,
                 metric=rule.metric,

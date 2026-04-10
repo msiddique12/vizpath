@@ -354,6 +354,12 @@ class ProjectAlertEvent(Base):
         nullable=True,
         index=True,
     )
+    replay_source_event_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("project_alert_events.id"),
+        nullable=True,
+        index=True,
+    )
     event_type = Column(String(40), nullable=False, index=True)
     rule_name = Column(String(120), nullable=True)
     metric = Column(String(40), nullable=True)
@@ -371,6 +377,12 @@ class ProjectAlertEvent(Base):
         Index("ix_alert_events_project_created", "project_id", "created_at"),
         Index("ix_alert_events_project_type_created", "project_id", "event_type", "created_at"),
         Index("ix_alert_events_project_rule_created", "project_id", "rule_id", "created_at"),
+        Index(
+            "ix_alert_events_project_source_created",
+            "project_id",
+            "replay_source_event_id",
+            "created_at",
+        ),
     )
 
     def __repr__(self) -> str:
