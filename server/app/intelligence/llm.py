@@ -159,7 +159,8 @@ class LLMLabeler:
         )
         self.model = settings.nvidia_llm_model
         self.temperature = 0.0
-        self.max_tokens = 2000  # Needs room for <think> + JSON output
+        self.max_tokens = settings.nvidia_llm_max_tokens
+        self.request_timeout_seconds = settings.nvidia_llm_timeout_seconds
 
         # Redis setup
         try:
@@ -169,6 +170,31 @@ class LLMLabeler:
             self.redis.ping()
         except Exception:
             self.redis = None
+
+    async def _chat_completion_content(self, prompt: str) -> str:
+        """Run a bounded chat completion and return response content."""
+        try:
+            response = await asyncio.wait_for(
+                self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": "detailed thinking off"},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
+                ),
+                timeout=self.request_timeout_seconds,
+            )
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(
+                f"LLM completion timed out after {self.request_timeout_seconds}s"
+            ) from exc
+
+        content = response.choices[0].message.content
+        if not content:
+            raise ValueError("LLM response content was empty")
+        return content
 
     async def label_trace(self, trace_data: dict[str, Any]) -> dict[str, Any] | None:
         """Evaluate a single trace using the LLM.
@@ -207,19 +233,7 @@ Respond ONLY with JSON:
 }}
 """
         try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "detailed thinking off"},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-            )
-
-            content = response.choices[0].message.content
-            if not content:
-                return None
+            content = await self._chat_completion_content(prompt)
 
             response_data = _extract_json(content)
             if not isinstance(response_data, dict):
@@ -317,16 +331,7 @@ Evaluate this trace and respond with JSON only:
 Labels should be relevant categories like: "efficient", "slow", "error_prone", "tool_heavy", "well_structured", "needs_optimization", etc.
 """
         try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "detailed thinking off"},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.0,
-                max_tokens=2000,
-            )
-            content = response.choices[0].message.content or ""
+            content = await self._chat_completion_content(prompt)
             response_data = _extract_json(content)
             if not isinstance(response_data, dict):
                 raise ValueError("Invalid response payload")
@@ -443,16 +448,7 @@ Respond with JSON only:
 }}
 """
         try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "detailed thinking off"},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.0,
-                max_tokens=2000,
-            )
-            content = response.choices[0].message.content or ""
+            content = await self._chat_completion_content(prompt)
             response_data = _extract_json(content)
             if not isinstance(response_data, dict):
                 raise ValueError("Invalid response payload")

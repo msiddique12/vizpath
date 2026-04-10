@@ -1,5 +1,6 @@
 """Tests for intelligence LLM labeler module."""
 
+import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -161,6 +162,22 @@ class TestLabelTrace:
         result = await labeler.label_trace(SAMPLE_TRACE)
         assert result is None
 
+    @pytest.mark.asyncio
+    async def test_label_trace_uses_configured_max_tokens(self, labeler):
+        labeler.max_tokens = 321
+        response_json = json.dumps({
+            "success": True,
+            "confidence": 0.9,
+            "reasoning": "ok",
+        })
+        labeler.client.chat.completions.create = AsyncMock(
+            return_value=_mock_chat_response(response_json)
+        )
+
+        result = await labeler.label_trace(SAMPLE_TRACE)
+        assert result is not None
+        assert labeler.client.chat.completions.create.await_args.kwargs["max_tokens"] == 321
+
 
 class TestAnalyzeTrace:
     @pytest.mark.asyncio
@@ -209,6 +226,17 @@ class TestAnalyzeTrace:
         assert result["analysis"]["labels"] == ["good", "42"]
         assert result["analysis"]["suggestions"] == ["Cache repeated queries"]
         assert result["analysis"]["summary"] == "Strong tracing run"
+
+    @pytest.mark.asyncio
+    async def test_analyze_trace_timeout_returns_safe_fallback(self, labeler):
+        labeler.request_timeout_seconds = 0.01
+        labeler.client.chat.completions.create = AsyncMock(
+            side_effect=asyncio.TimeoutError()
+        )
+
+        result = await labeler.analyze_trace(SAMPLE_TRACE)
+        assert result["quality_score"] == 0
+        assert "timed out" in result["error_analysis"].lower()
 
 
 

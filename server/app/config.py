@@ -26,6 +26,14 @@ class Settings(BaseSettings):
         default="nvidia/llama-3.3-nemotron-super-49b-v1.5",
         alias="NVIDIA_LLM_MODEL",
     )
+    nvidia_llm_timeout_seconds: float = Field(
+        default=20.0,
+        alias="NVIDIA_LLM_TIMEOUT_SECONDS",
+    )
+    nvidia_llm_max_tokens: int = Field(
+        default=2000,
+        alias="NVIDIA_LLM_MAX_TOKENS",
+    )
     nvidia_embedding_model: str = Field(
         default="nvidia/nv-embedqa-e5-v5",
         alias="NVIDIA_EMBEDDING_MODEL",
@@ -169,6 +177,22 @@ class Settings(BaseSettings):
     def validate_retry_backoff_seconds(cls, v: float) -> float:
         if v <= 0:
             raise ValueError("ALERT_NOTIFICATION_RETRY_BACKOFF_SECONDS must be greater than 0")
+        return v
+
+    @field_validator("nvidia_llm_timeout_seconds")
+    @classmethod
+    def validate_nvidia_llm_timeout_seconds(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("NVIDIA_LLM_TIMEOUT_SECONDS must be greater than 0")
+        return v
+
+    @field_validator("nvidia_llm_max_tokens")
+    @classmethod
+    def validate_nvidia_llm_max_tokens(cls, v: int) -> int:
+        if v < 128:
+            raise ValueError("NVIDIA_LLM_MAX_TOKENS must be at least 128")
+        if v > 4096:
+            raise ValueError("NVIDIA_LLM_MAX_TOKENS must be 4096 or less")
         return v
 
     @field_validator("alert_dead_letter_replay_max_attempts")
