@@ -253,6 +253,8 @@ export type AlertEventType =
   | 'notification_queued'
   | 'notification_sent'
   | 'notification_failed'
+  | 'notification_replayed'
+  | 'notification_replay_failed'
 
 export interface AlertEvent {
   id: string
@@ -266,6 +268,27 @@ export interface AlertEvent {
   current_value: number | null
   message: string | null
   created_at: string
+}
+
+export interface AlertDeadLetter {
+  id: string
+  event_type: 'notification_failed' | 'notification_replay_failed'
+  rule_id: string | null
+  destination_id: string | null
+  rule_name: string | null
+  destination_name: string | null
+  current_value: number | null
+  message: string | null
+  replayable: boolean
+  created_at: string
+}
+
+export interface AlertReplayResponse {
+  event_id: string
+  replayed: boolean
+  queued: boolean
+  delivered: boolean
+  message: string
 }
 
 export async function getAlertRules(): Promise<AlertRule[]> {
@@ -377,6 +400,25 @@ export async function getAlertEvents(params?: {
   if (params?.limit !== undefined) searchParams.set('limit', String(params.limit))
   if (params?.offset !== undefined) searchParams.set('offset', String(params.offset))
   return fetchApi(`/projects/me/alerts/events?${searchParams}`)
+}
+
+export async function getAlertDeadLetters(params?: {
+  replayable_only?: boolean
+  limit?: number
+  offset?: number
+}): Promise<AlertDeadLetter[]> {
+  const searchParams = new URLSearchParams()
+  if (params?.replayable_only) searchParams.set('replayable_only', 'true')
+  if (params?.limit !== undefined) searchParams.set('limit', String(params.limit))
+  if (params?.offset !== undefined) searchParams.set('offset', String(params.offset))
+  const query = searchParams.toString()
+  return fetchApi(`/projects/me/alerts/dead-letter${query ? `?${query}` : ''}`)
+}
+
+export async function replayAlertDeadLetter(eventId: string): Promise<AlertReplayResponse> {
+  return fetchApi(`/projects/me/alerts/dead-letter/${eventId}/replay`, {
+    method: 'POST',
+  })
 }
 
 // Curation API

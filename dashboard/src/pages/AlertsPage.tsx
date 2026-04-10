@@ -11,9 +11,11 @@ import {
   deleteAlertDestination,
   deleteAlertRule,
   evaluateAlertRules,
+  getAlertDeadLetters,
   getAlertDestinations,
   getAlertEvents,
   getAlertRules,
+  replayAlertDeadLetter,
   updateAlertDestination,
   updateAlertRule,
 } from '@/lib/api'
@@ -43,6 +45,8 @@ function formatEventType(eventType: AlertEventType): string {
   if (eventType === 'breach') return 'Rule Breach'
   if (eventType === 'notification_queued') return 'Notification Queued'
   if (eventType === 'notification_sent') return 'Notification Sent'
+  if (eventType === 'notification_replayed') return 'Notification Replayed'
+  if (eventType === 'notification_replay_failed') return 'Replay Failed'
   return 'Notification Failed'
 }
 
@@ -76,6 +80,11 @@ export default function AlertsPage() {
   const eventsQuery = useQuery({
     queryKey: ['alerts-events'],
     queryFn: () => getAlertEvents({ limit: 25 }),
+  })
+
+  const deadLettersQuery = useQuery({
+    queryKey: ['alerts-dead-letter'],
+    queryFn: () => getAlertDeadLetters({ limit: 25 }),
   })
 
   const createRuleMutation = useMutation({
@@ -163,9 +172,20 @@ export default function AlertsPage() {
     onError: () => setActionStatus('Failed to delete destination.'),
   })
 
+  const replayDeadLetterMutation = useMutation({
+    mutationFn: replayAlertDeadLetter,
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['alerts-dead-letter'] })
+      queryClient.invalidateQueries({ queryKey: ['alerts-events'] })
+      setActionStatus(data.message)
+    },
+    onError: () => setActionStatus('Failed to replay dead-letter alert.'),
+  })
+
   const rules = rulesQuery.data ?? []
   const destinations = destinationsQuery.data ?? []
   const events = eventsQuery.data ?? []
+  const deadLetters = deadLettersQuery.data ?? []
   const activeDestinations = destinations.filter((destination) => destination.is_active)
   const evaluatedRules = useMemo(() => evaluateMutation.data?.rules ?? [], [evaluateMutation.data?.rules])
   const evaluatedById = useMemo(
@@ -509,6 +529,59 @@ export default function AlertsPage() {
                 <p className="text-xs text-muted-500 whitespace-nowrap">
                   {new Date(event.created_at).toLocaleString()}
                 </p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="bg-dark-900 rounded-lg border border-dark-700">
+        <div className="px-4 py-3 border-b border-dark-700">
+          <h2 className="text-sm font-medium text-muted-200">Dead-Letter Notifications</h2>
+        </div>
+        {deadLettersQuery.isLoading ? (
+          <div className="flex items-center justify-center h-20">
+            <Loader2 className="h-5 w-5 text-primary-500 animate-spin" />
+          </div>
+        ) : deadLettersQuery.error ? (
+          <div className="p-4 text-sm text-red-400">Failed to load dead-letter alerts.</div>
+        ) : deadLetters.length === 0 ? (
+          <div className="p-4 text-sm text-muted-400">No failed notifications to replay.</div>
+        ) : (
+          <div className="divide-y divide-dark-700">
+            {deadLetters.map((deadLetter) => (
+              <div key={deadLetter.id} className="px-4 py-3 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm text-muted-100">
+                    {deadLetter.rule_name ?? 'Unknown rule'} → {deadLetter.destination_name ?? 'Unknown destination'}
+                  </p>
+                  <p className="text-xs text-muted-400 mt-1">
+                    {formatEventType(deadLetter.event_type)}
+                    {deadLetter.current_value !== null ? ` · current ${deadLetter.current_value.toFixed(2)}` : ''}
+                  </p>
+                  {deadLetter.message && (
+                    <p className="text-xs text-muted-500 mt-1">{deadLetter.message}</p>
+                  )}
+                  <p className="text-xs text-muted-500 mt-1">
+                    {new Date(deadLetter.created_at).toLocaleString()}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => replayDeadLetterMutation.mutate(deadLetter.id)}
+                  disabled={
+                    replayDeadLetterMutation.isPending || !deadLetter.replayable
+                  }
+                  className={clsx(
+                    'inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded border transition-colors',
+                    replayDeadLetterMutation.isPending || !deadLetter.replayable
+                      ? 'border-dark-700 text-muted-500 cursor-not-allowed'
+                      : 'border-primary-700 text-primary-300 hover:bg-primary-900/20'
+                  )}
+                >
+                  <Webhook className="h-3 w-3" />
+                  Replay
+                </button>
               </div>
             ))}
           </div>

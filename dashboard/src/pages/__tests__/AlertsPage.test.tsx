@@ -99,6 +99,10 @@ describe('AlertsPage', () => {
         ])
       }
 
+      if (url.includes('/api/v1/projects/me/alerts/dead-letter') && method === 'GET') {
+        return createJsonResponse([])
+      }
+
       if (url.includes('/api/v1/projects/me/alerts/destinations') && method === 'GET') {
         return createJsonResponse(destinations)
       }
