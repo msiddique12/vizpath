@@ -38,6 +38,15 @@ const OPERATOR_OPTIONS: Array<{ value: AlertOperator; label: string }> = [
   { value: 'lte', label: '<=' },
 ]
 
+const EVENT_TYPE_OPTIONS: Array<{ value: AlertEventType; label: string }> = [
+  { value: 'breach', label: 'Rule Breach' },
+  { value: 'notification_queued', label: 'Notification Queued' },
+  { value: 'notification_sent', label: 'Notification Sent' },
+  { value: 'notification_failed', label: 'Notification Failed' },
+  { value: 'notification_replayed', label: 'Notification Replayed' },
+  { value: 'notification_replay_failed', label: 'Replay Failed' },
+]
+
 function formatMetric(metric: AlertMetric): string {
   return METRIC_OPTIONS.find((option) => option.value === metric)?.label ?? metric
 }
@@ -63,6 +72,8 @@ export default function AlertsPage() {
   const [destinationName, setDestinationName] = useState('')
   const [destinationUrl, setDestinationUrl] = useState('')
   const [destinationToken, setDestinationToken] = useState('')
+  const [eventTypeFilter, setEventTypeFilter] = useState<AlertEventType | 'all'>('all')
+  const [eventRuleFilter, setEventRuleFilter] = useState<string>('all')
 
   const [formError, setFormError] = useState<string | null>(null)
   const [destinationError, setDestinationError] = useState<string | null>(null)
@@ -79,8 +90,13 @@ export default function AlertsPage() {
   })
 
   const eventsQuery = useQuery({
-    queryKey: ['alerts-events'],
-    queryFn: () => getAlertEvents({ limit: 25 }),
+    queryKey: ['alerts-events', eventTypeFilter, eventRuleFilter],
+    queryFn: () =>
+      getAlertEvents({
+        limit: 25,
+        event_type: eventTypeFilter === 'all' ? undefined : eventTypeFilter,
+        rule_id: eventRuleFilter === 'all' ? undefined : eventRuleFilter,
+      }),
   })
 
   const deadLettersQuery = useQuery({
@@ -549,8 +565,36 @@ export default function AlertsPage() {
       )}
 
       <div className="bg-dark-900 rounded-lg border border-dark-700">
-        <div className="px-4 py-3 border-b border-dark-700">
+        <div className="px-4 py-3 border-b border-dark-700 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <h2 className="text-sm font-medium text-muted-200">Recent Alert Events</h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={eventTypeFilter}
+              onChange={(event) => setEventTypeFilter(event.target.value as AlertEventType | 'all')}
+              aria-label="Event type filter"
+              className="rounded-lg border border-dark-700 bg-dark-800 px-3 py-2 text-xs text-muted-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            >
+              <option value="all">All event types</option>
+              {EVENT_TYPE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <select
+              value={eventRuleFilter}
+              onChange={(event) => setEventRuleFilter(event.target.value)}
+              aria-label="Event rule filter"
+              className="rounded-lg border border-dark-700 bg-dark-800 px-3 py-2 text-xs text-muted-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            >
+              <option value="all">All rules</option>
+              {rules.map((rule) => (
+                <option key={rule.id} value={rule.id}>
+                  {rule.name}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
         {eventsQuery.isLoading ? (
           <div className="flex items-center justify-center h-20">

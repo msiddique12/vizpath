@@ -33,6 +33,7 @@ describe('AlertsPage', () => {
     let destinationBody: Record<string, unknown> | null = null
     const destinations: Array<Record<string, unknown>> = []
     let evaluateCalled = false
+    const eventsRequestUrls: string[] = []
 
     globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = resolveUrl(input)
@@ -100,6 +101,7 @@ describe('AlertsPage', () => {
       }
 
       if (url.includes('/api/v1/projects/me/alerts/events') && method === 'GET') {
+        eventsRequestUrls.push(url)
         return createJsonResponse([
           {
             id: 'event-1',
@@ -204,7 +206,7 @@ describe('AlertsPage', () => {
     renderWithProviders(<AlertsPage />, ['/alerts'])
 
     await waitFor(() => {
-      expect(screen.getByText('Error guardrail')).toBeInTheDocument()
+      expect(screen.getAllByText('Error guardrail').length).toBeGreaterThan(0)
     })
 
     fireEvent.change(screen.getByLabelText('Rule name'), { target: { value: 'Cost spike' } })
@@ -250,7 +252,28 @@ describe('AlertsPage', () => {
       expect(screen.getByText('1 active alert detected.')).toBeInTheDocument()
       expect(screen.getByText(/Current: 50.00/)).toBeInTheDocument()
       expect(screen.getByText('Recent Alert Events')).toBeInTheDocument()
-      expect(screen.getByText('Rule Breach')).toBeInTheDocument()
+      expect(screen.getAllByText('Rule Breach').length).toBeGreaterThan(0)
+    })
+
+    fireEvent.change(screen.getByLabelText('Event type filter'), {
+      target: { value: 'notification_failed' },
+    })
+    await waitFor(() => {
+      expect(
+        eventsRequestUrls.some((url) => url.includes('event_type=notification_failed'))
+      ).toBe(true)
+    })
+
+    fireEvent.change(screen.getByLabelText('Event rule filter'), {
+      target: { value: 'rule-1' },
+    })
+    await waitFor(() => {
+      expect(
+        eventsRequestUrls.some(
+          (url) =>
+            url.includes('event_type=notification_failed') && url.includes('rule_id=rule-1')
+        )
+      ).toBe(true)
     })
   })
 })
