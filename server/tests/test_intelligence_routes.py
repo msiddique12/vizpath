@@ -208,20 +208,28 @@ class TestIntelligenceStatusEndpoint:
             mock_settings.nvidia_api_key = None
             mock_settings.nvidia_llm_model = "nvidia/model"
             mock_settings.nvidia_base_url = "https://integrate.api.nvidia.com/v1"
+            mock_settings.nvidia_llm_timeout_seconds = 20.0
+            mock_settings.nvidia_llm_max_tokens = 2000
             resp = client.get("/api/v1/intelligence/status")
             assert resp.status_code == 200
             data = resp.json()
             assert data["nvidia_api_key_configured"] is False
+            assert data["llm_timeout_seconds"] == 20.0
+            assert data["llm_max_tokens"] == 2000
 
     def test_status_reports_configured_key(self, client, test_db):
         with patch("app.routes.intelligence.settings") as mock_settings:
             mock_settings.nvidia_api_key = "nvapi-test"
             mock_settings.nvidia_llm_model = "nvidia/model"
             mock_settings.nvidia_base_url = "https://integrate.api.nvidia.com/v1"
+            mock_settings.nvidia_llm_timeout_seconds = 15.0
+            mock_settings.nvidia_llm_max_tokens = 1024
             resp = client.get("/api/v1/intelligence/status")
             assert resp.status_code == 200
             data = resp.json()
             assert data["nvidia_api_key_configured"] is True
+            assert data["llm_timeout_seconds"] == 15.0
+            assert data["llm_max_tokens"] == 1024
 
 
 class TestSafetyScanEndpoint:

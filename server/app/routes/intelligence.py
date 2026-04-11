@@ -2013,6 +2013,8 @@ async def intelligence_status(
         "nvidia_api_key_configured": bool(settings.nvidia_api_key),
         "model": settings.nvidia_llm_model,
         "base_url": settings.nvidia_base_url,
+        "llm_timeout_seconds": settings.nvidia_llm_timeout_seconds,
+        "llm_max_tokens": settings.nvidia_llm_max_tokens,
     }
 
 
