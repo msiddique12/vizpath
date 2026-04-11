@@ -141,6 +141,12 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
               : 'Could not verify intelligence readiness.'}
         </div>
       )}
+      {isIntelligenceReady && intelligenceStatus.data && (
+        <div className="bg-dark-900 border border-dark-700 rounded-lg px-3 py-2 text-xs text-muted-300">
+          Guardrails: timeout {intelligenceStatus.data.llm_timeout_seconds ?? 20}s · max tokens{' '}
+          {intelligenceStatus.data.llm_max_tokens ?? 2000}
+        </div>
+      )}
 
       <div className="flex gap-2">
         <button

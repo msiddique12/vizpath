@@ -917,6 +917,8 @@ export interface IntelligenceStatusResponse {
   nvidia_api_key_configured: boolean
   model: string
   base_url: string
+  llm_timeout_seconds?: number
+  llm_max_tokens?: number
 }
 
 export interface StoryModeSeedResponse {

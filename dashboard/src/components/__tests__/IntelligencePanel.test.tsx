@@ -31,6 +31,8 @@ describe('IntelligencePanel deterministic diagnostics', () => {
           nvidia_api_key_configured: false,
           model: 'nvidia/test-model',
           base_url: 'https://api.example.test',
+          llm_timeout_seconds: 20,
+          llm_max_tokens: 2000,
         })
       }
       if (url.includes('/api/v1/intelligence/copilot')) {
@@ -120,6 +122,8 @@ describe('IntelligencePanel deterministic diagnostics', () => {
           nvidia_api_key_configured: true,
           model: 'nvidia/test-model',
           base_url: 'https://api.example.test',
+          llm_timeout_seconds: 15,
+          llm_max_tokens: 1024,
         })
       }
       if (url.includes('/api/v1/intelligence/copilot')) {
@@ -196,6 +200,7 @@ describe('IntelligencePanel deterministic diagnostics', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Explain Regression' }))
 
     await waitFor(() => {
+      expect(screen.getByText('Guardrails: timeout 15s · max tokens 1024')).toBeInTheDocument()
       expect(screen.getByText(/Regression Explain/)).toBeInTheDocument()
       expect(screen.getByText(/New reliability failures in candidate trace/)).toBeInTheDocument()
     })
@@ -213,6 +218,8 @@ describe('IntelligencePanel deterministic diagnostics', () => {
           nvidia_api_key_configured: true,
           model: 'nvidia/test-model',
           base_url: 'https://api.example.test',
+          llm_timeout_seconds: 12,
+          llm_max_tokens: 1500,
         })
       }
       if (url.includes('/api/v1/intelligence/copilot')) {
@@ -265,6 +272,7 @@ describe('IntelligencePanel deterministic diagnostics', () => {
     renderWithProviders(<IntelligencePanel traceId="trace-current" />)
 
     await waitFor(() => {
+      expect(screen.getByText('Guardrails: timeout 12s · max tokens 1500')).toBeInTheDocument()
       expect(screen.getByText('Trace Copilot')).toBeInTheDocument()
       expect(screen.getByText('New reliability failures in candidate trace')).toBeInTheDocument()
       expect(screen.getAllByText('Address primary root-cause recommendation').length).toBeGreaterThan(0)
