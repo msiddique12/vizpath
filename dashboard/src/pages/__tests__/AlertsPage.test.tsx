@@ -34,6 +34,7 @@ describe('AlertsPage', () => {
     const destinations: Array<Record<string, unknown>> = []
     let evaluateCalled = false
     const eventsRequestUrls: string[] = []
+    const opsSummaryRequestUrls: string[] = []
 
     globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = resolveUrl(input)
@@ -83,8 +84,11 @@ describe('AlertsPage', () => {
       }
 
       if (url.includes('/api/v1/projects/me/alerts/ops-summary') && method === 'GET') {
+        opsSummaryRequestUrls.push(url)
+        const parsedUrl = new URL(url, 'http://localhost')
+        const windowDays = Number(parsedUrl.searchParams.get('window_days') ?? '7')
         return createJsonResponse({
-          window_days: 7,
+          window_days: windowDays,
           generated_at: new Date().toISOString(),
           queue_depth: 0,
           total_delivery_attempts: 1,
@@ -253,6 +257,13 @@ describe('AlertsPage', () => {
       expect(screen.getByText(/Current: 50.00/)).toBeInTheDocument()
       expect(screen.getByText('Recent Alert Events')).toBeInTheDocument()
       expect(screen.getAllByText('Rule Breach').length).toBeGreaterThan(0)
+    })
+
+    expect(opsSummaryRequestUrls.some((url) => url.includes('window_days=7'))).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: '30d' }))
+    await waitFor(() => {
+      expect(opsSummaryRequestUrls.some((url) => url.includes('window_days=30'))).toBe(true)
+      expect(screen.getByText('Delivery Success (30d)')).toBeInTheDocument()
     })
 
     fireEvent.change(screen.getByLabelText('Event type filter'), {

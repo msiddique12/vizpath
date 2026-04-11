@@ -74,6 +74,7 @@ export default function AlertsPage() {
   const [destinationToken, setDestinationToken] = useState('')
   const [eventTypeFilter, setEventTypeFilter] = useState<AlertEventType | 'all'>('all')
   const [eventRuleFilter, setEventRuleFilter] = useState<string>('all')
+  const [opsWindowDays, setOpsWindowDays] = useState<7 | 30>(7)
 
   const [formError, setFormError] = useState<string | null>(null)
   const [destinationError, setDestinationError] = useState<string | null>(null)
@@ -105,8 +106,8 @@ export default function AlertsPage() {
   })
 
   const opsSummaryQuery = useQuery({
-    queryKey: ['alerts-ops-summary'],
-    queryFn: () => getAlertOpsSummary(7),
+    queryKey: ['alerts-ops-summary', opsWindowDays],
+    queryFn: () => getAlertOpsSummary(opsWindowDays),
   })
 
   const createRuleMutation = useMutation({
@@ -281,9 +282,38 @@ export default function AlertsPage() {
         </p>
       </div>
 
+      <div className="space-y-2">
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => setOpsWindowDays(7)}
+            className={clsx(
+              'px-2.5 py-1 text-xs rounded border transition-colors',
+              opsWindowDays === 7
+                ? 'border-primary-500 bg-primary-900/30 text-primary-200'
+                : 'border-dark-700 text-muted-400 hover:bg-dark-800'
+            )}
+          >
+            7d
+          </button>
+          <button
+            type="button"
+            onClick={() => setOpsWindowDays(30)}
+            className={clsx(
+              'px-2.5 py-1 text-xs rounded border transition-colors',
+              opsWindowDays === 30
+                ? 'border-primary-500 bg-primary-900/30 text-primary-200'
+                : 'border-dark-700 text-muted-400 hover:bg-dark-800'
+            )}
+          >
+            30d
+          </button>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="bg-dark-900 rounded-lg border border-dark-700 p-3">
-          <p className="text-xs text-muted-400">Delivery Success (7d)</p>
+          <p className="text-xs text-muted-400">Delivery Success ({opsWindowDays}d)</p>
           <p className="text-lg font-semibold text-muted-100 mt-1">
             {opsSummary ? `${opsSummary.delivery_success_rate.toFixed(1)}%` : '...'}
           </p>
@@ -294,7 +324,7 @@ export default function AlertsPage() {
           </p>
         </div>
         <div className="bg-dark-900 rounded-lg border border-dark-700 p-3">
-          <p className="text-xs text-muted-400">Replay Success (7d)</p>
+          <p className="text-xs text-muted-400">Replay Success ({opsWindowDays}d)</p>
           <p className="text-lg font-semibold text-muted-100 mt-1">
             {opsSummary ? `${opsSummary.replay_success_rate.toFixed(1)}%` : '...'}
           </p>
