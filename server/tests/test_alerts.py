@@ -876,3 +876,83 @@ def test_alert_ops_summary_reports_delivery_and_replay_kpis(client, monkeypatch)
     assert summary["median_replay_seconds"] is not None
     assert summary["median_replay_seconds"] >= 0
     assert isinstance(summary["queue_depth"], int)
+
+
+def test_alert_ops_trends_reports_daily_series(client, monkeypatch):
+    """Ops trends should return daily series with delivery and replay counts."""
+    api_key = _create_project(client, "alerts-ops-trends")
+    headers = {"X-API-Key": api_key}
+
+    _ingest_trace_span(client, api_key=api_key, suffix="ops-trends-err", status="error")
+    create_rule = client.post(
+        "/api/v1/projects/me/alerts",
+        headers=headers,
+        json={
+            "name": "Ops trends rule",
+            "metric": "error_rate_percent",
+            "operator": "gte",
+            "threshold": 50,
+            "window_days": 30,
+            "is_active": True,
+        },
+    )
+    assert create_rule.status_code == 201
+
+    create_destination = client.post(
+        "/api/v1/projects/me/alerts/destinations",
+        headers=headers,
+        json={
+            "name": "Ops trends webhook",
+            "kind": "webhook",
+            "target_url": "https://example.com/alerts",
+            "secret_token": "ops-trends-secret",
+            "is_active": True,
+        },
+    )
+    assert create_destination.status_code == 201
+
+    delivery_calls = {"count": 0}
+
+    def _mock_post_webhook_json(_target_url, _payload, _secret_token=None):
+        delivery_calls["count"] += 1
+        return delivery_calls["count"] >= 2
+
+    monkeypatch.setattr(alert_service, "_post_webhook_json", _mock_post_webhook_json)
+
+    first_evaluation = client.get(
+        "/api/v1/projects/me/alerts/evaluate",
+        headers=headers,
+        params={"persist": "true", "notify": "true"},
+    )
+    assert first_evaluation.status_code == 200
+
+    dead_letters = client.get("/api/v1/projects/me/alerts/dead-letter", headers=headers)
+    assert dead_letters.status_code == 200
+    dead_letter_id = dead_letters.json()[0]["id"]
+
+    replay_response = client.post(
+        f"/api/v1/projects/me/alerts/dead-letter/{dead_letter_id}/replay",
+        headers=headers,
+    )
+    assert replay_response.status_code == 200
+    assert replay_response.json()["replayed"] is True
+
+    trends_response = client.get(
+        "/api/v1/projects/me/alerts/ops-trends",
+        headers=headers,
+        params={"window_days": 7},
+    )
+    assert trends_response.status_code == 200
+    trends = trends_response.json()
+    assert trends["window_days"] == 7
+    assert len(trends["series"]) == 7
+
+    total_delivery_attempts = sum(point["delivery_attempts"] for point in trends["series"])
+    total_sent = sum(point["notifications_sent"] for point in trends["series"])
+    total_failed = sum(point["notifications_failed"] for point in trends["series"])
+    total_replayed = sum(point["notifications_replayed"] for point in trends["series"])
+
+    assert total_delivery_attempts == 2
+    assert total_sent == 1
+    assert total_failed == 1
+    assert total_replayed == 1

@@ -271,6 +271,26 @@ class AlertOpsSummaryResponse(BaseModel):
     median_replay_seconds: float | None
 
 
+class AlertOpsTrendPointResponse(BaseModel):
+    """Daily alert delivery trend point."""
+
+    date: str
+    notifications_sent: int
+    notifications_failed: int
+    notifications_queued: int
+    notifications_replayed: int
+    delivery_attempts: int
+    delivery_success_rate: float
+
+
+class AlertOpsTrendsResponse(BaseModel):
+    """Time-series alert delivery trends for a project."""
+
+    window_days: int
+    generated_at: str
+    series: list[AlertOpsTrendPointResponse]
+
+
 def _to_rule_response(rule: ProjectAlertRule) -> AlertRuleResponse:
     return AlertRuleResponse(
         id=str(rule.id),
@@ -915,6 +935,87 @@ def alert_ops_summary(
         replay_failures=replay_failures,
         replay_success_rate=replay_success_rate,
         median_replay_seconds=median_replay_seconds,
+    )
+
+
+@router.get("/ops-trends", response_model=AlertOpsTrendsResponse)
+def alert_ops_trends(
+    window_days: int = Query(default=14, ge=2, le=90),
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> AlertOpsTrendsResponse:
+    """Return daily alert delivery/replay trend points for the project."""
+    now = datetime.now(timezone.utc)
+    start_date = (now - timedelta(days=window_days - 1)).date()
+    window_start = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
+
+    series_by_day: dict[str, dict[str, int | float | str]] = {}
+    for day_offset in range(window_days):
+        day = start_date + timedelta(days=day_offset)
+        key = day.isoformat()
+        series_by_day[key] = {
+            "date": key,
+            "notifications_sent": 0,
+            "notifications_failed": 0,
+            "notifications_queued": 0,
+            "notifications_replayed": 0,
+            "delivery_attempts": 0,
+            "delivery_success_rate": 0.0,
+        }
+
+    events = (
+        db.query(ProjectAlertEvent)
+        .filter(
+            ProjectAlertEvent.project_id == project.id,
+            ProjectAlertEvent.created_at >= window_start,
+        )
+        .all()
+    )
+
+    for event in events:
+        if event.created_at is None:
+            continue
+        day_key = _as_utc(event.created_at).date().isoformat()
+        point = series_by_day.get(day_key)
+        if point is None:
+            continue
+
+        if event.event_type == "notification_sent":
+            point["notifications_sent"] = int(point["notifications_sent"]) + 1
+        elif event.event_type in {"notification_failed", "notification_replay_failed"}:
+            point["notifications_failed"] = int(point["notifications_failed"]) + 1
+        elif event.event_type == "notification_queued":
+            point["notifications_queued"] = int(point["notifications_queued"]) + 1
+        elif event.event_type == "notification_replayed":
+            point["notifications_replayed"] = int(point["notifications_replayed"]) + 1
+
+    series: list[AlertOpsTrendPointResponse] = []
+    for day_key in sorted(series_by_day.keys()):
+        point = series_by_day[day_key]
+        notifications_sent = int(point["notifications_sent"])
+        notifications_failed = int(point["notifications_failed"])
+        delivery_attempts = notifications_sent + notifications_failed
+        delivery_success_rate = (
+            round((notifications_sent / delivery_attempts) * 100, 2)
+            if delivery_attempts > 0
+            else 0.0
+        )
+        series.append(
+            AlertOpsTrendPointResponse(
+                date=str(point["date"]),
+                notifications_sent=notifications_sent,
+                notifications_failed=notifications_failed,
+                notifications_queued=int(point["notifications_queued"]),
+                notifications_replayed=int(point["notifications_replayed"]),
+                delivery_attempts=delivery_attempts,
+                delivery_success_rate=delivery_success_rate,
+            )
+        )
+
+    return AlertOpsTrendsResponse(
+        window_days=window_days,
+        generated_at=now.isoformat(),
+        series=series,
     )
 
 
