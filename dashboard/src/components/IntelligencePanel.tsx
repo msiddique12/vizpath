@@ -29,6 +29,7 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
   const [regressionExplain, setRegressionExplain] = useState<RegressionExplainResult | null>(null)
   const [baselineTraceId, setBaselineTraceId] = useState<string>('')
   const [actionStatus, setActionStatus] = useState<string | null>(null)
+  const [isRefreshingCopilot, setIsRefreshingCopilot] = useState(false)
 
   const copilotQuery = useQuery({
     queryKey: ['trace-copilot', traceId],
@@ -122,6 +123,19 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
   const isRegressionDisabled =
     regressionExplainMutation.isPending || baselineId.length === 0 || isSameTraceComparison
 
+  const handleRefreshCopilot = async () => {
+    try {
+      setIsRefreshingCopilot(true)
+      const freshResult = await getTraceCopilot(traceId, { refreshCache: true })
+      queryClient.setQueryData(['trace-copilot', traceId], freshResult)
+      setActionStatus('Refreshed copilot from fresh signals.')
+    } catch {
+      setActionStatus('Failed to refresh copilot.')
+    } finally {
+      setIsRefreshingCopilot(false)
+    }
+  }
+
   return (
     <div className="bg-dark-800 rounded-lg p-4 space-y-4">
       <div className="flex items-center justify-between">
@@ -199,16 +213,21 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
         <div className="flex items-center justify-between">
           <p className="text-xs uppercase tracking-wide text-muted-400">Trace Copilot</p>
           <button
-            onClick={() => copilotQuery.refetch()}
-            disabled={copilotQuery.isFetching}
+            onClick={handleRefreshCopilot}
+            disabled={copilotQuery.isFetching || isRefreshingCopilot}
             className={clsx(
               'inline-flex items-center gap-1 rounded border px-2 py-1 text-xs transition-colors',
-              copilotQuery.isFetching
+              copilotQuery.isFetching || isRefreshingCopilot
                 ? 'border-dark-600 text-muted-500'
                 : 'border-dark-600 text-muted-300 hover:text-muted-100'
             )}
           >
-            <RefreshCw className={clsx('h-3 w-3', copilotQuery.isFetching && 'animate-spin')} />
+            <RefreshCw
+              className={clsx(
+                'h-3 w-3',
+                (copilotQuery.isFetching || isRefreshingCopilot) && 'animate-spin'
+              )}
+            />
             Refresh
           </button>
         </div>

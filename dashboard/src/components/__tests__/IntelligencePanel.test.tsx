@@ -279,4 +279,89 @@ describe('IntelligencePanel deterministic diagnostics', () => {
       expect(screen.getByText('candidate_tool')).toBeInTheDocument()
     })
   })
+
+  it('forces fresh copilot recompute when refresh is clicked', async () => {
+    const copilotRefreshFlags: boolean[] = []
+
+    globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString()
+      if (url.includes('/api/v1/intelligence/status')) {
+        return createJsonResponse({
+          nvidia_api_key_configured: true,
+          model: 'nvidia/test-model',
+          base_url: 'https://api.example.test',
+          llm_timeout_seconds: 12,
+          llm_max_tokens: 1500,
+        })
+      }
+      if (url.includes('/api/v1/intelligence/copilot')) {
+        const body = JSON.parse(String(init?.body ?? '{}')) as { refresh_cache?: boolean }
+        copilotRefreshFlags.push(Boolean(body.refresh_cache))
+        const isFresh = Boolean(body.refresh_cache)
+        return createJsonResponse({
+          trace_id: 'trace-current',
+          baseline_trace_id: null,
+          triage_score: isFresh ? 80 : 78,
+          triage_status: 'high_risk',
+          confidence: 0.88,
+          summary: isFresh
+            ? 'Fresh copilot recompute completed.'
+            : 'Cached copilot summary.',
+          root_cause: {
+            title: 'New reliability failures in candidate trace',
+            detail: 'Review erroring spans first and add deterministic fallback handling.',
+            source: 'regression_explain',
+            confidence: 0.88,
+          },
+          next_fixes: [
+            {
+              id: 'fix-1',
+              title: 'Address primary root-cause recommendation',
+              priority: 'high',
+              rationale: 'Review erroring spans first and add deterministic fallback handling.',
+              expected_gain: 'Reduce recurrence of the top failure signal.',
+              linked_span_ids: ['span-1'],
+            },
+          ],
+          span_references: [
+            {
+              span_id: 'span-1',
+              span_name: 'candidate_tool',
+              span_type: 'tool',
+              status: 'error',
+              duration_ms: 410,
+              tokens: 0,
+              reason: 'Referenced by failure-mode evidence',
+            },
+          ],
+          candidate_failure: { status: 'issue_detected', primary_mode: 'tool', confidence: 0.82 },
+          candidate_anomaly: { status: 'outlier', anomaly_score: 66, anomaly_count: 2 },
+          candidate_safety: { risk_level: 'low', risk_score: 0 },
+          compare_summary: null,
+          generated_at: new Date().toISOString(),
+          cached: !isFresh,
+          cache_ttl_seconds: 120,
+        })
+      }
+      throw new Error(`Unexpected fetch call: ${url}`)
+    }) as unknown as typeof fetch
+
+    renderWithProviders(<IntelligencePanel traceId="trace-current" />)
+
+    await waitFor(() => {
+      expect(copilotRefreshFlags.length).toBeGreaterThan(0)
+    })
+    expect(copilotRefreshFlags).toContain(false)
+
+    const refreshButton = screen.getByRole('button', { name: 'Refresh' })
+    await waitFor(() => {
+      expect(refreshButton).not.toBeDisabled()
+    })
+    fireEvent.click(refreshButton)
+
+    await waitFor(() => {
+      expect(copilotRefreshFlags.length).toBeGreaterThan(1)
+      expect(copilotRefreshFlags).toContain(true)
+    })
+  })
 })
