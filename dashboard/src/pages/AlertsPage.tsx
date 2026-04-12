@@ -13,7 +13,7 @@ import {
   evaluateAlertRules,
   getAlertDeadLetters,
   getAlertDestinations,
-  getAlertEvents,
+  getAlertEventsPage,
   getAlertOpsSummary,
   getAlertOpsTrends,
   getAlertRules,
@@ -97,7 +97,7 @@ export default function AlertsPage() {
   const eventsQuery = useQuery({
     queryKey: ['alerts-events', eventTypeFilter, eventRuleFilter, eventOffset],
     queryFn: () =>
-      getAlertEvents({
+      getAlertEventsPage({
         limit: EVENTS_PAGE_SIZE,
         offset: eventOffset,
         event_type: eventTypeFilter === 'all' ? undefined : eventTypeFilter,
@@ -216,8 +216,9 @@ export default function AlertsPage() {
 
   const rules = rulesQuery.data ?? []
   const destinations = destinationsQuery.data ?? []
-  const events = eventsQuery.data ?? []
-  const hasNextEventsPage = events.length === EVENTS_PAGE_SIZE
+  const eventsPage = eventsQuery.data
+  const events = eventsPage?.events ?? []
+  const hasNextEventsPage = eventsPage?.has_more ?? false
   const deadLetters = deadLettersQuery.data ?? []
   const opsSummary = opsSummaryQuery.data
   const opsTrendSeries = opsTrendsQuery.data?.series ?? []
@@ -709,7 +710,10 @@ export default function AlertsPage() {
             >
               Next
             </button>
-            <span className="text-xs text-muted-500">Page {Math.floor(eventOffset / EVENTS_PAGE_SIZE) + 1}</span>
+            <span className="text-xs text-muted-500">
+              Page {Math.floor(eventOffset / EVENTS_PAGE_SIZE) + 1}
+              {eventsPage ? ` · ${eventsPage.total} total` : ''}
+            </span>
           </div>
         </div>
         {eventsQuery.isLoading ? (

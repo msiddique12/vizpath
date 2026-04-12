@@ -270,6 +270,14 @@ export interface AlertEvent {
   created_at: string
 }
 
+export interface AlertEventListResponse {
+  events: AlertEvent[]
+  total: number
+  limit: number
+  offset: number
+  has_more: boolean
+}
+
 export interface AlertDeadLetter {
   id: string
   event_type: 'notification_failed' | 'notification_replay_failed'
@@ -436,6 +444,20 @@ export async function getAlertEvents(params?: {
   if (params?.limit !== undefined) searchParams.set('limit', String(params.limit))
   if (params?.offset !== undefined) searchParams.set('offset', String(params.offset))
   return fetchApi(`/projects/me/alerts/events?${searchParams}`)
+}
+
+export async function getAlertEventsPage(params?: {
+  event_type?: AlertEventType
+  rule_id?: string
+  limit?: number
+  offset?: number
+}): Promise<AlertEventListResponse> {
+  const searchParams = new URLSearchParams()
+  if (params?.event_type) searchParams.set('event_type', params.event_type)
+  if (params?.rule_id) searchParams.set('rule_id', params.rule_id)
+  if (params?.limit !== undefined) searchParams.set('limit', String(params.limit))
+  if (params?.offset !== undefined) searchParams.set('offset', String(params.offset))
+  return fetchApi(`/projects/me/alerts/events/page?${searchParams}`)
 }
 
 export async function getAlertDeadLetters(params?: {

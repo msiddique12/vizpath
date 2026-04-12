@@ -180,7 +180,7 @@ describe('AlertsPage', () => {
         })
       }
 
-      if (url.includes('/api/v1/projects/me/alerts/events') && method === 'GET') {
+      if (url.includes('/api/v1/projects/me/alerts/events/page') && method === 'GET') {
         eventsRequestUrls.push(url)
         const parsedUrl = new URL(url, 'http://localhost')
         const offset = Number(parsedUrl.searchParams.get('offset') ?? '0')
@@ -188,27 +188,57 @@ describe('AlertsPage', () => {
         const ruleId = parsedUrl.searchParams.get('rule_id')
 
         if (eventType || ruleId) {
-          return createJsonResponse([
-            {
-              id: 'event-filtered',
-              event_type: 'notification_failed',
-              rule_id: 'rule-1',
-              destination_id: null,
-              rule_name: 'Error guardrail',
-              metric: 'error_rate_percent',
-              operator: 'gte',
-              threshold: 5,
-              current_value: 50,
-              message: 'Filtered event result',
-              created_at: new Date().toISOString(),
-            },
-          ])
+          return createJsonResponse({
+            events: [
+              {
+                id: 'event-filtered',
+                event_type: 'notification_failed',
+                rule_id: 'rule-1',
+                destination_id: null,
+                rule_name: 'Error guardrail',
+                metric: 'error_rate_percent',
+                operator: 'gte',
+                threshold: 5,
+                current_value: 50,
+                message: 'Filtered event result',
+                created_at: new Date().toISOString(),
+              },
+            ],
+            total: 1,
+            limit: 25,
+            offset: 0,
+            has_more: false,
+          })
         }
 
         if (offset === 25) {
-          return createJsonResponse([
-            {
-              id: 'event-page-2',
+          return createJsonResponse({
+            events: [
+              {
+                id: 'event-page-2',
+                event_type: 'breach',
+                rule_id: 'rule-1',
+                destination_id: null,
+                rule_name: 'Error guardrail',
+                metric: 'error_rate_percent',
+                operator: 'gte',
+                threshold: 5,
+                current_value: 50,
+                message: 'Rule breached page 2',
+                created_at: new Date().toISOString(),
+              },
+            ],
+            total: 26,
+            limit: 25,
+            offset: 25,
+            has_more: false,
+          })
+        }
+
+        return createJsonResponse(
+          {
+            events: Array.from({ length: 25 }, (_, index) => ({
+              id: `event-page-1-${index + 1}`,
               event_type: 'breach',
               rule_id: 'rule-1',
               destination_id: null,
@@ -217,26 +247,14 @@ describe('AlertsPage', () => {
               operator: 'gte',
               threshold: 5,
               current_value: 50,
-              message: 'Rule breached page 2',
+              message: index === 0 ? 'Rule breached page 1' : `Rule breached page 1 item ${index + 1}`,
               created_at: new Date().toISOString(),
-            },
-          ])
-        }
-
-        return createJsonResponse(
-          Array.from({ length: 25 }, (_, index) => ({
-            id: `event-page-1-${index + 1}`,
-            event_type: 'breach',
-            rule_id: 'rule-1',
-            destination_id: null,
-            rule_name: 'Error guardrail',
-            metric: 'error_rate_percent',
-            operator: 'gte',
-            threshold: 5,
-            current_value: 50,
-            message: index === 0 ? 'Rule breached page 1' : `Rule breached page 1 item ${index + 1}`,
-            created_at: new Date().toISOString(),
-          }))
+            })),
+            total: 26,
+            limit: 25,
+            offset: 0,
+            has_more: true,
+          }
         )
       }
 
