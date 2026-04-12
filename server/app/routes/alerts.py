@@ -224,6 +224,16 @@ class AlertEventResponse(BaseModel):
     created_at: str
 
 
+class AlertEventListResponse(BaseModel):
+    """Paginated alert event list with metadata."""
+
+    events: list[AlertEventResponse]
+    total: int
+    limit: int
+    offset: int
+    has_more: bool
+
+
 class AlertDeadLetterResponse(BaseModel):
     """Serialized failed notification event that can be replayed."""
 
@@ -702,6 +712,41 @@ def list_alert_events(
         .all()
     )
     return [_to_event_response(event) for event in events]
+
+
+@router.get("/events/page", response_model=AlertEventListResponse)
+def list_alert_events_page(
+    event_type: str | None = Query(default=None, pattern=ALERT_EVENT_TYPE_PATTERN),
+    rule_id: UUID | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> AlertEventListResponse:
+    """List alert event history with pagination metadata."""
+    query = db.query(ProjectAlertEvent).filter(ProjectAlertEvent.project_id == project.id)
+    if event_type:
+        query = query.filter(ProjectAlertEvent.event_type == event_type)
+    if rule_id:
+        query = query.filter(ProjectAlertEvent.rule_id == rule_id)
+
+    total = query.count()
+    events = (
+        query.order_by(ProjectAlertEvent.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+        .all()
+    )
+    serialized_events = [_to_event_response(event) for event in events]
+    has_more = (offset + len(serialized_events)) < total
+
+    return AlertEventListResponse(
+        events=serialized_events,
+        total=total,
+        limit=limit,
+        offset=offset,
+        has_more=has_more,
+    )
 
 
 @router.get("/dead-letter", response_model=list[AlertDeadLetterResponse])

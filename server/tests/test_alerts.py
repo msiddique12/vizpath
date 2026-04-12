@@ -520,6 +520,32 @@ def test_alert_events_endpoint_lists_and_filters_event_history(client, monkeypat
     assert filtered_events
     assert all(event["event_type"] == "notification_sent" for event in filtered_events)
 
+    paged_events = client.get(
+        "/api/v1/projects/me/alerts/events/page",
+        headers=headers,
+        params={"limit": 1, "offset": 0},
+    )
+    assert paged_events.status_code == 200
+    paged_payload = paged_events.json()
+    assert paged_payload["limit"] == 1
+    assert paged_payload["offset"] == 0
+    assert paged_payload["total"] >= 2
+    assert len(paged_payload["events"]) == 1
+    assert paged_payload["has_more"] is True
+
+    paged_filtered = client.get(
+        "/api/v1/projects/me/alerts/events/page",
+        headers=headers,
+        params={"event_type": "notification_sent", "limit": 50, "offset": 0},
+    )
+    assert paged_filtered.status_code == 200
+    paged_filtered_payload = paged_filtered.json()
+    assert paged_filtered_payload["total"] >= 1
+    assert all(
+        event["event_type"] == "notification_sent"
+        for event in paged_filtered_payload["events"]
+    )
+
     evaluate_again = client.get(
         "/api/v1/projects/me/alerts/evaluate",
         headers=headers,
