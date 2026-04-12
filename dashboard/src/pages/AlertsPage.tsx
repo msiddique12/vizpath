@@ -15,6 +15,7 @@ import {
   getAlertDestinations,
   getAlertEvents,
   getAlertOpsSummary,
+  getAlertOpsTrends,
   getAlertRules,
   replayAlertDeadLetter,
   updateAlertDestination,
@@ -112,6 +113,10 @@ export default function AlertsPage() {
   const opsSummaryQuery = useQuery({
     queryKey: ['alerts-ops-summary', opsWindowDays],
     queryFn: () => getAlertOpsSummary(opsWindowDays),
+  })
+  const opsTrendsQuery = useQuery({
+    queryKey: ['alerts-ops-trends', opsWindowDays],
+    queryFn: () => getAlertOpsTrends(opsWindowDays),
   })
 
   const createRuleMutation = useMutation({
@@ -215,6 +220,12 @@ export default function AlertsPage() {
   const hasNextEventsPage = events.length === EVENTS_PAGE_SIZE
   const deadLetters = deadLettersQuery.data ?? []
   const opsSummary = opsSummaryQuery.data
+  const opsTrendSeries = opsTrendsQuery.data?.series ?? []
+  const recentTrendPoints = opsTrendSeries.slice(-7)
+  const maxTrendAttempts = Math.max(
+    ...recentTrendPoints.map((point) => point.delivery_attempts),
+    1
+  )
   const activeDestinations = destinations.filter((destination) => destination.is_active)
   const evaluatedRules = useMemo(() => evaluateMutation.data?.rules ?? [], [evaluateMutation.data?.rules])
   const evaluatedById = useMemo(
@@ -359,6 +370,43 @@ export default function AlertsPage() {
           </p>
           <p className="text-xs text-muted-500 mt-1">Time from failure event to replay attempt</p>
         </div>
+      </div>
+
+      <div className="bg-dark-900 rounded-lg border border-dark-700 p-3">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs text-muted-400">Daily Delivery Trend ({opsWindowDays}d window)</p>
+          <p className="text-xs text-muted-500">Last 7 days</p>
+        </div>
+        {opsTrendsQuery.isLoading ? (
+          <div className="flex items-center gap-2 text-xs text-muted-500 mt-3">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Loading trend...
+          </div>
+        ) : recentTrendPoints.length === 0 ? (
+          <p className="text-xs text-muted-500 mt-3">No trend data yet.</p>
+        ) : (
+          <div className="mt-3 space-y-2">
+            {recentTrendPoints.map((point) => (
+              <div key={point.date} className="grid grid-cols-[90px_1fr_auto] items-center gap-2">
+                <p className="text-xs text-muted-400">{point.date.slice(5)}</p>
+                <div className="h-2 rounded bg-dark-800 overflow-hidden">
+                  <div
+                    className="h-full bg-primary-500/80"
+                    style={{
+                      width: `${Math.max(
+                        6,
+                        Math.round((point.delivery_attempts / maxTrendAttempts) * 100)
+                      )}%`,
+                    }}
+                  />
+                </div>
+                <p className="text-xs text-muted-300">
+                  {point.notifications_sent}/{point.delivery_attempts}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="bg-dark-900 rounded-lg border border-dark-700 p-4 space-y-4">

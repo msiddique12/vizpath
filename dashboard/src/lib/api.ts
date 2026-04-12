@@ -311,6 +311,22 @@ export interface AlertOpsSummary {
   median_replay_seconds: number | null
 }
 
+export interface AlertOpsTrendPoint {
+  date: string
+  notifications_sent: number
+  notifications_failed: number
+  notifications_queued: number
+  notifications_replayed: number
+  delivery_attempts: number
+  delivery_success_rate: number
+}
+
+export interface AlertOpsTrends {
+  window_days: number
+  generated_at: string
+  series: AlertOpsTrendPoint[]
+}
+
 export async function getAlertRules(): Promise<AlertRule[]> {
   return fetchApi('/projects/me/alerts')
 }
@@ -444,6 +460,11 @@ export async function replayAlertDeadLetter(eventId: string): Promise<AlertRepla
 export async function getAlertOpsSummary(windowDays = 7): Promise<AlertOpsSummary> {
   const params = new URLSearchParams({ window_days: String(windowDays) })
   return fetchApi(`/projects/me/alerts/ops-summary?${params}`)
+}
+
+export async function getAlertOpsTrends(windowDays = 14): Promise<AlertOpsTrends> {
+  const params = new URLSearchParams({ window_days: String(windowDays) })
+  return fetchApi(`/projects/me/alerts/ops-trends?${params}`)
 }
 
 // Curation API

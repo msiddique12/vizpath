@@ -35,6 +35,7 @@ describe('AlertsPage', () => {
     let evaluateCalled = false
     const eventsRequestUrls: string[] = []
     const opsSummaryRequestUrls: string[] = []
+    const opsTrendsRequestUrls: string[] = []
 
     globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = resolveUrl(input)
@@ -101,6 +102,81 @@ describe('AlertsPage', () => {
           replay_failures: 0,
           replay_success_rate: 0,
           median_replay_seconds: null,
+        })
+      }
+
+      if (url.includes('/api/v1/projects/me/alerts/ops-trends') && method === 'GET') {
+        opsTrendsRequestUrls.push(url)
+        const parsedUrl = new URL(url, 'http://localhost')
+        const windowDays = Number(parsedUrl.searchParams.get('window_days') ?? '7')
+        return createJsonResponse({
+          window_days: windowDays,
+          generated_at: new Date().toISOString(),
+          series: [
+            {
+              date: '2026-04-06',
+              notifications_sent: 0,
+              notifications_failed: 0,
+              notifications_queued: 0,
+              notifications_replayed: 0,
+              delivery_attempts: 0,
+              delivery_success_rate: 0,
+            },
+            {
+              date: '2026-04-07',
+              notifications_sent: 1,
+              notifications_failed: 0,
+              notifications_queued: 0,
+              notifications_replayed: 0,
+              delivery_attempts: 1,
+              delivery_success_rate: 100,
+            },
+            {
+              date: '2026-04-08',
+              notifications_sent: 1,
+              notifications_failed: 1,
+              notifications_queued: 0,
+              notifications_replayed: 1,
+              delivery_attempts: 2,
+              delivery_success_rate: 50,
+            },
+            {
+              date: '2026-04-09',
+              notifications_sent: 0,
+              notifications_failed: 1,
+              notifications_queued: 0,
+              notifications_replayed: 0,
+              delivery_attempts: 1,
+              delivery_success_rate: 0,
+            },
+            {
+              date: '2026-04-10',
+              notifications_sent: 2,
+              notifications_failed: 0,
+              notifications_queued: 0,
+              notifications_replayed: 0,
+              delivery_attempts: 2,
+              delivery_success_rate: 100,
+            },
+            {
+              date: '2026-04-11',
+              notifications_sent: 1,
+              notifications_failed: 0,
+              notifications_queued: 0,
+              notifications_replayed: 0,
+              delivery_attempts: 1,
+              delivery_success_rate: 100,
+            },
+            {
+              date: '2026-04-12',
+              notifications_sent: 0,
+              notifications_failed: 1,
+              notifications_queued: 0,
+              notifications_replayed: 0,
+              delivery_attempts: 1,
+              delivery_success_rate: 0,
+            },
+          ],
         })
       }
 
@@ -299,6 +375,7 @@ describe('AlertsPage', () => {
       expect(screen.getByText('Recent Alert Events')).toBeInTheDocument()
       expect(screen.getAllByText('Rule Breach').length).toBeGreaterThan(0)
       expect(screen.getByText('Rule breached page 1')).toBeInTheDocument()
+      expect(screen.getByText('Daily Delivery Trend (7d window)')).toBeInTheDocument()
     })
 
     fireEvent.click(screen.getByRole('button', { name: 'Next events page' }))
@@ -313,9 +390,11 @@ describe('AlertsPage', () => {
     })
 
     expect(opsSummaryRequestUrls.some((url) => url.includes('window_days=7'))).toBe(true)
+    expect(opsTrendsRequestUrls.some((url) => url.includes('window_days=7'))).toBe(true)
     fireEvent.click(screen.getByRole('button', { name: '30d' }))
     await waitFor(() => {
       expect(opsSummaryRequestUrls.some((url) => url.includes('window_days=30'))).toBe(true)
+      expect(opsTrendsRequestUrls.some((url) => url.includes('window_days=30'))).toBe(true)
       expect(screen.getByText('Delivery Success (30d)')).toBeInTheDocument()
     })
 
