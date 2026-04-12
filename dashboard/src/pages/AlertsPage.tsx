@@ -223,8 +223,22 @@ export default function AlertsPage() {
   const opsSummary = opsSummaryQuery.data
   const opsTrendSeries = opsTrendsQuery.data?.series ?? []
   const recentTrendPoints = opsTrendSeries.slice(-7)
+  const recentTrendWithFlags = recentTrendPoints.map((point, index) => {
+    const previousPoint = index > 0 ? recentTrendPoints[index - 1] : null
+    const failureSpike =
+      previousPoint === null
+        ? point.notifications_failed >= 3
+        : point.notifications_failed >= previousPoint.notifications_failed + 2 &&
+          point.notifications_failed >= 2
+    const lowSuccess = point.delivery_attempts >= 2 && point.delivery_success_rate < 50
+    return {
+      ...point,
+      failureSpike,
+      lowSuccess,
+    }
+  })
   const maxTrendAttempts = Math.max(
-    ...recentTrendPoints.map((point) => point.delivery_attempts),
+    ...recentTrendWithFlags.map((point) => point.delivery_attempts),
     1
   )
   const activeDestinations = destinations.filter((destination) => destination.is_active)
@@ -383,13 +397,25 @@ export default function AlertsPage() {
             <Loader2 className="h-3 w-3 animate-spin" />
             Loading trend...
           </div>
-        ) : recentTrendPoints.length === 0 ? (
+        ) : recentTrendWithFlags.length === 0 ? (
           <p className="text-xs text-muted-500 mt-3">No trend data yet.</p>
         ) : (
           <div className="mt-3 space-y-2">
-            {recentTrendPoints.map((point) => (
+            {recentTrendWithFlags.map((point) => (
               <div key={point.date} className="grid grid-cols-[90px_1fr_auto] items-center gap-2">
-                <p className="text-xs text-muted-400">{point.date.slice(5)}</p>
+                <div className="flex items-center gap-1">
+                  <p className="text-xs text-muted-400">{point.date.slice(5)}</p>
+                  {point.failureSpike && (
+                    <span className="rounded border border-red-700 bg-red-900/20 px-1.5 py-0.5 text-[10px] text-red-300">
+                      Spike
+                    </span>
+                  )}
+                  {point.lowSuccess && (
+                    <span className="rounded border border-amber-700 bg-amber-900/20 px-1.5 py-0.5 text-[10px] text-amber-300">
+                      Low success
+                    </span>
+                  )}
+                </div>
                 <div className="h-2 rounded bg-dark-800 overflow-hidden">
                   <div
                     className="h-full bg-primary-500/80"

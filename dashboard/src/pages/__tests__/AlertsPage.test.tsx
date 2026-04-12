@@ -143,10 +143,10 @@ describe('AlertsPage', () => {
             {
               date: '2026-04-09',
               notifications_sent: 0,
-              notifications_failed: 1,
+              notifications_failed: 3,
               notifications_queued: 0,
               notifications_replayed: 0,
-              delivery_attempts: 1,
+              delivery_attempts: 3,
               delivery_success_rate: 0,
             },
             {
@@ -394,6 +394,8 @@ describe('AlertsPage', () => {
       expect(screen.getAllByText('Rule Breach').length).toBeGreaterThan(0)
       expect(screen.getByText('Rule breached page 1')).toBeInTheDocument()
       expect(screen.getByText('Daily Delivery Trend (7d window)')).toBeInTheDocument()
+      expect(screen.getByText('Spike')).toBeInTheDocument()
+      expect(screen.getByText('Low success')).toBeInTheDocument()
     })
 
     fireEvent.click(screen.getByRole('button', { name: 'Next events page' }))
