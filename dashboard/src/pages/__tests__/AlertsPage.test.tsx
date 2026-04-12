@@ -106,9 +106,50 @@ describe('AlertsPage', () => {
 
       if (url.includes('/api/v1/projects/me/alerts/events') && method === 'GET') {
         eventsRequestUrls.push(url)
-        return createJsonResponse([
-          {
-            id: 'event-1',
+        const parsedUrl = new URL(url, 'http://localhost')
+        const offset = Number(parsedUrl.searchParams.get('offset') ?? '0')
+        const eventType = parsedUrl.searchParams.get('event_type')
+        const ruleId = parsedUrl.searchParams.get('rule_id')
+
+        if (eventType || ruleId) {
+          return createJsonResponse([
+            {
+              id: 'event-filtered',
+              event_type: 'notification_failed',
+              rule_id: 'rule-1',
+              destination_id: null,
+              rule_name: 'Error guardrail',
+              metric: 'error_rate_percent',
+              operator: 'gte',
+              threshold: 5,
+              current_value: 50,
+              message: 'Filtered event result',
+              created_at: new Date().toISOString(),
+            },
+          ])
+        }
+
+        if (offset === 25) {
+          return createJsonResponse([
+            {
+              id: 'event-page-2',
+              event_type: 'breach',
+              rule_id: 'rule-1',
+              destination_id: null,
+              rule_name: 'Error guardrail',
+              metric: 'error_rate_percent',
+              operator: 'gte',
+              threshold: 5,
+              current_value: 50,
+              message: 'Rule breached page 2',
+              created_at: new Date().toISOString(),
+            },
+          ])
+        }
+
+        return createJsonResponse(
+          Array.from({ length: 25 }, (_, index) => ({
+            id: `event-page-1-${index + 1}`,
             event_type: 'breach',
             rule_id: 'rule-1',
             destination_id: null,
@@ -117,10 +158,10 @@ describe('AlertsPage', () => {
             operator: 'gte',
             threshold: 5,
             current_value: 50,
-            message: 'Rule breached',
+            message: index === 0 ? 'Rule breached page 1' : `Rule breached page 1 item ${index + 1}`,
             created_at: new Date().toISOString(),
-          },
-        ])
+          }))
+        )
       }
 
       if (url.includes('/api/v1/projects/me/alerts/dead-letter') && method === 'GET') {
@@ -257,6 +298,18 @@ describe('AlertsPage', () => {
       expect(screen.getByText(/Current: 50.00/)).toBeInTheDocument()
       expect(screen.getByText('Recent Alert Events')).toBeInTheDocument()
       expect(screen.getAllByText('Rule Breach').length).toBeGreaterThan(0)
+      expect(screen.getByText('Rule breached page 1')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next events page' }))
+    await waitFor(() => {
+      expect(screen.getByText('Rule breached page 2')).toBeInTheDocument()
+      expect(eventsRequestUrls.some((url) => url.includes('offset=25'))).toBe(true)
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Previous events page' }))
+    await waitFor(() => {
+      expect(screen.getByText('Rule breached page 1')).toBeInTheDocument()
     })
 
     expect(opsSummaryRequestUrls.some((url) => url.includes('window_days=7'))).toBe(true)

@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, BellRing, Loader2, ShieldCheck, Trash2, Webhook } from 'lucide-react'
 import clsx from 'clsx'
@@ -38,6 +38,8 @@ const OPERATOR_OPTIONS: Array<{ value: AlertOperator; label: string }> = [
   { value: 'lte', label: '<=' },
 ]
 
+const EVENTS_PAGE_SIZE = 25
+
 const EVENT_TYPE_OPTIONS: Array<{ value: AlertEventType; label: string }> = [
   { value: 'breach', label: 'Rule Breach' },
   { value: 'notification_queued', label: 'Notification Queued' },
@@ -74,6 +76,7 @@ export default function AlertsPage() {
   const [destinationToken, setDestinationToken] = useState('')
   const [eventTypeFilter, setEventTypeFilter] = useState<AlertEventType | 'all'>('all')
   const [eventRuleFilter, setEventRuleFilter] = useState<string>('all')
+  const [eventOffset, setEventOffset] = useState(0)
   const [opsWindowDays, setOpsWindowDays] = useState<7 | 30>(7)
 
   const [formError, setFormError] = useState<string | null>(null)
@@ -91,10 +94,11 @@ export default function AlertsPage() {
   })
 
   const eventsQuery = useQuery({
-    queryKey: ['alerts-events', eventTypeFilter, eventRuleFilter],
+    queryKey: ['alerts-events', eventTypeFilter, eventRuleFilter, eventOffset],
     queryFn: () =>
       getAlertEvents({
-        limit: 25,
+        limit: EVENTS_PAGE_SIZE,
+        offset: eventOffset,
         event_type: eventTypeFilter === 'all' ? undefined : eventTypeFilter,
         rule_id: eventRuleFilter === 'all' ? undefined : eventRuleFilter,
       }),
@@ -208,6 +212,7 @@ export default function AlertsPage() {
   const rules = rulesQuery.data ?? []
   const destinations = destinationsQuery.data ?? []
   const events = eventsQuery.data ?? []
+  const hasNextEventsPage = events.length === EVENTS_PAGE_SIZE
   const deadLetters = deadLettersQuery.data ?? []
   const opsSummary = opsSummaryQuery.data
   const activeDestinations = destinations.filter((destination) => destination.is_active)
@@ -216,6 +221,10 @@ export default function AlertsPage() {
     () => new Map(evaluatedRules.map((rule) => [rule.id, rule])),
     [evaluatedRules]
   )
+
+  useEffect(() => {
+    setEventOffset(0)
+  }, [eventTypeFilter, eventRuleFilter])
 
   const handleCreateRule = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -624,6 +633,35 @@ export default function AlertsPage() {
                 </option>
               ))}
             </select>
+            <button
+              type="button"
+              aria-label="Previous events page"
+              onClick={() => setEventOffset((current) => Math.max(0, current - EVENTS_PAGE_SIZE))}
+              disabled={eventOffset === 0 || eventsQuery.isFetching}
+              className={clsx(
+                'rounded-lg border px-3 py-2 text-xs transition-colors',
+                eventOffset === 0 || eventsQuery.isFetching
+                  ? 'border-dark-700 text-muted-500 cursor-not-allowed'
+                  : 'border-dark-700 bg-dark-800 text-muted-100 hover:bg-dark-700'
+              )}
+            >
+              Prev
+            </button>
+            <button
+              type="button"
+              aria-label="Next events page"
+              onClick={() => setEventOffset((current) => current + EVENTS_PAGE_SIZE)}
+              disabled={!hasNextEventsPage || eventsQuery.isFetching}
+              className={clsx(
+                'rounded-lg border px-3 py-2 text-xs transition-colors',
+                !hasNextEventsPage || eventsQuery.isFetching
+                  ? 'border-dark-700 text-muted-500 cursor-not-allowed'
+                  : 'border-dark-700 bg-dark-800 text-muted-100 hover:bg-dark-700'
+              )}
+            >
+              Next
+            </button>
+            <span className="text-xs text-muted-500">Page {Math.floor(eventOffset / EVENTS_PAGE_SIZE) + 1}</span>
           </div>
         </div>
         {eventsQuery.isLoading ? (
