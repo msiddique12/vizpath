@@ -266,6 +266,10 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
                 score {copilotQuery.data.triage_score} · confidence {Math.round(copilotQuery.data.confidence * 100)}%
               </span>
             </div>
+            <p className="text-[11px] text-muted-500">
+              {copilotQuery.data.cached ? 'Cached' : 'Fresh'} · generated{' '}
+              {new Date(copilotQuery.data.generated_at).toLocaleTimeString()}
+            </p>
 
             <div className="bg-dark-800 rounded-lg p-2">
               <p className="text-xs text-muted-400">Root Cause</p>

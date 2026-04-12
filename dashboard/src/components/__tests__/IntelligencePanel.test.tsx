@@ -273,6 +273,9 @@ describe('IntelligencePanel deterministic diagnostics', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Guardrails: timeout 12s · max tokens 1500')).toBeInTheDocument()
+      expect(
+        screen.getByText((text) => text.includes('Fresh') && text.includes('generated'))
+      ).toBeInTheDocument()
       expect(screen.getByText('Trace Copilot')).toBeInTheDocument()
       expect(screen.getByText('New reliability failures in candidate trace')).toBeInTheDocument()
       expect(screen.getAllByText('Address primary root-cause recommendation').length).toBeGreaterThan(0)
