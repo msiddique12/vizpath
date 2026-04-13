@@ -29,7 +29,7 @@ async def broadcast_message(message: dict, project_id: str | None = None) -> Non
     data = json.dumps(message)
     disconnected = set()
 
-    for connection, conn_project_id in active_connections.items():
+    for connection, conn_project_id in list(active_connections.items()):
         # If project_id specified, only send to matching connections
         if project_id is not None and conn_project_id != project_id:
             continue

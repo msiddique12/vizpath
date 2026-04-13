@@ -161,6 +161,36 @@ class TestBroadcastMessage:
         # Clean up
         active_connections.clear()
 
+    @pytest.mark.asyncio
+    async def test_broadcast_tolerates_connection_map_mutation_mid_send(self):
+        """Connection map changes during send should not crash broadcast iteration."""
+        active_connections.clear()
+        sent_payloads: list[str] = []
+
+        ws_primary = MagicMock()
+        ws_secondary = MagicMock()
+
+        async def primary_send(data: str) -> None:
+            sent_payloads.append(data)
+            # Simulate concurrent disconnect while iterating.
+            active_connections.pop(ws_secondary, None)
+
+        async def secondary_send(data: str) -> None:
+            sent_payloads.append(data)
+
+        ws_primary.send_text = primary_send
+        ws_secondary.send_text = secondary_send
+        active_connections[ws_primary] = "project-1"
+        active_connections[ws_secondary] = "project-1"
+
+        await broadcast_message({"type": "test"}, project_id="project-1")
+
+        assert ws_primary in active_connections
+        assert ws_secondary not in active_connections
+        assert len(sent_payloads) >= 1
+
+        active_connections.clear()
+
 
 class TestNotifySpanIngested:
     """Tests for notify_span_ingested function."""
