@@ -210,6 +210,72 @@ describe('IntelligencePanel deterministic diagnostics', () => {
     })
   })
 
+  it('shows daily intelligence call budget guardrail when configured', async () => {
+    globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString()
+      if (url.includes('/api/v1/intelligence/status')) {
+        return createJsonResponse({
+          nvidia_api_key_configured: true,
+          model: 'nvidia/test-model',
+          base_url: 'https://api.example.test',
+          llm_timeout_seconds: 12,
+          llm_max_tokens: 1500,
+          daily_call_budget: {
+            enforced: true,
+            limit: 5,
+            used: 2,
+            remaining: 3,
+            allowed: true,
+            resets_at: '2026-04-14T00:00:00+00:00',
+            retry_after_seconds: null,
+          },
+        })
+      }
+      if (url.includes('/api/v1/intelligence/copilot')) {
+        return createJsonResponse({
+          trace_id: 'trace-current',
+          baseline_trace_id: null,
+          triage_score: 24,
+          triage_status: 'stable',
+          confidence: 0.25,
+          summary: 'No strong root-cause signal detected (25% confidence).',
+          root_cause: {
+            title: 'No strong root-cause signal detected',
+            detail: 'This trace looks stable relative to current deterministic checks.',
+            source: 'summary',
+            confidence: 0.25,
+          },
+          next_fixes: [
+            {
+              id: 'fix-1',
+              title: 'Continue monitoring this trace pattern',
+              priority: 'low',
+              rationale: 'No high-confidence failure vectors were detected by deterministic checks.',
+              expected_gain: 'Maintain baseline quality while collecting more data.',
+              linked_span_ids: [],
+            },
+          ],
+          span_references: [],
+          candidate_failure: { status: 'no_major_failure_signals', primary_mode: 'none', confidence: 0 },
+          candidate_anomaly: { status: 'normal', anomaly_score: 0, anomaly_count: 0 },
+          candidate_safety: { risk_level: 'low', risk_score: 0 },
+          compare_summary: null,
+          generated_at: new Date().toISOString(),
+          cached: false,
+          cache_ttl_seconds: 120,
+        })
+      }
+      throw new Error(`Unexpected fetch call: ${url}`)
+    }) as unknown as typeof fetch
+
+    renderWithProviders(<IntelligencePanel traceId="trace-current" />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Guardrails: timeout 12s · max tokens 1500')).toBeInTheDocument()
+      expect(screen.getByText('Daily calls 2/5 · remaining 3')).toBeInTheDocument()
+    })
+  })
+
   it('renders copilot root cause and fix recommendations', async () => {
     globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString()

@@ -116,6 +116,12 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
         : 'Significant reliability gain from corrections.'
   )
   const isIntelligenceReady = intelligenceStatus.data?.nvidia_api_key_configured === true
+  const dailyCallBudget = intelligenceStatus.data?.daily_call_budget
+  const dailyCallBudgetSummary = dailyCallBudget
+    ? dailyCallBudget.enforced
+      ? `Daily calls ${dailyCallBudget.used}/${dailyCallBudget.limit ?? 0} · remaining ${dailyCallBudget.remaining ?? 0}`
+      : 'Daily calls unlimited'
+    : null
   const isAnalyzeDisabled =
     analyzeMutation.isPending || selfAnalyzeMutation.isPending || !isIntelligenceReady
   const baselineId = baselineTraceId.trim()
@@ -157,8 +163,16 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
       )}
       {isIntelligenceReady && intelligenceStatus.data && (
         <div className="bg-dark-900 border border-dark-700 rounded-lg px-3 py-2 text-xs text-muted-300">
-          Guardrails: timeout {intelligenceStatus.data.llm_timeout_seconds ?? 20}s · max tokens{' '}
-          {intelligenceStatus.data.llm_max_tokens ?? 2000}
+          <p>
+            Guardrails: timeout {intelligenceStatus.data.llm_timeout_seconds ?? 20}s · max tokens{' '}
+            {intelligenceStatus.data.llm_max_tokens ?? 2000}
+          </p>
+          {dailyCallBudgetSummary && <p className="mt-1">{dailyCallBudgetSummary}</p>}
+          {dailyCallBudget?.enforced && dailyCallBudget.allowed === false && (
+            <p className="mt-1 text-amber-300">
+              Daily budget exhausted. Resets at {dailyCallBudget.resets_at}.
+            </p>
+          )}
         </div>
       )}
 

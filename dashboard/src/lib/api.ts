@@ -962,6 +962,15 @@ export interface IntelligenceStatusResponse {
   base_url: string
   llm_timeout_seconds?: number
   llm_max_tokens?: number
+  daily_call_budget?: {
+    enforced: boolean
+    limit: number | null
+    used: number
+    remaining: number | null
+    allowed: boolean
+    resets_at: string
+    retry_after_seconds: number | null
+  }
 }
 
 export interface StoryModeSeedResponse {
