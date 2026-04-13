@@ -171,6 +171,97 @@ class TestAnalyzeEndpoint:
             assert second.headers.get("X-Intelligence-Budget-Remaining") == "0"
             assert second.headers.get("Retry-After")
 
+    def test_analyze_not_found_does_not_consume_daily_call_budget(self, client, monkeypatch):
+        create_response = client.post(
+            "/api/v1/projects/",
+            json={"name": "intelligence-budget-not-found"},
+        )
+        assert create_response.status_code == 201
+        api_key = create_response.json()["api_key"]
+        headers = {"X-API-Key": api_key}
+
+        from app.intelligence import budget as budget_module
+        from app.routes import intelligence as intelligence_routes
+
+        monkeypatch.setattr(intelligence_routes.settings, "nvidia_api_key", "nvapi-test")
+        monkeypatch.setattr(
+            budget_module.settings,
+            "intelligence_daily_call_limit_per_project",
+            1,
+        )
+
+        missing_response = client.post(
+            "/api/v1/intelligence/analyze",
+            json={"trace_id": "missing-trace"},
+            headers=headers,
+        )
+        assert missing_response.status_code == 404
+
+        status_after_missing = client.get("/api/v1/intelligence/status", headers=headers)
+        assert status_after_missing.status_code == 200
+        budget = status_after_missing.json()["daily_call_budget"]
+        assert budget["used"] == 0
+        assert budget["remaining"] == 1
+
+        _post_trace_spans(client, "intelligence-budget-not-found-trace", 120.0, headers=headers)
+
+        with patch("app.intelligence.llm.LLMLabeler") as MockLabeler:
+            mock_instance = MockLabeler.return_value
+            mock_instance.analyze_trace = AsyncMock(
+                return_value={
+                    "quality_score": 81,
+                    "efficiency_score": 70,
+                    "error_analysis": "",
+                    "suggestions": [],
+                }
+            )
+            valid_response = client.post(
+                "/api/v1/intelligence/analyze",
+                json={"trace_id": "intelligence-budget-not-found-trace"},
+                headers=headers,
+            )
+            assert valid_response.status_code == 200
+            assert valid_response.headers.get("X-Intelligence-Budget-Used") == "1"
+
+            blocked_response = client.post(
+                "/api/v1/intelligence/analyze",
+                json={"trace_id": "intelligence-budget-not-found-trace"},
+                headers=headers,
+            )
+            assert blocked_response.status_code == 429
+
+
+class TestClustersEndpoint:
+    def test_clusters_insufficient_data_does_not_consume_daily_call_budget(self, client, monkeypatch):
+        create_response = client.post(
+            "/api/v1/projects/",
+            json={"name": "intelligence-budget-clusters"},
+        )
+        assert create_response.status_code == 201
+        api_key = create_response.json()["api_key"]
+        headers = {"X-API-Key": api_key}
+
+        from app.intelligence import budget as budget_module
+        from app.routes import intelligence as intelligence_routes
+
+        monkeypatch.setattr(intelligence_routes.settings, "nvidia_api_key", "nvapi-test")
+        monkeypatch.setattr(
+            budget_module.settings,
+            "intelligence_daily_call_limit_per_project",
+            1,
+        )
+
+        empty_clusters_response = client.get("/api/v1/intelligence/clusters", headers=headers)
+        assert empty_clusters_response.status_code == 200
+        assert empty_clusters_response.json()["message"] == "Not enough traces to cluster"
+        assert empty_clusters_response.headers.get("X-Intelligence-Budget-Used") is None
+
+        status_after_empty = client.get("/api/v1/intelligence/status", headers=headers)
+        assert status_after_empty.status_code == 200
+        budget = status_after_empty.json()["daily_call_budget"]
+        assert budget["used"] == 0
+        assert budget["remaining"] == 1
+
 
 class TestCompareEndpoint:
     def test_compare_success_with_regression_signals(self, client, test_db):

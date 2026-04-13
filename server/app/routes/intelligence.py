@@ -1806,12 +1806,12 @@ async def analyze_trace(
 ) -> dict[str, Any]:
     """Analyze a trace for quality and efficiency."""
     _require_nvidia_key()
+    trace_data = _get_trace_data(req.trace_id, project.id, db)
     budget_status = _enforce_intelligence_call_budget(project)
     _set_intelligence_budget_headers(response, budget_status)
 
     from app.intelligence.llm import LLMLabeler
 
-    trace_data = _get_trace_data(req.trace_id, project.id, db)
     labeler = LLMLabeler()
     result = await labeler.analyze_trace(trace_data)
     return _normalize_analyze_result(result, req.trace_id)
@@ -2088,12 +2088,12 @@ async def self_analyze_trace(
 ) -> dict[str, Any]:
     """Deep evaluation of agent decision-making quality."""
     _require_nvidia_key()
+    trace_data = _get_trace_data(req.trace_id, project.id, db)
     budget_status = _enforce_intelligence_call_budget(project)
     _set_intelligence_budget_headers(response, budget_status)
 
     from app.intelligence.llm import LLMLabeler
 
-    trace_data = _get_trace_data(req.trace_id, project.id, db)
     labeler = LLMLabeler()
     result = await labeler.self_analyze(trace_data)
     return _normalize_self_analyze_result(result, req.trace_id)
@@ -2108,12 +2108,12 @@ async def suggest_curation(
 ) -> dict[str, Any]:
     """Generate a curation suggestion (label/score/notes) from AI trace analysis."""
     _require_nvidia_key()
+    trace_data = _get_trace_data(req.trace_id, project.id, db)
     budget_status = _enforce_intelligence_call_budget(project)
     _set_intelligence_budget_headers(response, budget_status)
 
     from app.intelligence.llm import LLMLabeler
 
-    trace_data = _get_trace_data(req.trace_id, project.id, db)
     labeler = LLMLabeler()
     result = await labeler.analyze_trace(trace_data)
     normalized = _normalize_analyze_result(result, req.trace_id)
@@ -2129,12 +2129,12 @@ async def embed_trace_endpoint(
 ) -> dict[str, Any]:
     """Generate an embedding for a trace."""
     _require_nvidia_key()
+    trace_data = _get_trace_data(req.trace_id, project.id, db)
     budget_status = _enforce_intelligence_call_budget(project)
     _set_intelligence_budget_headers(response, budget_status)
 
     from app.intelligence.embeddings import embed_trace, trace_to_text
 
-    trace_data = _get_trace_data(req.trace_id, project.id, db)
     text = trace_to_text(trace_data)
     embedding = await embed_trace(req.trace_id, text)
     return {
@@ -2153,12 +2153,12 @@ async def generate_synthetic(
 ) -> dict[str, Any]:
     """Generate synthetic training data from a trace."""
     _require_nvidia_key()
+    trace_data = _get_trace_data(req.trace_id, project.id, db)
     budget_status = _enforce_intelligence_call_budget(project)
     _set_intelligence_budget_headers(response, budget_status)
 
     from app.intelligence.synthetic import SyntheticDataGenerator
 
-    trace_data = _get_trace_data(req.trace_id, project.id, db)
     generator = SyntheticDataGenerator()
 
     if req.mode == "variations":
@@ -2184,8 +2184,6 @@ async def get_clusters(
 ) -> dict[str, Any]:
     """Get trace clusters for the current project."""
     _require_nvidia_key()
-    budget_status = _enforce_intelligence_call_budget(project)
-    _set_intelligence_budget_headers(response, budget_status)
 
     from app.intelligence.clustering import cluster_traces, get_cluster_summary
     from app.intelligence.embeddings import get_trace_embeddings, trace_to_text
@@ -2200,6 +2198,9 @@ async def get_clusters(
     )
     if len(traces) < 2:
         return {"clusters": [], "message": "Not enough traces to cluster"}
+
+    budget_status = _enforce_intelligence_call_budget(project)
+    _set_intelligence_budget_headers(response, budget_status)
 
     # Build text representations
     trace_texts: dict[str, str] = {}
