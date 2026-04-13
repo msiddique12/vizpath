@@ -149,6 +149,10 @@ class TestAnalyzeEndpoint:
                 headers=headers,
             )
             assert first.status_code == 200
+            assert first.headers.get("X-Intelligence-Budget-Enforced") == "true"
+            assert first.headers.get("X-Intelligence-Budget-Limit") == "1"
+            assert first.headers.get("X-Intelligence-Budget-Used") == "1"
+            assert first.headers.get("X-Intelligence-Budget-Remaining") == "0"
 
             second = client.post(
                 "/api/v1/intelligence/analyze",
@@ -161,6 +165,10 @@ class TestAnalyzeEndpoint:
             assert detail["limit"] == 1
             assert detail["used"] == 1
             assert detail["remaining"] == 0
+            assert second.headers.get("X-Intelligence-Budget-Enforced") == "true"
+            assert second.headers.get("X-Intelligence-Budget-Limit") == "1"
+            assert second.headers.get("X-Intelligence-Budget-Used") == "1"
+            assert second.headers.get("X-Intelligence-Budget-Remaining") == "0"
             assert second.headers.get("Retry-After")
 
 

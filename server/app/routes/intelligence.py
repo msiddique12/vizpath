@@ -10,7 +10,7 @@ from math import isfinite
 from threading import Lock
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
@@ -18,6 +18,7 @@ from app.auth import verify_api_key
 from app.config import settings
 from app.database import get_db
 from app.intelligence.budget import (
+    IntelligenceBudgetStatus,
     consume_intelligence_budget_call,
     get_intelligence_budget_status,
 )
@@ -883,15 +884,15 @@ def _require_nvidia_key() -> None:
         )
 
 
-def _enforce_intelligence_call_budget(project: Project) -> None:
+def _enforce_intelligence_call_budget(project: Project) -> IntelligenceBudgetStatus:
     """Consume project intelligence call budget and fail fast when exhausted."""
     budget_status = consume_intelligence_budget_call(str(project.id))
+    headers = _intelligence_budget_headers(budget_status)
     if budget_status.allowed:
-        return
+        return budget_status
 
-    headers: dict[str, str] | None = None
     if budget_status.retry_after_seconds is not None:
-        headers = {"Retry-After": str(budget_status.retry_after_seconds)}
+        headers["Retry-After"] = str(budget_status.retry_after_seconds)
 
     raise HTTPException(
         status_code=429,
@@ -906,6 +907,24 @@ def _enforce_intelligence_call_budget(project: Project) -> None:
         },
         headers=headers,
     )
+
+
+def _intelligence_budget_headers(budget_status: IntelligenceBudgetStatus) -> dict[str, str]:
+    headers = {
+        "X-Intelligence-Budget-Enforced": str(bool(budget_status.enforced)).lower(),
+        "X-Intelligence-Budget-Used": str(int(budget_status.used)),
+        "X-Intelligence-Budget-Resets-At": str(budget_status.resets_at),
+    }
+    if budget_status.limit is not None:
+        headers["X-Intelligence-Budget-Limit"] = str(int(budget_status.limit))
+    if budget_status.remaining is not None:
+        headers["X-Intelligence-Budget-Remaining"] = str(int(budget_status.remaining))
+    return headers
+
+
+def _set_intelligence_budget_headers(response: Response, budget_status: IntelligenceBudgetStatus) -> None:
+    for key, value in _intelligence_budget_headers(budget_status).items():
+        response.headers[key] = value
 
 
 def _get_trace_data(trace_id: str, project_id: Any, db: Session) -> dict[str, Any]:
@@ -1781,12 +1800,14 @@ class TraceCopilotRequest(BaseModel):
 @router.post("/analyze")
 async def analyze_trace(
     req: AnalyzeRequest,
+    response: Response,
     project: Project = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """Analyze a trace for quality and efficiency."""
     _require_nvidia_key()
-    _enforce_intelligence_call_budget(project)
+    budget_status = _enforce_intelligence_call_budget(project)
+    _set_intelligence_budget_headers(response, budget_status)
 
     from app.intelligence.llm import LLMLabeler
 
@@ -2061,12 +2082,14 @@ async def intelligence_status(
 @router.post("/self-analyze")
 async def self_analyze_trace(
     req: SelfAnalyzeRequest,
+    response: Response,
     project: Project = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """Deep evaluation of agent decision-making quality."""
     _require_nvidia_key()
-    _enforce_intelligence_call_budget(project)
+    budget_status = _enforce_intelligence_call_budget(project)
+    _set_intelligence_budget_headers(response, budget_status)
 
     from app.intelligence.llm import LLMLabeler
 
@@ -2079,12 +2102,14 @@ async def self_analyze_trace(
 @router.post("/suggest-curation")
 async def suggest_curation(
     req: SuggestCurationRequest,
+    response: Response,
     project: Project = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """Generate a curation suggestion (label/score/notes) from AI trace analysis."""
     _require_nvidia_key()
-    _enforce_intelligence_call_budget(project)
+    budget_status = _enforce_intelligence_call_budget(project)
+    _set_intelligence_budget_headers(response, budget_status)
 
     from app.intelligence.llm import LLMLabeler
 
@@ -2098,12 +2123,14 @@ async def suggest_curation(
 @router.post("/embed")
 async def embed_trace_endpoint(
     req: EmbedRequest,
+    response: Response,
     project: Project = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """Generate an embedding for a trace."""
     _require_nvidia_key()
-    _enforce_intelligence_call_budget(project)
+    budget_status = _enforce_intelligence_call_budget(project)
+    _set_intelligence_budget_headers(response, budget_status)
 
     from app.intelligence.embeddings import embed_trace, trace_to_text
 
@@ -2120,12 +2147,14 @@ async def embed_trace_endpoint(
 @router.post("/generate-synthetic")
 async def generate_synthetic(
     req: SyntheticRequest,
+    response: Response,
     project: Project = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """Generate synthetic training data from a trace."""
     _require_nvidia_key()
-    _enforce_intelligence_call_budget(project)
+    budget_status = _enforce_intelligence_call_budget(project)
+    _set_intelligence_budget_headers(response, budget_status)
 
     from app.intelligence.synthetic import SyntheticDataGenerator
 
@@ -2149,12 +2178,14 @@ async def generate_synthetic(
 
 @router.get("/clusters")
 async def get_clusters(
+    response: Response,
     project: Project = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """Get trace clusters for the current project."""
     _require_nvidia_key()
-    _enforce_intelligence_call_budget(project)
+    budget_status = _enforce_intelligence_call_budget(project)
+    _set_intelligence_budget_headers(response, budget_status)
 
     from app.intelligence.clustering import cluster_traces, get_cluster_summary
     from app.intelligence.embeddings import get_trace_embeddings, trace_to_text
