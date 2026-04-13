@@ -9,6 +9,7 @@ from sqlalchemy.pool import StaticPool
 import app.rate_limit as rate_limit
 from app.config import settings
 from app.database import Base, get_db
+from app.intelligence.budget import _reset_intelligence_budget_state_for_tests
 from app.main import app
 from app.routes.intelligence import _clear_intelligence_summary_cache
 from app.secret_crypto import _get_fernet
@@ -71,3 +72,4 @@ def _disable_rate_limiting_for_test_suite(monkeypatch):
 def _clear_intelligence_summary_cache_between_tests():
     """Prevent cached intelligence summaries from leaking across tests."""
     _clear_intelligence_summary_cache()
+    _reset_intelligence_budget_state_for_tests()

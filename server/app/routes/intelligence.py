@@ -17,6 +17,10 @@ from sqlalchemy.orm import Session
 from app.auth import verify_api_key
 from app.config import settings
 from app.database import get_db
+from app.intelligence.budget import (
+    consume_intelligence_budget_call,
+    get_intelligence_budget_status,
+)
 from app.models import Project, Span, Trace
 from app.validation import ID_PATTERN
 
@@ -877,6 +881,31 @@ def _require_nvidia_key() -> None:
             status_code=503,
             detail="NVIDIA API key not configured. Set NVIDIA_API_KEY env var.",
         )
+
+
+def _enforce_intelligence_call_budget(project: Project) -> None:
+    """Consume project intelligence call budget and fail fast when exhausted."""
+    budget_status = consume_intelligence_budget_call(str(project.id))
+    if budget_status.allowed:
+        return
+
+    headers: dict[str, str] | None = None
+    if budget_status.retry_after_seconds is not None:
+        headers = {"Retry-After": str(budget_status.retry_after_seconds)}
+
+    raise HTTPException(
+        status_code=429,
+        detail={
+            "code": "intelligence_daily_budget_exceeded",
+            "message": "Daily intelligence call budget exhausted for this project.",
+            "limit": budget_status.limit,
+            "used": budget_status.used,
+            "remaining": budget_status.remaining,
+            "resets_at": budget_status.resets_at,
+            "retry_after_seconds": budget_status.retry_after_seconds,
+        },
+        headers=headers,
+    )
 
 
 def _get_trace_data(trace_id: str, project_id: Any, db: Session) -> dict[str, Any]:
@@ -1757,6 +1786,7 @@ async def analyze_trace(
 ) -> dict[str, Any]:
     """Analyze a trace for quality and efficiency."""
     _require_nvidia_key()
+    _enforce_intelligence_call_budget(project)
 
     from app.intelligence.llm import LLMLabeler
 
@@ -2009,12 +2039,22 @@ async def intelligence_status(
     _project: Project = Depends(verify_api_key),
 ) -> dict[str, Any]:
     """Return intelligence setup status for dashboard/demo checks."""
+    budget_status = get_intelligence_budget_status(str(_project.id))
     return {
         "nvidia_api_key_configured": bool(settings.nvidia_api_key),
         "model": settings.nvidia_llm_model,
         "base_url": settings.nvidia_base_url,
         "llm_timeout_seconds": settings.nvidia_llm_timeout_seconds,
         "llm_max_tokens": settings.nvidia_llm_max_tokens,
+        "daily_call_budget": {
+            "enforced": budget_status.enforced,
+            "limit": budget_status.limit,
+            "used": budget_status.used,
+            "remaining": budget_status.remaining,
+            "allowed": budget_status.allowed,
+            "resets_at": budget_status.resets_at,
+            "retry_after_seconds": budget_status.retry_after_seconds,
+        },
     }
 
 
@@ -2026,6 +2066,7 @@ async def self_analyze_trace(
 ) -> dict[str, Any]:
     """Deep evaluation of agent decision-making quality."""
     _require_nvidia_key()
+    _enforce_intelligence_call_budget(project)
 
     from app.intelligence.llm import LLMLabeler
 
@@ -2043,6 +2084,7 @@ async def suggest_curation(
 ) -> dict[str, Any]:
     """Generate a curation suggestion (label/score/notes) from AI trace analysis."""
     _require_nvidia_key()
+    _enforce_intelligence_call_budget(project)
 
     from app.intelligence.llm import LLMLabeler
 
@@ -2061,6 +2103,7 @@ async def embed_trace_endpoint(
 ) -> dict[str, Any]:
     """Generate an embedding for a trace."""
     _require_nvidia_key()
+    _enforce_intelligence_call_budget(project)
 
     from app.intelligence.embeddings import embed_trace, trace_to_text
 
@@ -2082,6 +2125,7 @@ async def generate_synthetic(
 ) -> dict[str, Any]:
     """Generate synthetic training data from a trace."""
     _require_nvidia_key()
+    _enforce_intelligence_call_budget(project)
 
     from app.intelligence.synthetic import SyntheticDataGenerator
 
@@ -2110,6 +2154,7 @@ async def get_clusters(
 ) -> dict[str, Any]:
     """Get trace clusters for the current project."""
     _require_nvidia_key()
+    _enforce_intelligence_call_budget(project)
 
     from app.intelligence.clustering import cluster_traces, get_cluster_summary
     from app.intelligence.embeddings import get_trace_embeddings, trace_to_text

@@ -46,6 +46,7 @@ def _post_trace_spans(
     *,
     status: str = "success",
     llm_calls: int = 1,
+    headers: dict[str, str] | None = None,
 ) -> None:
     now = datetime.now(timezone.utc).isoformat()
     spans = []
@@ -63,7 +64,7 @@ def _post_trace_spans(
                 "tokens": 100,
             }
         )
-    resp = client.post("/api/v1/traces/spans/batch", json=spans)
+    resp = client.post("/api/v1/traces/spans/batch", json=spans, headers=headers)
     assert resp.status_code == 201
 
 
@@ -112,6 +113,55 @@ class TestAnalyzeEndpoint:
             assert resp.status_code == 200
             data = resp.json()
             assert data["quality_score"] == 85
+
+    def test_analyze_enforces_daily_call_budget(self, client, monkeypatch):
+        create_response = client.post("/api/v1/projects/", json={"name": "intelligence-budget-limit"})
+        assert create_response.status_code == 201
+        api_key = create_response.json()["api_key"]
+        headers = {"X-API-Key": api_key}
+
+        _post_trace_spans(client, "intelligence-budget-trace", 150.0, headers=headers)
+
+        from app.intelligence import budget as budget_module
+        from app.routes import intelligence as intelligence_routes
+
+        monkeypatch.setattr(intelligence_routes.settings, "nvidia_api_key", "nvapi-test")
+        monkeypatch.setattr(
+            budget_module.settings,
+            "intelligence_daily_call_limit_per_project",
+            1,
+        )
+
+        mock_result = {
+            "quality_score": 85,
+            "efficiency_score": 70,
+            "error_analysis": "No errors found.",
+            "suggestions": ["Cache queries"],
+        }
+
+        with patch("app.intelligence.llm.LLMLabeler") as MockLabeler:
+            mock_instance = MockLabeler.return_value
+            mock_instance.analyze_trace = AsyncMock(return_value=mock_result)
+
+            first = client.post(
+                "/api/v1/intelligence/analyze",
+                json={"trace_id": "intelligence-budget-trace"},
+                headers=headers,
+            )
+            assert first.status_code == 200
+
+            second = client.post(
+                "/api/v1/intelligence/analyze",
+                json={"trace_id": "intelligence-budget-trace"},
+                headers=headers,
+            )
+            assert second.status_code == 429
+            detail = second.json().get("detail", {})
+            assert detail["code"] == "intelligence_daily_budget_exceeded"
+            assert detail["limit"] == 1
+            assert detail["used"] == 1
+            assert detail["remaining"] == 0
+            assert second.headers.get("Retry-After")
 
 
 class TestCompareEndpoint:
@@ -230,6 +280,53 @@ class TestIntelligenceStatusEndpoint:
             assert data["nvidia_api_key_configured"] is True
             assert data["llm_timeout_seconds"] == 15.0
             assert data["llm_max_tokens"] == 1024
+
+    def test_status_reports_daily_call_budget_usage(self, client, monkeypatch):
+        create_response = client.post("/api/v1/projects/", json={"name": "intelligence-budget-status"})
+        assert create_response.status_code == 201
+        api_key = create_response.json()["api_key"]
+        headers = {"X-API-Key": api_key}
+
+        _post_trace_spans(client, "intelligence-budget-status-trace", 200.0, headers=headers)
+
+        from app.intelligence import budget as budget_module
+        from app.routes import intelligence as intelligence_routes
+
+        monkeypatch.setattr(intelligence_routes.settings, "nvidia_api_key", "nvapi-test")
+        monkeypatch.setattr(
+            budget_module.settings,
+            "intelligence_daily_call_limit_per_project",
+            2,
+        )
+
+        with patch("app.intelligence.llm.LLMLabeler") as MockLabeler:
+            mock_instance = MockLabeler.return_value
+            mock_instance.analyze_trace = AsyncMock(
+                return_value={
+                    "quality_score": 80,
+                    "efficiency_score": 72,
+                    "error_analysis": "",
+                    "suggestions": [],
+                }
+            )
+            analyze_response = client.post(
+                "/api/v1/intelligence/analyze",
+                json={"trace_id": "intelligence-budget-status-trace"},
+                headers=headers,
+            )
+            assert analyze_response.status_code == 200
+
+        status_response = client.get("/api/v1/intelligence/status", headers=headers)
+        assert status_response.status_code == 200
+        data = status_response.json()
+        budget = data["daily_call_budget"]
+        assert budget["enforced"] is True
+        assert budget["limit"] == 2
+        assert budget["used"] == 1
+        assert budget["remaining"] == 1
+        assert budget["allowed"] is True
+        assert budget["retry_after_seconds"] is None
+        assert isinstance(budget["resets_at"], str)
 
 
 class TestSafetyScanEndpoint:

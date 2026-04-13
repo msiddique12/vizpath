@@ -90,6 +90,7 @@ def test_nvidia_llm_guardrails_have_safe_defaults():
     settings = Settings(**BASE_SETTINGS)
     assert settings.nvidia_llm_timeout_seconds == 20.0
     assert settings.nvidia_llm_max_tokens == 2000
+    assert settings.intelligence_daily_call_limit_per_project == 0
 
 
 def test_nvidia_llm_timeout_must_be_positive():
@@ -106,3 +107,9 @@ def test_nvidia_llm_max_tokens_must_stay_within_supported_range():
     with pytest.raises(ValidationError) as max_exc:
         Settings(**BASE_SETTINGS, NVIDIA_LLM_MAX_TOKENS=5000)
     assert "NVIDIA_LLM_MAX_TOKENS must be 4096 or less" in str(max_exc.value)
+
+
+def test_intelligence_daily_call_limit_must_be_non_negative():
+    with pytest.raises(ValidationError) as exc:
+        Settings(**BASE_SETTINGS, INTELLIGENCE_DAILY_CALL_LIMIT_PER_PROJECT=-1)
+    assert "intelligence_daily_call_limit_per_project must be 0 or greater" in str(exc.value)

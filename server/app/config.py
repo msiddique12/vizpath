@@ -34,6 +34,10 @@ class Settings(BaseSettings):
         default=2000,
         alias="NVIDIA_LLM_MAX_TOKENS",
     )
+    intelligence_daily_call_limit_per_project: int = Field(
+        default=0,
+        alias="INTELLIGENCE_DAILY_CALL_LIMIT_PER_PROJECT",
+    )
     nvidia_embedding_model: str = Field(
         default="nvidia/nv-embedqa-e5-v5",
         alias="NVIDIA_EMBEDDING_MODEL",
@@ -151,6 +155,7 @@ class Settings(BaseSettings):
         "alert_notification_queue_maxsize",
         "alert_notification_max_retries",
         "alert_dead_letter_replay_cooldown_seconds",
+        "intelligence_daily_call_limit_per_project",
     )
     @classmethod
     def validate_positive_ints(cls, v: int, info: ValidationInfo) -> int:
