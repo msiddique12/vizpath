@@ -354,18 +354,24 @@ class Client:
     def close(self) -> None:
         """Shutdown the client and flush remaining spans."""
         if self._shutdown.is_set():
+            if self in Client._instances:
+                Client._instances.remove(self)
             return
 
-        self._shutdown.set()
+        try:
+            self._shutdown.set()
 
-        if self._flush_thread and self._flush_thread.is_alive():
-            self._flush_thread.join(timeout=2.0)
+            if self._flush_thread and self._flush_thread.is_alive():
+                self._flush_thread.join(timeout=2.0)
 
-        self.flush()
+            self.flush()
 
-        if self._client:
-            self._client.close()
-            self._client = None
+            if self._client:
+                self._client.close()
+                self._client = None
+        finally:
+            if self in Client._instances:
+                Client._instances.remove(self)
 
     def stats(self) -> dict[str, int]:
         """Return client runtime metrics."""
@@ -386,7 +392,7 @@ class Client:
 @atexit.register
 def _cleanup() -> None:
     """Ensure all clients flush on interpreter shutdown."""
-    for client in Client._instances:
+    for client in list(Client._instances):
         try:
             client.close()
         except Exception:

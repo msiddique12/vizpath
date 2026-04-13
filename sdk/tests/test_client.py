@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from vizpath.client import Client
+from vizpath.client import Client, _cleanup
 from vizpath.config import Config
 from vizpath.exceptions import VizpathError
 
@@ -58,6 +58,47 @@ class TestClientHeaders:
         client = Client(config)
 
         assert client._client is None
+
+    def test_close_unregisters_client_instance(self, monkeypatch):
+        """Closed clients should be removed from global cleanup registry."""
+        registry: list[Client] = []
+        monkeypatch.setattr(Client, "_instances", registry)
+
+        config = Config(api_key=None, base_url="http://localhost:8000/api/v1")
+        client = Client(config)
+        assert client in registry
+
+        client.close()
+        assert client not in registry
+
+        # idempotent close should remain safe and not re-register
+        client.close()
+        assert client not in registry
+
+    def test_atexit_cleanup_iterates_snapshot(self, monkeypatch):
+        """Atexit cleanup should close every client even if registry mutates during close."""
+        closed: list[str] = []
+
+        class DummyClient:
+            def __init__(self, name: str, registry: list[object]) -> None:
+                self.name = name
+                self.registry = registry
+
+            def close(self) -> None:
+                closed.append(self.name)
+                if self in self.registry:
+                    self.registry.remove(self)
+
+        registry: list[object] = []
+        first = DummyClient("first", registry)
+        second = DummyClient("second", registry)
+        registry.extend([first, second])
+        monkeypatch.setattr(Client, "_instances", registry)
+
+        _cleanup()
+
+        assert sorted(closed) == ["first", "second"]
+        assert registry == []
 
 
 class TestClientRetry:
