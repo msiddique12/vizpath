@@ -146,10 +146,14 @@ class Client:
         """Send one payload batch with retry. Returns True only if the batch succeeded."""
         last_error: Exception | None = None
         saw_transport_error = False
+        client = self._client
+        if client is None:
+            self._rebuffer_spans(spans)
+            return False
 
         for attempt in range(self._config.max_retries):
             try:
-                response = self._client.post("/traces/spans/batch", json=payload)
+                response = client.post("/traces/spans/batch", json=payload)
                 self._handle_response(response)
                 self._flushed_spans += len(spans)
                 logger.debug(f"Flushed {len(spans)} spans")
