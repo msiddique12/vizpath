@@ -9,6 +9,20 @@ const API_BASE = (() => {
   return configured.endsWith('/') ? configured.slice(0, -1) : configured
 })()
 
+export class ApiError extends Error {
+  status: number
+  code?: string
+  retryAfterSeconds?: number
+
+  constructor(message: string, status: number, options?: { code?: string; retryAfterSeconds?: number }) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.code = options?.code
+    this.retryAfterSeconds = options?.retryAfterSeconds
+  }
+}
+
 async function parseJsonOrEmpty<T>(response: Response): Promise<T> {
   if (response.status === 204) {
     return undefined as T
@@ -18,6 +32,58 @@ async function parseJsonOrEmpty<T>(response: Response): Promise<T> {
     return undefined as T
   }
   return JSON.parse(text) as T
+}
+
+function parseApiErrorPayload(payload: unknown): { message?: string; code?: string } {
+  if (!payload || typeof payload !== 'object') {
+    return {}
+  }
+
+  const root = payload as Record<string, unknown>
+  const detail = root.detail
+  if (typeof detail === 'string') {
+    return { message: detail }
+  }
+  if (detail && typeof detail === 'object') {
+    const detailObj = detail as Record<string, unknown>
+    return {
+      message: typeof detailObj.message === 'string' ? detailObj.message : undefined,
+      code: typeof detailObj.code === 'string' ? detailObj.code : undefined,
+    }
+  }
+  if (typeof root.message === 'string') {
+    return { message: root.message }
+  }
+  return {}
+}
+
+async function buildApiError(response: Response): Promise<ApiError> {
+  let payload: unknown
+  try {
+    payload = await parseJsonOrEmpty<unknown>(response)
+  } catch {
+    payload = undefined
+  }
+
+  const parsed = parseApiErrorPayload(payload)
+  const retryAfterRaw = response.headers.get('Retry-After')
+  const retryAfterSeconds =
+    retryAfterRaw && Number.isFinite(Number(retryAfterRaw))
+      ? Math.max(0, Math.floor(Number(retryAfterRaw)))
+      : undefined
+
+  let message = parsed.message ?? `API error: ${response.status}`
+  if (parsed.code) {
+    message = `${message} (${parsed.code})`
+  }
+  if (retryAfterSeconds !== undefined) {
+    message = `${message}. Retry after ${retryAfterSeconds}s.`
+  }
+
+  return new ApiError(message, response.status, {
+    code: parsed.code,
+    retryAfterSeconds,
+  })
 }
 
 async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
@@ -36,7 +102,7 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> 
   })
 
   if (!response.ok) {
-    throw new Error(`API error: ${response.status}`)
+    throw await buildApiError(response)
   }
 
   return parseJsonOrEmpty<T>(response)
@@ -58,7 +124,7 @@ async function fetchRootApi<T>(endpoint: string, options?: RequestInit): Promise
   })
 
   if (!response.ok) {
-    throw new Error(`API error: ${response.status}`)
+    throw await buildApiError(response)
   }
 
   return parseJsonOrEmpty<T>(response)

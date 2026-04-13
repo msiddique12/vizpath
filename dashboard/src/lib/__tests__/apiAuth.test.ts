@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { getDetailedHealth, getTraces } from '../api'
+import { analyzeTrace, ApiError, getDetailedHealth, getTraces } from '../api'
 import { setStoredApiKey } from '../apiKey'
 
 function jsonResponse(body: unknown): Response {
@@ -62,5 +62,42 @@ describe('dashboard API key header behavior', () => {
     const init = fetchMock.mock.calls[0][1] as RequestInit | undefined
     const headers = new Headers(init?.headers)
     expect(headers.get('X-API-Key')).toBe('stored-test-key')
+  })
+
+  it('throws detailed ApiError for budget guardrail 429 responses', async () => {
+    globalThis.fetch = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            detail: {
+              code: 'intelligence_daily_budget_exceeded',
+              message: 'Daily intelligence call budget exhausted for this project.',
+            },
+          }),
+          {
+            status: 429,
+            headers: {
+              'Content-Type': 'application/json',
+              'Retry-After': '120',
+            },
+          }
+        )
+      )
+    ) as unknown as typeof fetch
+
+    let thrown: unknown
+    try {
+      await analyzeTrace('trace-budget')
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBeInstanceOf(ApiError)
+    expect(thrown).toMatchObject({
+      status: 429,
+      code: 'intelligence_daily_budget_exceeded',
+      retryAfterSeconds: 120,
+    })
+    expect((thrown as Error).message).toContain('Daily intelligence call budget exhausted for this project.')
   })
 })
