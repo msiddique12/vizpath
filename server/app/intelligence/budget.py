@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from threading import Lock
-from typing import Any
+from typing import Any, cast
 
 import redis
 
@@ -150,7 +150,14 @@ def _read_usage(project_id: str, now: datetime) -> int:
 
     try:
         raw = redis_client.get(_counter_key(project_id, now))
-        return int(raw) if raw is not None else 0
+        if raw is None:
+            return 0
+        if hasattr(raw, "__await__"):
+            raise TypeError("Async Redis client not supported in sync budget path")
+        raw_value = cast(Any, raw)
+        if isinstance(raw_value, (bytes, bytearray)):
+            raw_value = raw_value.decode("utf-8", errors="ignore")
+        return int(raw_value)
     except Exception as exc:  # pragma: no cover - depends on environment
         logger.warning("Intelligence budget read failed, using fallback: %s", exc)
         return _fallback_read_usage(project_id, now)
@@ -165,8 +172,13 @@ def _reserve_usage(project_id: str, limit: int, now: datetime) -> tuple[bool, in
     ttl = _seconds_until_reset(now)
     try:
         result = redis_client.eval(_RESERVE_BUDGET_LUA, 1, key, limit, ttl)
-        allowed = bool(int(result[0]))
-        used = int(result[1])
+        if hasattr(result, "__await__"):
+            raise TypeError("Async Redis client not supported in sync budget path")
+        parsed_result = cast(Any, result)
+        if not isinstance(parsed_result, (list, tuple)) or len(parsed_result) < 2:
+            raise ValueError("Unexpected Redis LUA response for budget reservation")
+        allowed = bool(int(parsed_result[0]))
+        used = int(parsed_result[1])
         return allowed, used
     except Exception as exc:  # pragma: no cover - depends on environment
         logger.warning("Intelligence budget reserve failed, using fallback: %s", exc)
