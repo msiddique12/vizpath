@@ -28,3 +28,28 @@ We aim to acknowledge valid reports quickly and work toward a fix with reasonabl
 
 - Avoid sharing secrets, API keys, or customer data when reporting.
 - For remote debugging, provide sanitized test cases only.
+
+## Automated security checks
+
+The repository runs a dedicated `Security` GitHub Actions workflow with:
+
+- Secret scanning (`gitleaks`) on pushes and pull requests
+- Python dependency auditing (`pip-audit`) for `server` and `sdk`
+- Dashboard production dependency auditing (`npm audit --omit=dev --audit-level=high`)
+
+Local equivalents:
+
+```bash
+# Secret scan
+gitleaks detect --source . --redact
+
+# Python dependency audits
+pip install pip-audit
+pip install -e "./server[dev]"
+pip-audit
+pip install -e "./sdk[dev]"
+pip-audit
+
+# Dashboard prod dependency audit
+cd dashboard && npm ci && npm audit --omit=dev --audit-level=high
+```
