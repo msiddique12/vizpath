@@ -1,0 +1,293 @@
+{
+  "critical_components": {
+    "AnalyzeRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "trace_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9._:-]+$",
+          "title": "Trace Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "trace_id"
+      ],
+      "title": "AnalyzeRequest",
+      "type": "object"
+    },
+    "FailureModesRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "trace_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9._:-]+$",
+          "title": "Trace Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "trace_id"
+      ],
+      "title": "FailureModesRequest",
+      "type": "object"
+    },
+    "ProjectBudgetStatusResponse": {
+      "description": "Response schema for current budget status and usage.",
+      "properties": {
+        "alert_threshold_percent": {
+          "title": "Alert Threshold Percent",
+          "type": "number"
+        },
+        "alert_triggered": {
+          "title": "Alert Triggered",
+          "type": "boolean"
+        },
+        "cost_alert_triggered": {
+          "title": "Cost Alert Triggered",
+          "type": "boolean"
+        },
+        "cost_usage_percent": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cost Usage Percent"
+        },
+        "cost_used": {
+          "title": "Cost Used",
+          "type": "number"
+        },
+        "hard_stop_enabled": {
+          "title": "Hard Stop Enabled",
+          "type": "boolean"
+        },
+        "month_end": {
+          "title": "Month End",
+          "type": "string"
+        },
+        "month_start": {
+          "title": "Month Start",
+          "type": "string"
+        },
+        "monthly_cost_limit": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Monthly Cost Limit"
+        },
+        "monthly_token_limit": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Monthly Token Limit"
+        },
+        "token_alert_triggered": {
+          "title": "Token Alert Triggered",
+          "type": "boolean"
+        },
+        "token_usage_percent": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Token Usage Percent"
+        },
+        "tokens_used": {
+          "title": "Tokens Used",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "month_start",
+        "month_end",
+        "tokens_used",
+        "cost_used",
+        "monthly_token_limit",
+        "monthly_cost_limit",
+        "token_usage_percent",
+        "cost_usage_percent",
+        "alert_threshold_percent",
+        "token_alert_triggered",
+        "cost_alert_triggered",
+        "alert_triggered",
+        "hard_stop_enabled"
+      ],
+      "title": "ProjectBudgetStatusResponse",
+      "type": "object"
+    },
+    "TraceCopilotRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "baseline_trace_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Baseline Trace Id"
+        },
+        "history_limit": {
+          "default": 20,
+          "maximum": 100.0,
+          "minimum": 3.0,
+          "title": "History Limit",
+          "type": "integer"
+        },
+        "refresh_cache": {
+          "default": false,
+          "title": "Refresh Cache",
+          "type": "boolean"
+        },
+        "trace_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9._:-]+$",
+          "title": "Trace Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "trace_id"
+      ],
+      "title": "TraceCopilotRequest",
+      "type": "object"
+    }
+  },
+  "critical_paths": {
+    "/api/v1/intelligence/analyze": {
+      "post": {
+        "operation_id": "analyze_trace_api_v1_intelligence_analyze_post",
+        "request_body_required": true,
+        "request_json_schema": {
+          "$ref": "#/components/schemas/AnalyzeRequest"
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "json_schema": {
+              "additionalProperties": true,
+              "title": "Response Analyze Trace Api V1 Intelligence Analyze Post",
+              "type": "object"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "json_schema": {
+              "$ref": "#/components/schemas/HTTPValidationError"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/intelligence/copilot": {
+      "post": {
+        "operation_id": "trace_copilot_api_v1_intelligence_copilot_post",
+        "request_body_required": true,
+        "request_json_schema": {
+          "$ref": "#/components/schemas/TraceCopilotRequest"
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "json_schema": {
+              "additionalProperties": true,
+              "title": "Response Trace Copilot Api V1 Intelligence Copilot Post",
+              "type": "object"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "json_schema": {
+              "$ref": "#/components/schemas/HTTPValidationError"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/intelligence/failure-modes": {
+      "post": {
+        "operation_id": "failure_modes_api_v1_intelligence_failure_modes_post",
+        "request_body_required": true,
+        "request_json_schema": {
+          "$ref": "#/components/schemas/FailureModesRequest"
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "json_schema": {
+              "additionalProperties": true,
+              "title": "Response Failure Modes Api V1 Intelligence Failure Modes Post",
+              "type": "object"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "json_schema": {
+              "$ref": "#/components/schemas/HTTPValidationError"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/intelligence/status": {
+      "get": {
+        "operation_id": "intelligence_status_api_v1_intelligence_status_get",
+        "request_body_required": false,
+        "request_json_schema": null,
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "json_schema": {
+              "additionalProperties": true,
+              "title": "Response Intelligence Status Api V1 Intelligence Status Get",
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/me/budget/status": {
+      "get": {
+        "operation_id": "get_project_budget_status_api_v1_projects_me_budget_status_get",
+        "request_body_required": false,
+        "request_json_schema": null,
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "json_schema": {
+              "$ref": "#/components/schemas/ProjectBudgetStatusResponse"
+            }
+          }
+        }
+      }
+    }
+  },
+  "schema_version": 1
+}
