@@ -276,6 +276,81 @@ describe('IntelligencePanel deterministic diagnostics', () => {
     })
   })
 
+  it('applies retry cooldown when analyze is rate limited', async () => {
+    globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString()
+      if (url.includes('/api/v1/intelligence/status')) {
+        return createJsonResponse({
+          nvidia_api_key_configured: true,
+          model: 'nvidia/test-model',
+          base_url: 'https://api.example.test',
+          llm_timeout_seconds: 12,
+          llm_max_tokens: 1500,
+        })
+      }
+      if (url.includes('/api/v1/intelligence/copilot')) {
+        return createJsonResponse({
+          trace_id: 'trace-current',
+          baseline_trace_id: null,
+          triage_score: 24,
+          triage_status: 'stable',
+          confidence: 0.25,
+          summary: 'No strong root-cause signal detected (25% confidence).',
+          root_cause: {
+            title: 'No strong root-cause signal detected',
+            detail: 'This trace looks stable relative to current deterministic checks.',
+            source: 'summary',
+            confidence: 0.25,
+          },
+          next_fixes: [],
+          span_references: [],
+          candidate_failure: { status: 'no_major_failure_signals', primary_mode: 'none', confidence: 0 },
+          candidate_anomaly: { status: 'normal', anomaly_score: 0, anomaly_count: 0 },
+          candidate_safety: { risk_level: 'low', risk_score: 0 },
+          compare_summary: null,
+          generated_at: new Date().toISOString(),
+          cached: false,
+          cache_ttl_seconds: 120,
+        })
+      }
+      if (url.includes('/api/v1/intelligence/analyze')) {
+        return new Response(
+          JSON.stringify({
+            detail: {
+              code: 'intelligence_daily_budget_exceeded',
+              message: 'Daily intelligence call budget exhausted for this project.',
+            },
+          }),
+          {
+            status: 429,
+            headers: {
+              'Content-Type': 'application/json',
+              'Retry-After': '3',
+            },
+          }
+        )
+      }
+      throw new Error(`Unexpected fetch call: ${url}`)
+    }) as unknown as typeof fetch
+
+    renderWithProviders(<IntelligencePanel traceId="trace-current" />)
+
+    const analyzeButton = await screen.findByRole('button', { name: 'Analyze trace with Nemotron' })
+    await waitFor(() => {
+      expect(analyzeButton).not.toBeDisabled()
+    })
+
+    fireEvent.click(analyzeButton)
+
+    await waitFor(() => {
+      expect(screen.getByText(/Cooldown active\. Retry in 3s\./)).toBeInTheDocument()
+      expect(analyzeButton).toBeDisabled()
+      expect(
+        screen.getByText(/Daily intelligence call budget exhausted for this project/)
+      ).toBeInTheDocument()
+    })
+  })
+
   it('renders copilot root cause and fix recommendations', async () => {
     globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString()

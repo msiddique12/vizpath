@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Brain, Sparkles, Loader2, Star, Tag, Lightbulb, CheckCircle2, Wand2, ShieldAlert, AlertTriangle, RefreshCw } from 'lucide-react'
 import clsx from 'clsx'
 import {
+  ApiError,
   analyzeTrace,
   getFailureModes,
   getTraceCopilot,
@@ -30,6 +31,8 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
   const [baselineTraceId, setBaselineTraceId] = useState<string>('')
   const [actionStatus, setActionStatus] = useState<string | null>(null)
   const [isRefreshingCopilot, setIsRefreshingCopilot] = useState(false)
+  const [cooldownUntilMs, setCooldownUntilMs] = useState<number | null>(null)
+  const [cooldownRemainingSeconds, setCooldownRemainingSeconds] = useState(0)
 
   const copilotQuery = useQuery({
     queryKey: ['trace-copilot', traceId],
@@ -51,16 +54,49 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
     setRegressionExplain(null)
     setBaselineTraceId('')
     setActionStatus(null)
+    setCooldownUntilMs(null)
+    setCooldownRemainingSeconds(0)
   }, [traceId])
+
+  useEffect(() => {
+    if (cooldownUntilMs === null) {
+      setCooldownRemainingSeconds(0)
+      return
+    }
+
+    const update = () => {
+      const remaining = Math.max(0, Math.ceil((cooldownUntilMs - Date.now()) / 1000))
+      setCooldownRemainingSeconds(remaining)
+      if (remaining === 0) {
+        setCooldownUntilMs(null)
+      }
+    }
+
+    update()
+    const timer = window.setInterval(update, 1000)
+    return () => window.clearInterval(timer)
+  }, [cooldownUntilMs])
+
+  const applyRetryCooldown = (error: unknown) => {
+    if (!(error instanceof ApiError)) {
+      return
+    }
+    if (typeof error.retryAfterSeconds !== 'number' || error.retryAfterSeconds <= 0) {
+      return
+    }
+    setCooldownUntilMs(Date.now() + error.retryAfterSeconds * 1000)
+  }
 
   const analyzeMutation = useMutation({
     mutationFn: () => analyzeTrace(traceId),
     onSuccess: (data) => setAnalysis(data),
+    onError: (error) => applyRetryCooldown(error),
   })
 
   const selfAnalyzeMutation = useMutation({
     mutationFn: () => selfAnalyzeTrace(traceId),
     onSuccess: (data) => setSelfAnalysis(data),
+    onError: (error) => applyRetryCooldown(error),
   })
 
   const failureModesMutation = useMutation({
@@ -122,8 +158,12 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
       ? `Daily calls ${dailyCallBudget.used}/${dailyCallBudget.limit ?? 0} · remaining ${dailyCallBudget.remaining ?? 0}`
       : 'Daily calls unlimited'
     : null
+  const isCooldownActive = cooldownRemainingSeconds > 0
   const isAnalyzeDisabled =
-    analyzeMutation.isPending || selfAnalyzeMutation.isPending || !isIntelligenceReady
+    analyzeMutation.isPending
+    || selfAnalyzeMutation.isPending
+    || !isIntelligenceReady
+    || isCooldownActive
   const baselineId = baselineTraceId.trim()
   const isSameTraceComparison = baselineId.length > 0 && baselineId === traceId
   const isRegressionDisabled =
@@ -171,6 +211,11 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
           {dailyCallBudget?.enforced && dailyCallBudget.allowed === false && (
             <p className="mt-1 text-amber-300">
               Daily budget exhausted. Resets at {dailyCallBudget.resets_at}.
+            </p>
+          )}
+          {isCooldownActive && (
+            <p className="mt-1 text-amber-300">
+              Cooldown active. Retry in {cooldownRemainingSeconds}s.
             </p>
           )}
         </div>
