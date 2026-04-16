@@ -110,8 +110,12 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
 
     try {
       const ws = new WebSocket(url)
+      wsRef.current = ws
 
       ws.onopen = () => {
+        if (wsRef.current !== ws) {
+          return
+        }
         reconnectAttemptRef.current = 0
         setConnected(true)
         setLastDisconnect(null)
@@ -119,6 +123,9 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       }
 
       ws.onmessage = (event) => {
+        if (wsRef.current !== ws) {
+          return
+        }
         try {
           const data = JSON.parse(event.data)
           if (data.type === 'ping') {
@@ -132,6 +139,9 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       }
 
       ws.onclose = (event) => {
+        if (wsRef.current !== ws) {
+          return
+        }
         wsRef.current = null
         setConnected(false)
         const isAuthFailure = event.code === AUTH_FAILURE_CODE
@@ -162,10 +172,11 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       }
 
       ws.onerror = () => {
+        if (wsRef.current !== ws) {
+          return
+        }
         ws.close()
       }
-
-      wsRef.current = ws
     } catch {
       reconnectTimeoutRef.current = setTimeout(connect, 3000)
     }
@@ -182,9 +193,10 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       reconnectTimeoutRef.current = undefined
     }
 
-    if (wsRef.current) {
-      wsRef.current.close()
-      wsRef.current = null
+    const socket = wsRef.current
+    wsRef.current = null
+    if (socket) {
+      socket.close()
     }
   }, [])
 

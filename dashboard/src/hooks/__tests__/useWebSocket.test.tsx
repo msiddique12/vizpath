@@ -214,6 +214,41 @@ describe('useWebSocket', () => {
     renderResult.unmount()
   })
 
+  it('ignores stale close events from a replaced socket', async () => {
+    const onDisconnect = vi.fn()
+    const { stateHolder, renderResult } = createHarness(onDisconnect)
+
+    await waitFor(() => {
+      expect(stateHolder.state.connected).toBe(true)
+      expect(MockWebSocket.instances).toHaveLength(1)
+    })
+
+    const firstSocket = MockWebSocket.latest()
+
+    act(() => {
+      stateHolder.setApiKey('runtime-next-key')
+    })
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(2)
+      expect(stateHolder.state.connected).toBe(true)
+    })
+
+    act(() => {
+      firstSocket.triggerClose(1000, 'late close from stale socket')
+    })
+
+    expect(stateHolder.state.connected).toBe(true)
+    expect(stateHolder.state.lastDisconnect).toBe(null)
+    expect(onDisconnect).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: 'late close from stale socket',
+      })
+    )
+
+    renderResult.unmount()
+  })
+
   it('uses stored dashboard API key when connecting', async () => {
     setStoredApiKey('stored-dashboard-key')
     const onDisconnect = vi.fn()
