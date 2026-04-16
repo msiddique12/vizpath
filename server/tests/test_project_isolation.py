@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 
 import numpy as np
+import pytest
 
 from app.intelligence import clustering as clustering_module
 from app.intelligence import embeddings as embeddings_module
@@ -31,6 +32,38 @@ def _ingest_trace(client, api_key: str, trace_id: str) -> None:
         headers={"X-API-Key": api_key},
     )
     assert response.status_code == 201
+
+
+def _create_alert_rule(client, api_key: str, name: str) -> str:
+    response = client.post(
+        "/api/v1/projects/me/alerts",
+        headers={"X-API-Key": api_key},
+        json={
+            "name": name,
+            "metric": "trace_count",
+            "operator": "gte",
+            "threshold": 1,
+            "window_days": 7,
+            "is_active": True,
+        },
+    )
+    assert response.status_code == 201
+    return response.json()["id"]
+
+
+def _create_alert_destination(client, api_key: str, name: str) -> str:
+    response = client.post(
+        "/api/v1/projects/me/alerts/destinations",
+        headers={"X-API-Key": api_key},
+        json={
+            "name": name,
+            "kind": "webhook",
+            "target_url": "https://example.com/isolation",
+            "is_active": True,
+        },
+    )
+    assert response.status_code == 201
+    return response.json()["id"]
 
 
 def test_cannot_read_other_project_traces(client):
@@ -80,6 +113,114 @@ def test_intelligence_rejects_foreign_trace_access(client, monkeypatch):
     )
 
     assert response.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "payload"),
+    [
+        ("/api/v1/intelligence/analyze", {}),
+        ("/api/v1/intelligence/self-analyze", {}),
+        ("/api/v1/intelligence/suggest-curation", {}),
+        ("/api/v1/intelligence/embed", {}),
+        ("/api/v1/intelligence/generate-synthetic", {"mode": "variations", "n": 1}),
+        ("/api/v1/intelligence/failure-modes", {}),
+        ("/api/v1/intelligence/safety-scan", {}),
+        ("/api/v1/intelligence/anomaly-detect", {}),
+        ("/api/v1/intelligence/summary", {}),
+        ("/api/v1/intelligence/copilot", {}),
+    ],
+)
+def test_intelligence_trace_endpoints_reject_foreign_trace_ids(
+    client,
+    monkeypatch,
+    endpoint: str,
+    payload: dict[str, object],
+):
+    monkeypatch.setattr(intelligence_route.settings, "nvidia_api_key", "test-key")
+
+    _, key_a = _create_project(client, "project-intel-endpoint-a")
+    _, key_b = _create_project(client, "project-intel-endpoint-b")
+
+    _ingest_trace(client, key_a, "trace-intel-endpoint-a")
+
+    response = client.post(
+        endpoint,
+        json={"trace_id": "trace-intel-endpoint-a", **payload},
+        headers={"X-API-Key": key_b},
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize("endpoint", ["/api/v1/intelligence/compare", "/api/v1/intelligence/regression-explain"])
+def test_intelligence_pairwise_endpoints_reject_foreign_trace_ids(
+    client,
+    endpoint: str,
+):
+    _, key_a = _create_project(client, "project-intel-pair-a")
+    _, key_b = _create_project(client, "project-intel-pair-b")
+
+    _ingest_trace(client, key_a, "trace-intel-pair-a")
+    _ingest_trace(client, key_b, "trace-intel-pair-b")
+
+    response = client.post(
+        endpoint,
+        json={"trace_a_id": "trace-intel-pair-a", "trace_b_id": "trace-intel-pair-b"},
+        headers={"X-API-Key": key_b},
+    )
+
+    assert response.status_code == 404
+
+
+def test_cannot_delete_or_read_spans_of_other_project_trace(client):
+    _, key_a = _create_project(client, "project-trace-read-delete-a")
+    _, key_b = _create_project(client, "project-trace-read-delete-b")
+
+    _ingest_trace(client, key_a, "trace-read-delete-a")
+
+    spans_response = client.get(
+        "/api/v1/traces/trace-read-delete-a/spans",
+        headers={"X-API-Key": key_b},
+    )
+    delete_response = client.delete(
+        "/api/v1/traces/trace-read-delete-a",
+        headers={"X-API-Key": key_b},
+    )
+
+    assert spans_response.status_code == 404
+    assert delete_response.status_code == 404
+
+
+def test_alert_rule_and_destination_ids_are_isolated_by_project(client):
+    _, key_a = _create_project(client, "project-alert-ids-a")
+    _, key_b = _create_project(client, "project-alert-ids-b")
+
+    rule_id = _create_alert_rule(client, key_a, "isolated-rule")
+    destination_id = _create_alert_destination(client, key_a, "isolated-destination")
+
+    update_rule_foreign = client.put(
+        f"/api/v1/projects/me/alerts/{rule_id}",
+        headers={"X-API-Key": key_b},
+        json={"threshold": 2},
+    )
+    delete_rule_foreign = client.delete(
+        f"/api/v1/projects/me/alerts/{rule_id}",
+        headers={"X-API-Key": key_b},
+    )
+    update_destination_foreign = client.put(
+        f"/api/v1/projects/me/alerts/destinations/{destination_id}",
+        headers={"X-API-Key": key_b},
+        json={"is_active": False},
+    )
+    delete_destination_foreign = client.delete(
+        f"/api/v1/projects/me/alerts/destinations/{destination_id}",
+        headers={"X-API-Key": key_b},
+    )
+
+    assert update_rule_foreign.status_code == 404
+    assert delete_rule_foreign.status_code == 404
+    assert update_destination_foreign.status_code == 404
+    assert delete_destination_foreign.status_code == 404
 
 
 def test_clustering_contains_only_project_traces(client, monkeypatch):
