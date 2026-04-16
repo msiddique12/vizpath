@@ -210,6 +210,134 @@ describe('IntelligencePanel deterministic diagnostics', () => {
     })
   })
 
+  it('loads recent traces and pre-fills baseline for regression explain', async () => {
+    let regressionRequestBody: Record<string, unknown> | null = null
+    globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString()
+      if (url.includes('/api/v1/intelligence/status')) {
+        return createJsonResponse({
+          nvidia_api_key_configured: true,
+          model: 'nvidia/test-model',
+          base_url: 'https://api.example.test',
+          llm_timeout_seconds: 15,
+          llm_max_tokens: 1024,
+        })
+      }
+      if (url.includes('/api/v1/intelligence/copilot')) {
+        return createJsonResponse({
+          trace_id: 'trace-current',
+          baseline_trace_id: null,
+          triage_score: 24,
+          triage_status: 'stable',
+          confidence: 0.25,
+          summary: 'No strong root-cause signal detected (25% confidence).',
+          root_cause: {
+            title: 'No strong root-cause signal detected',
+            detail: 'This trace looks stable relative to current deterministic checks.',
+            source: 'summary',
+            confidence: 0.25,
+          },
+          next_fixes: [],
+          span_references: [],
+          candidate_failure: { status: 'no_major_failure_signals', primary_mode: 'none', confidence: 0 },
+          candidate_anomaly: { status: 'normal', anomaly_score: 0, anomaly_count: 0 },
+          candidate_safety: { risk_level: 'low', risk_score: 0 },
+          compare_summary: null,
+          generated_at: new Date().toISOString(),
+          cached: false,
+          cache_ttl_seconds: 120,
+        })
+      }
+      if (url.includes('/api/v1/traces?')) {
+        return createJsonResponse({
+          traces: [
+            {
+              id: 'trace-current',
+              name: 'Current Trace',
+              status: 'success',
+              start_time: '2026-04-14T10:00:00Z',
+              end_time: '2026-04-14T10:00:10Z',
+              duration_ms: 10000,
+              metadata: {},
+              total_tokens: 100,
+              total_cost: 0.01,
+              span_count: 5,
+              error_count: 0,
+              created_at: '2026-04-14T10:00:11Z',
+            },
+            {
+              id: 'trace-latest-baseline',
+              name: 'Latest Baseline',
+              status: 'success',
+              start_time: '2026-04-14T09:59:00Z',
+              end_time: '2026-04-14T09:59:12Z',
+              duration_ms: 12000,
+              metadata: {},
+              total_tokens: 120,
+              total_cost: 0.012,
+              span_count: 6,
+              error_count: 0,
+              created_at: '2026-04-14T09:59:13Z',
+            },
+          ],
+          total: 2,
+          limit: 20,
+          offset: 0,
+        })
+      }
+      if (url.includes('/api/v1/intelligence/regression-explain')) {
+        regressionRequestBody = JSON.parse(String(init?.body ?? '{}'))
+        return createJsonResponse({
+          trace_a_id: 'trace-latest-baseline',
+          trace_b_id: 'trace-current',
+          compare_summary: { status: 'regressed', regression_score: 55, signal_count: 2 },
+          candidate_failure: { status: 'issue_detected', primary_mode: 'infra', confidence: 0.77 },
+          candidate_anomaly: { status: 'outlier', anomaly_score: 72, anomaly_count: 2 },
+          candidate_safety: { risk_level: 'low', risk_score: 0 },
+          explanation: {
+            status: 'regression_explained',
+            hypothesis_count: 1,
+            top_hypothesis_confidence: 0.88,
+            summary: 'Generated 1 ranked root-cause hypotheses from deterministic signals.',
+            hypotheses: [
+              {
+                id: 'reliability_regression',
+                title: 'New reliability failures in candidate trace',
+                confidence: 0.88,
+                severity: 'high',
+                evidence: ['Trace B has more error spans than Trace A.'],
+                recommendation: 'Review erroring spans first; add retries/fallbacks only where deterministic.',
+              },
+            ],
+          },
+        })
+      }
+      throw new Error(`Unexpected fetch call: ${url}`)
+    }) as unknown as typeof fetch
+
+    renderWithProviders(<IntelligencePanel traceId="trace-current" />)
+
+    const loadButton = await screen.findByRole('button', { name: 'Load recent traces' })
+    fireEvent.click(loadButton)
+
+    const useLatestButton = await screen.findByRole('button', { name: 'Use latest recent trace' })
+    await waitFor(() => {
+      expect(useLatestButton).not.toBeDisabled()
+    })
+
+    fireEvent.click(useLatestButton)
+
+    expect(screen.getByLabelText('Baseline Trace ID (for regression explain)')).toHaveValue('trace-latest-baseline')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Explain Regression' }))
+    await waitFor(() => {
+      expect(regressionRequestBody).toMatchObject({
+        trace_a_id: 'trace-latest-baseline',
+        trace_b_id: 'trace-current',
+      })
+    })
+  })
+
   it('shows daily intelligence call budget guardrail when configured', async () => {
     globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString()

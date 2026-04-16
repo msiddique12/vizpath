@@ -6,6 +6,7 @@ import {
   ApiError,
   analyzeTrace,
   getFailureModes,
+  getTraces,
   getTraceCopilot,
   selfAnalyzeTrace,
   getIntelligenceStatus,
@@ -33,6 +34,7 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
   const [isRefreshingCopilot, setIsRefreshingCopilot] = useState(false)
   const [cooldownUntilMs, setCooldownUntilMs] = useState<number | null>(null)
   const [cooldownRemainingSeconds, setCooldownRemainingSeconds] = useState(0)
+  const [isBaselineLookupEnabled, setIsBaselineLookupEnabled] = useState(false)
 
   const copilotQuery = useQuery({
     queryKey: ['trace-copilot', traceId],
@@ -46,6 +48,16 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
     staleTime: 30000,
   })
 
+  const baselineTracesQuery = useQuery({
+    queryKey: ['intelligence-baseline-traces', traceId],
+    queryFn: () => getTraces(20, 0, undefined, {
+      sort_by: 'created_at',
+      sort_order: 'desc',
+    }),
+    staleTime: 30000,
+    enabled: isBaselineLookupEnabled,
+  })
+
   // Reset state when traceId changes to prevent showing stale data
   useEffect(() => {
     setAnalysis(null)
@@ -56,6 +68,7 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
     setActionStatus(null)
     setCooldownUntilMs(null)
     setCooldownRemainingSeconds(0)
+    setIsBaselineLookupEnabled(false)
   }, [traceId])
 
   useEffect(() => {
@@ -168,6 +181,10 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
   const isSameTraceComparison = baselineId.length > 0 && baselineId === traceId
   const isRegressionDisabled =
     regressionExplainMutation.isPending || baselineId.length === 0 || isSameTraceComparison
+  const baselineCandidates = (baselineTracesQuery.data?.traces ?? [])
+    .filter((trace) => trace.id !== traceId)
+  const latestBaselineTraceId = baselineCandidates[0]?.id ?? ''
+  const canUseLatestBaseline = latestBaselineTraceId.length > 0 && latestBaselineTraceId !== baselineId
 
   const handleRefreshCopilot = async () => {
     try {
@@ -409,17 +426,74 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
         </div>
 
         <div>
-          <label htmlFor="baseline-trace-id" className="block text-xs text-muted-400 mb-1">
-            Baseline Trace ID (for regression explain)
-          </label>
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <label htmlFor="baseline-trace-id" className="block text-xs text-muted-400">
+              Baseline Trace ID (for regression explain)
+            </label>
+            {!isBaselineLookupEnabled && (
+              <button
+                type="button"
+                onClick={() => setIsBaselineLookupEnabled(true)}
+                className="rounded border border-dark-600 px-2 py-1 text-[11px] text-muted-300 hover:text-muted-100"
+              >
+                Load recent traces
+              </button>
+            )}
+          </div>
           <input
             id="baseline-trace-id"
             type="text"
+            list={isBaselineLookupEnabled ? 'baseline-trace-options' : undefined}
             value={baselineTraceId}
             onChange={(event) => setBaselineTraceId(event.target.value)}
             placeholder="trace-baseline-123"
             className="w-full rounded-lg border border-dark-700 bg-dark-800 px-3 py-2 text-sm text-muted-100 placeholder:text-muted-500 focus:outline-none focus:ring-1 focus:ring-primary-600"
           />
+          {isBaselineLookupEnabled && baselineTracesQuery.isFetching && (
+            <p className="mt-1 text-xs text-muted-500">Loading recent traces...</p>
+          )}
+          {isBaselineLookupEnabled && baselineTracesQuery.isError && (
+            <p className="mt-1 text-xs text-amber-400">
+              Could not load recent traces. You can still enter a baseline trace ID manually.
+            </p>
+          )}
+          {isBaselineLookupEnabled && !baselineTracesQuery.isFetching && !baselineTracesQuery.isError && (
+            <div className="mt-1 flex items-center justify-between gap-2">
+              {baselineCandidates.length > 0 ? (
+                <p className="text-xs text-muted-500">
+                  Showing {baselineCandidates.length} recent trace option{baselineCandidates.length > 1 ? 's' : ''}.
+                </p>
+              ) : (
+                <p className="text-xs text-muted-500">
+                  No additional traces available for baseline comparison.
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={() => setBaselineTraceId(latestBaselineTraceId)}
+                disabled={!canUseLatestBaseline}
+                className={clsx(
+                  'rounded border px-2 py-1 text-[11px] transition-colors',
+                  canUseLatestBaseline
+                    ? 'border-dark-600 text-muted-300 hover:text-muted-100'
+                    : 'border-dark-700 text-muted-500 cursor-not-allowed'
+                )}
+              >
+                Use latest recent trace
+              </button>
+            </div>
+          )}
+          {isBaselineLookupEnabled && baselineCandidates.length > 0 && (
+            <datalist id="baseline-trace-options">
+              {baselineCandidates.map((trace) => (
+                <option
+                  key={trace.id}
+                  value={trace.id}
+                  label={`${trace.name || trace.id} · ${new Date(trace.created_at).toLocaleString()}`}
+                />
+              ))}
+            </datalist>
+          )}
           {isSameTraceComparison && (
             <p className="mt-1 text-xs text-amber-400">
               Baseline trace must be different from current trace.
