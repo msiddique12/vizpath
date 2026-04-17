@@ -10,6 +10,7 @@ from math import isfinite
 from threading import Lock
 from typing import Any
 
+import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
@@ -22,7 +23,7 @@ from app.intelligence.budget import (
     consume_intelligence_budget_call,
     get_intelligence_budget_status,
 )
-from app.models import Project, Span, Trace
+from app.models import CuratedLabel, Project, Span, Trace
 from app.validation import ID_PATTERN
 
 logger = logging.getLogger(__name__)
@@ -1032,6 +1033,22 @@ def _trace_to_data(trace: Trace, spans: list[Span]) -> dict[str, Any]:
     return data
 
 
+def _cosine_similarity(vector_a: np.ndarray | None, vector_b: np.ndarray | None) -> float:
+    """Compute safe cosine similarity for two embedding vectors."""
+    if vector_a is None or vector_b is None:
+        return 0.0
+
+    norm_a = float(np.linalg.norm(vector_a))
+    norm_b = float(np.linalg.norm(vector_b))
+    if norm_a <= 0 or norm_b <= 0:
+        return 0.0
+
+    similarity = float(np.dot(vector_a, vector_b) / (norm_a * norm_b))
+    if not isfinite(similarity):
+        return 0.0
+    return similarity
+
+
 def _summary_cache_key(
     project_id: Any,
     trace_id: str,
@@ -1794,6 +1811,15 @@ class TraceCopilotRequest(BaseModel):
     refresh_cache: bool = False
 
 
+class SimilarTracesRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    trace_id: str = Field(min_length=1, max_length=128, pattern=ID_PATTERN)
+    limit: int = Field(default=5, ge=1, le=10)
+    history_limit: int = Field(default=200, ge=2, le=500)
+    min_similarity: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
 # --- Endpoints ---
 
 
@@ -2053,6 +2079,140 @@ async def trace_copilot(
     _set_cached_intelligence_summary(cache_key, result)
     result["cached"] = False
     return result
+
+
+@router.post("/similar")
+async def similar_traces(
+    req: SimilarTracesRequest,
+    response: Response,
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Find similar traces and include deterministic recovery hints."""
+    _require_nvidia_key()
+    query_trace = (
+        db.query(Trace)
+        .filter(Trace.id == req.trace_id, Trace.project_id == project.id)
+        .first()
+    )
+    if not query_trace:
+        raise HTTPException(status_code=404, detail="Trace not found")
+
+    query_spans = db.query(Span).filter(Span.trace_id == req.trace_id).all()
+    candidate_traces = (
+        db.query(Trace)
+        .filter(Trace.project_id == project.id, Trace.id != req.trace_id)
+        .order_by(Trace.created_at.desc())
+        .limit(req.history_limit)
+        .all()
+    )
+    if not candidate_traces:
+        return {
+            "trace_id": req.trace_id,
+            "match_count": 0,
+            "matches": [],
+            "message": "No candidate traces found",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    budget_status = _enforce_intelligence_call_budget(project)
+    _set_intelligence_budget_headers(response, budget_status)
+
+    from app.intelligence.embeddings import get_trace_embeddings, trace_to_text
+
+    candidate_ids = [str(trace.id) for trace in candidate_traces]
+    candidate_spans = db.query(Span).filter(Span.trace_id.in_(candidate_ids)).all()
+    candidate_spans_by_trace_id: dict[str, list[Span]] = {}
+    for span in candidate_spans:
+        trace_id = str(span.trace_id)
+        if trace_id not in candidate_spans_by_trace_id:
+            candidate_spans_by_trace_id[trace_id] = []
+        candidate_spans_by_trace_id[trace_id].append(span)
+
+    trace_texts: dict[str, str] = {
+        str(req.trace_id): trace_to_text(_trace_to_data(query_trace, query_spans))
+    }
+    for candidate_trace in candidate_traces:
+        candidate_trace_id = str(candidate_trace.id)
+        trace_texts[candidate_trace_id] = trace_to_text(
+            _trace_to_data(
+                candidate_trace,
+                candidate_spans_by_trace_id.get(candidate_trace_id, []),
+            )
+        )
+
+    embeddings = await get_trace_embeddings(trace_texts)
+    query_embedding = embeddings.get(str(req.trace_id))
+
+    label_rows = (
+        db.query(CuratedLabel)
+        .filter(CuratedLabel.trace_id.in_(candidate_ids))
+        .all()
+    )
+    labels_by_trace_id = {str(row.trace_id): row for row in label_rows}
+
+    matches: list[dict[str, Any]] = []
+    for candidate_trace in candidate_traces:
+        candidate_trace_id = str(candidate_trace.id)
+        similarity = _cosine_similarity(query_embedding, embeddings.get(candidate_trace_id))
+        if similarity < req.min_similarity:
+            continue
+
+        comparison = _compare_trace_metrics(
+            candidate_trace,
+            candidate_spans_by_trace_id.get(candidate_trace_id, []),
+            query_trace,
+            query_spans,
+        )
+        label = labels_by_trace_id.get(candidate_trace_id)
+
+        matches.append(
+            {
+                "trace_id": candidate_trace_id,
+                "name": candidate_trace.name,
+                "status": candidate_trace.status,
+                "created_at": (
+                    candidate_trace.created_at.isoformat()
+                    if candidate_trace.created_at
+                    else None
+                ),
+                "similarity": round(similarity, 4),
+                "metrics": {
+                    "duration_ms": candidate_trace.duration_ms,
+                    "error_count": candidate_trace.error_count,
+                    "total_tokens": candidate_trace.total_tokens,
+                    "total_cost": candidate_trace.total_cost,
+                    "span_count": candidate_trace.span_count,
+                },
+                "curation": (
+                    {
+                        "label": label.label,
+                        "quality_score": label.quality_score,
+                        "notes": label.notes,
+                    }
+                    if label
+                    else None
+                ),
+                "compare_summary": comparison.get("summary", {}),
+                "recommended_actions": comparison.get("top_actions", []),
+            }
+        )
+
+    matches.sort(
+        key=lambda item: (
+            float(item.get("similarity", 0.0)),
+            str(item.get("created_at") or ""),
+        ),
+        reverse=True,
+    )
+    limited_matches = matches[: req.limit]
+
+    return {
+        "trace_id": req.trace_id,
+        "match_count": len(limited_matches),
+        "matches": limited_matches,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 @router.get("/status")

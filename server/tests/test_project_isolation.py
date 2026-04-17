@@ -128,6 +128,7 @@ def test_intelligence_rejects_foreign_trace_access(client, monkeypatch):
         ("/api/v1/intelligence/anomaly-detect", {}),
         ("/api/v1/intelligence/summary", {}),
         ("/api/v1/intelligence/copilot", {}),
+        ("/api/v1/intelligence/similar", {}),
     ],
 )
 def test_intelligence_trace_endpoints_reject_foreign_trace_ids(

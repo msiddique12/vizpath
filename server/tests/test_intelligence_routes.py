@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
+import numpy as np
 import pytest
 
 
@@ -259,6 +260,135 @@ class TestClustersEndpoint:
         status_after_empty = client.get("/api/v1/intelligence/status", headers=headers)
         assert status_after_empty.status_code == 200
         budget = status_after_empty.json()["daily_call_budget"]
+        assert budget["used"] == 0
+        assert budget["remaining"] == 1
+
+
+class TestSimilarEndpoint:
+    def test_similar_traces_returns_ranked_matches_with_curation(self, client, monkeypatch):
+        create_response = client.post("/api/v1/projects/", json={"name": "intelligence-similar-ranking"})
+        assert create_response.status_code == 201
+        api_key = create_response.json()["api_key"]
+        headers = {"X-API-Key": api_key}
+
+        _post_trace_spans(client, "trace-similar-query", 1600.0, status="error", llm_calls=2, headers=headers)
+        _post_trace_spans(client, "trace-similar-good", 900.0, status="success", llm_calls=1, headers=headers)
+        _post_trace_spans(client, "trace-similar-other", 1100.0, status="success", llm_calls=1, headers=headers)
+
+        curation_response = client.post(
+            "/api/v1/curation/labels",
+            json={
+                "trace_id": "trace-similar-good",
+                "label": "good",
+                "quality_score": 78,
+                "notes": "Rollback prompt version and reuse cached retrieval.",
+            },
+            headers=headers,
+        )
+        assert curation_response.status_code == 200
+
+        from app.intelligence import embeddings as embeddings_module
+        from app.routes import intelligence as intelligence_routes
+
+        monkeypatch.setattr(intelligence_routes.settings, "nvidia_api_key", "nvapi-test")
+
+        async def fake_get_trace_embeddings(trace_texts: dict[str, str]) -> dict[str, np.ndarray]:
+            vectors: dict[str, np.ndarray] = {
+                "trace-similar-query": np.array([1.0, 0.0, 0.0], dtype=np.float32),
+                "trace-similar-good": np.array([0.92, 0.08, 0.0], dtype=np.float32),
+                "trace-similar-other": np.array([0.30, 0.95, 0.0], dtype=np.float32),
+            }
+            return {trace_id: vectors[trace_id] for trace_id in trace_texts if trace_id in vectors}
+
+        monkeypatch.setattr(embeddings_module, "get_trace_embeddings", fake_get_trace_embeddings)
+
+        response = client.post(
+            "/api/v1/intelligence/similar",
+            json={"trace_id": "trace-similar-query", "limit": 2, "history_limit": 20},
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+        assert response.headers.get("X-Intelligence-Budget-Used") is not None
+        payload = response.json()
+        assert payload["trace_id"] == "trace-similar-query"
+        assert payload["match_count"] == 2
+        assert len(payload["matches"]) == 2
+
+        first = payload["matches"][0]
+        second = payload["matches"][1]
+        assert first["trace_id"] == "trace-similar-good"
+        assert first["similarity"] > second["similarity"]
+        assert first["curation"]["label"] == "good"
+        assert "Rollback prompt version" in first["curation"]["notes"]
+        assert {"status", "regression_score", "signal_count"}.issubset(first["compare_summary"].keys())
+        assert len(first["recommended_actions"]) >= 1
+
+    def test_similar_trace_not_found_does_not_consume_daily_call_budget(self, client, monkeypatch):
+        create_response = client.post(
+            "/api/v1/projects/",
+            json={"name": "intelligence-similar-not-found"},
+        )
+        assert create_response.status_code == 201
+        api_key = create_response.json()["api_key"]
+        headers = {"X-API-Key": api_key}
+
+        from app.intelligence import budget as budget_module
+        from app.routes import intelligence as intelligence_routes
+
+        monkeypatch.setattr(intelligence_routes.settings, "nvidia_api_key", "nvapi-test")
+        monkeypatch.setattr(
+            budget_module.settings,
+            "intelligence_daily_call_limit_per_project",
+            1,
+        )
+
+        missing = client.post(
+            "/api/v1/intelligence/similar",
+            json={"trace_id": "trace-does-not-exist"},
+            headers=headers,
+        )
+        assert missing.status_code == 404
+
+        status_after_missing = client.get("/api/v1/intelligence/status", headers=headers)
+        assert status_after_missing.status_code == 200
+        budget = status_after_missing.json()["daily_call_budget"]
+        assert budget["used"] == 0
+        assert budget["remaining"] == 1
+
+    def test_similar_without_candidates_does_not_consume_daily_call_budget(self, client, monkeypatch):
+        create_response = client.post(
+            "/api/v1/projects/",
+            json={"name": "intelligence-similar-empty"},
+        )
+        assert create_response.status_code == 201
+        api_key = create_response.json()["api_key"]
+        headers = {"X-API-Key": api_key}
+
+        _post_trace_spans(client, "trace-similar-single", 900.0, headers=headers)
+
+        from app.intelligence import budget as budget_module
+        from app.routes import intelligence as intelligence_routes
+
+        monkeypatch.setattr(intelligence_routes.settings, "nvidia_api_key", "nvapi-test")
+        monkeypatch.setattr(
+            budget_module.settings,
+            "intelligence_daily_call_limit_per_project",
+            1,
+        )
+
+        response = client.post(
+            "/api/v1/intelligence/similar",
+            json={"trace_id": "trace-similar-single"},
+            headers=headers,
+        )
+        assert response.status_code == 200
+        assert response.json()["message"] == "No candidate traces found"
+        assert response.headers.get("X-Intelligence-Budget-Used") is None
+
+        status_after = client.get("/api/v1/intelligence/status", headers=headers)
+        assert status_after.status_code == 200
+        budget = status_after.json()["daily_call_budget"]
         assert budget["used"] == 0
         assert budget["remaining"] == 1
 
