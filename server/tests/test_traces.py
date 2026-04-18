@@ -247,6 +247,70 @@ class TestTraceIngestion:
         assert response.status_code == 201
         assert response.json()["ingested"] == 1
 
+    def test_ingestion_sets_regression_guardrail_metadata(self, client):
+        now = datetime.now(timezone.utc).isoformat()
+
+        baseline_response = client.post(
+            "/api/v1/traces/spans/batch",
+            json=[
+                {
+                    "span_id": "span-reg-baseline-1",
+                    "trace_id": "trace-reg-baseline",
+                    "name": "baseline-llm",
+                    "span_type": "llm",
+                    "status": "success",
+                    "start_time": now,
+                    "end_time": now,
+                    "duration_ms": 300,
+                    "tokens": 100,
+                    "cost": 0.01,
+                }
+            ],
+        )
+        assert baseline_response.status_code == 201
+
+        candidate_response = client.post(
+            "/api/v1/traces/spans/batch",
+            json=[
+                {
+                    "span_id": "span-reg-candidate-1",
+                    "trace_id": "trace-reg-candidate",
+                    "name": "candidate-llm",
+                    "span_type": "llm",
+                    "status": "error",
+                    "start_time": now,
+                    "end_time": now,
+                    "duration_ms": 900,
+                    "tokens": 260,
+                    "cost": 0.05,
+                    "error": "tool timeout",
+                },
+                {
+                    "span_id": "span-reg-candidate-2",
+                    "trace_id": "trace-reg-candidate",
+                    "name": "candidate-tool",
+                    "span_type": "tool",
+                    "status": "success",
+                    "start_time": now,
+                    "end_time": now,
+                    "duration_ms": 400,
+                },
+            ],
+        )
+        assert candidate_response.status_code == 201
+
+        candidate_detail = client.get("/api/v1/traces/trace-reg-candidate")
+        assert candidate_detail.status_code == 200
+        metadata = candidate_detail.json()["trace"]["metadata"]
+        assert "regression_guardrail" in metadata
+
+        guardrail = metadata["regression_guardrail"]
+        assert guardrail["status"] == "risk_detected"
+        assert guardrail["baseline_trace_id"] == "trace-reg-baseline"
+        assert guardrail["risk_score"] > 0
+        assert guardrail["signal_count"] >= 1
+        assert len(guardrail["top_actions"]) >= 1
+
 
 class TestTraceBudgetGuard:
     """Tests for budget hard-stop behavior on ingestion."""

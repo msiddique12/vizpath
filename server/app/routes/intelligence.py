@@ -11,7 +11,7 @@ from threading import Lock
 from typing import Any
 
 import numpy as np
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
@@ -2211,6 +2211,96 @@ async def similar_traces(
         "trace_id": req.trace_id,
         "match_count": len(limited_matches),
         "matches": limited_matches,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.get("/incidents")
+async def intelligence_incidents(
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+    limit: int = Query(default=20, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    min_risk: int = Query(default=1, ge=0, le=100),
+) -> dict[str, Any]:
+    """List traces with persisted regression guardrail risk signals."""
+    traces = (
+        db.query(Trace)
+        .filter(Trace.project_id == project.id)
+        .order_by(Trace.created_at.desc())
+        .limit(1000)
+        .all()
+    )
+
+    all_incidents: list[dict[str, Any]] = []
+    for trace in traces:
+        metadata = trace.trace_metadata or {}
+        guardrail = metadata.get("regression_guardrail")
+        if not isinstance(guardrail, dict):
+            continue
+        if guardrail.get("status") != "risk_detected":
+            continue
+
+        risk_score = int(_safe_number(guardrail.get("risk_score")))
+        if risk_score < min_risk:
+            continue
+
+        signals = guardrail.get("signals")
+        signal_count = len(signals) if isinstance(signals, list) else 0
+        top_signal_title = None
+        if signal_count > 0 and isinstance(signals[0], dict):
+            top_signal_title = signals[0].get("title")
+
+        actions = guardrail.get("top_actions")
+        top_actions = [str(action) for action in actions[:2]] if isinstance(actions, list) else []
+
+        all_incidents.append(
+            {
+                "trace_id": str(trace.id),
+                "trace_name": trace.name,
+                "trace_status": trace.status,
+                "created_at": trace.created_at.isoformat() if trace.created_at else None,
+                "baseline_trace_id": guardrail.get("baseline_trace_id"),
+                "risk_score": risk_score,
+                "risk_level": str(guardrail.get("risk_level") or "none"),
+                "signal_count": signal_count,
+                "top_signal": top_signal_title,
+                "top_actions": top_actions,
+            }
+        )
+
+    all_incidents.sort(
+        key=lambda item: (
+            int(item["risk_score"]),
+            str(item.get("created_at") or ""),
+        ),
+        reverse=True,
+    )
+    paged = all_incidents[offset : offset + limit]
+
+    label_rows = (
+        db.query(CuratedLabel)
+        .filter(CuratedLabel.trace_id.in_([item["trace_id"] for item in paged]))
+        .all()
+    )
+    labels_by_trace_id = {str(row.trace_id): row for row in label_rows}
+    for item in paged:
+        label = labels_by_trace_id.get(item["trace_id"])
+        item["curation"] = (
+            {
+                "label": label.label,
+                "quality_score": label.quality_score,
+                "notes": label.notes,
+            }
+            if label
+            else None
+        )
+
+    return {
+        "incidents": paged,
+        "total": len(all_incidents),
+        "limit": limit,
+        "offset": offset,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 

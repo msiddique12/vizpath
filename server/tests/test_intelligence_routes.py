@@ -393,6 +393,65 @@ class TestSimilarEndpoint:
         assert budget["remaining"] == 1
 
 
+class TestIncidentsEndpoint:
+    def test_incidents_lists_guardrail_risks_with_curation(self, client):
+        create_response = client.post("/api/v1/projects/", json={"name": "intelligence-incidents"})
+        assert create_response.status_code == 201
+        api_key = create_response.json()["api_key"]
+        headers = {"X-API-Key": api_key}
+
+        _post_trace_spans(client, "trace-inc-baseline", 300.0, status="success", llm_calls=1, headers=headers)
+        _post_trace_spans(client, "trace-inc-high", 1300.0, status="error", llm_calls=2, headers=headers)
+        _post_trace_spans(client, "trace-inc-medium", 900.0, status="success", llm_calls=2, headers=headers)
+
+        label_response = client.post(
+            "/api/v1/curation/labels",
+            json={
+                "trace_id": "trace-inc-high",
+                "label": "failure",
+                "quality_score": 22,
+                "notes": "Escalate infra fallback policy",
+            },
+            headers=headers,
+        )
+        assert label_response.status_code == 200
+
+        response = client.get("/api/v1/intelligence/incidents", headers=headers)
+        assert response.status_code == 200
+        payload = response.json()
+
+        assert payload["total"] >= 1
+        assert payload["limit"] == 20
+        assert payload["offset"] == 0
+        assert len(payload["incidents"]) >= 1
+
+        top = payload["incidents"][0]
+        assert top["trace_id"] == "trace-inc-high"
+        assert top["risk_score"] > 0
+        assert top["risk_level"] in {"low", "medium", "high", "critical"}
+        assert top["signal_count"] >= 1
+        assert len(top["top_actions"]) >= 1
+        assert top["curation"]["label"] == "failure"
+
+    def test_incidents_respects_project_isolation(self, client):
+        create_a = client.post("/api/v1/projects/", json={"name": "intelligence-incidents-a"})
+        create_b = client.post("/api/v1/projects/", json={"name": "intelligence-incidents-b"})
+        assert create_a.status_code == 201
+        assert create_b.status_code == 201
+
+        key_a = create_a.json()["api_key"]
+        key_b = create_b.json()["api_key"]
+        headers_a = {"X-API-Key": key_a}
+        headers_b = {"X-API-Key": key_b}
+
+        _post_trace_spans(client, "trace-inc-iso-base-a", 320.0, status="success", llm_calls=1, headers=headers_a)
+        _post_trace_spans(client, "trace-inc-iso-risk-a", 1400.0, status="error", llm_calls=2, headers=headers_a)
+
+        response_b = client.get("/api/v1/intelligence/incidents", headers=headers_b)
+        assert response_b.status_code == 200
+        assert response_b.json()["total"] == 0
+
+
 class TestCompareEndpoint:
     def test_compare_success_with_regression_signals(self, client, test_db):
         now = datetime.now(timezone.utc).isoformat()
