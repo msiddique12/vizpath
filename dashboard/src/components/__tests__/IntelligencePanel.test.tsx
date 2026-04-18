@@ -338,6 +338,97 @@ describe('IntelligencePanel deterministic diagnostics', () => {
     })
   })
 
+  it('loads similar incidents and shows suggested fixes', async () => {
+    globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString()
+      if (url.includes('/api/v1/intelligence/status')) {
+        return createJsonResponse({
+          nvidia_api_key_configured: true,
+          model: 'nvidia/test-model',
+          base_url: 'https://api.example.test',
+          llm_timeout_seconds: 12,
+          llm_max_tokens: 1500,
+        })
+      }
+      if (url.includes('/api/v1/intelligence/copilot')) {
+        return createJsonResponse({
+          trace_id: 'trace-current',
+          baseline_trace_id: null,
+          triage_score: 24,
+          triage_status: 'stable',
+          confidence: 0.25,
+          summary: 'No strong root-cause signal detected (25% confidence).',
+          root_cause: {
+            title: 'No strong root-cause signal detected',
+            detail: 'This trace looks stable relative to current deterministic checks.',
+            source: 'summary',
+            confidence: 0.25,
+          },
+          next_fixes: [],
+          span_references: [],
+          candidate_failure: { status: 'no_major_failure_signals', primary_mode: 'none', confidence: 0 },
+          candidate_anomaly: { status: 'normal', anomaly_score: 0, anomaly_count: 0 },
+          candidate_safety: { risk_level: 'low', risk_score: 0 },
+          compare_summary: null,
+          generated_at: new Date().toISOString(),
+          cached: false,
+          cache_ttl_seconds: 120,
+        })
+      }
+      if (url.includes('/api/v1/intelligence/similar')) {
+        return createJsonResponse({
+          trace_id: 'trace-current',
+          match_count: 1,
+          generated_at: new Date().toISOString(),
+          matches: [
+            {
+              trace_id: 'trace-similar-1',
+              name: 'retry_recovered_trace',
+              status: 'success',
+              created_at: '2026-04-15T12:00:00Z',
+              similarity: 0.96,
+              metrics: {
+                duration_ms: 850,
+                error_count: 0,
+                total_tokens: 540,
+                total_cost: 0.012,
+                span_count: 4,
+              },
+              curation: {
+                label: 'good',
+                quality_score: 82,
+                notes: 'Use deterministic retry with bounded backoff.',
+              },
+              compare_summary: {
+                status: 'regressed',
+                regression_score: 70,
+                signal_count: 2,
+              },
+              recommended_actions: [
+                'Fix newly introduced erroring spans before optimizing for speed.',
+              ],
+            },
+          ],
+        })
+      }
+      throw new Error(`Unexpected fetch call: ${url}`)
+    }) as unknown as typeof fetch
+
+    renderWithProviders(<IntelligencePanel traceId="trace-current" />)
+
+    const similarButton = await screen.findByRole('button', { name: 'Find Similar Incidents' })
+    fireEvent.click(similarButton)
+
+    await waitFor(() => {
+      expect(screen.getByText('Similar Incidents')).toBeInTheDocument()
+      expect(screen.getByText('retry_recovered_trace')).toBeInTheDocument()
+      expect(screen.getByText(/similarity 96\.0%/)).toBeInTheDocument()
+      expect(
+        screen.getByText(/Fix newly introduced erroring spans before optimizing for speed/)
+      ).toBeInTheDocument()
+    })
+  })
+
   it('shows daily intelligence call budget guardrail when configured', async () => {
     globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString()

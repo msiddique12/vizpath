@@ -863,6 +863,40 @@ export interface TraceCopilotResult {
   cache_ttl_seconds: number
 }
 
+export interface SimilarTraceMatch {
+  trace_id: string
+  name: string
+  status: 'running' | 'success' | 'error'
+  created_at: string | null
+  similarity: number
+  metrics: {
+    duration_ms: number | null
+    error_count: number | null
+    total_tokens: number | null
+    total_cost: number | null
+    span_count: number | null
+  }
+  curation: {
+    label: string | null
+    quality_score: number | null
+    notes: string | null
+  } | null
+  compare_summary: {
+    status: 'regressed' | 'mixed' | 'improved' | 'neutral'
+    regression_score: number
+    signal_count: number
+  }
+  recommended_actions: string[]
+}
+
+export interface SimilarTracesResult {
+  trace_id: string
+  match_count: number
+  matches: SimilarTraceMatch[]
+  generated_at: string
+  message?: string
+}
+
 export async function analyzeTrace(traceId: string): Promise<TraceAnalysis> {
   return fetchApi('/intelligence/analyze', {
     method: 'POST',
@@ -936,6 +970,25 @@ export async function getTraceCopilot(
       baseline_trace_id: options?.baselineTraceId,
       history_limit: options?.historyLimit ?? 20,
       refresh_cache: options?.refreshCache ?? false,
+    }),
+  })
+}
+
+export async function getSimilarTraces(
+  traceId: string,
+  options?: {
+    limit?: number
+    historyLimit?: number
+    minSimilarity?: number
+  }
+): Promise<SimilarTracesResult> {
+  return fetchApi('/intelligence/similar', {
+    method: 'POST',
+    body: JSON.stringify({
+      trace_id: traceId,
+      limit: options?.limit ?? 5,
+      history_limit: options?.historyLimit ?? 200,
+      min_similarity: options?.minSimilarity ?? 0,
     }),
   })
 }

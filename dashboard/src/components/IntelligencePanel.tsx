@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Brain, Sparkles, Loader2, Star, Tag, Lightbulb, CheckCircle2, Wand2, ShieldAlert, AlertTriangle, RefreshCw } from 'lucide-react'
+import { Brain, Sparkles, Loader2, Star, Tag, Lightbulb, CheckCircle2, Wand2, ShieldAlert, AlertTriangle, RefreshCw, Search } from 'lucide-react'
 import clsx from 'clsx'
 import {
   ApiError,
   analyzeTrace,
   getFailureModes,
+  getSimilarTraces,
   getTraces,
   getTraceCopilot,
   selfAnalyzeTrace,
@@ -17,6 +18,7 @@ import {
   SelfAnalysis,
   FailureModesResult,
   RegressionExplainResult,
+  SimilarTracesResult,
 } from '@/lib/api'
 
 interface IntelligencePanelProps {
@@ -29,6 +31,7 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
   const [selfAnalysis, setSelfAnalysis] = useState<SelfAnalysis | null>(null)
   const [failureModes, setFailureModes] = useState<FailureModesResult | null>(null)
   const [regressionExplain, setRegressionExplain] = useState<RegressionExplainResult | null>(null)
+  const [similarTraces, setSimilarTraces] = useState<SimilarTracesResult | null>(null)
   const [baselineTraceId, setBaselineTraceId] = useState<string>('')
   const [actionStatus, setActionStatus] = useState<string | null>(null)
   const [isRefreshingCopilot, setIsRefreshingCopilot] = useState(false)
@@ -64,6 +67,7 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
     setSelfAnalysis(null)
     setFailureModes(null)
     setRegressionExplain(null)
+    setSimilarTraces(null)
     setBaselineTraceId('')
     setActionStatus(null)
     setCooldownUntilMs(null)
@@ -120,6 +124,11 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
   const regressionExplainMutation = useMutation({
     mutationFn: () => getRegressionExplain(baselineTraceId.trim(), traceId),
     onSuccess: (data) => setRegressionExplain(data),
+  })
+
+  const similarTracesMutation = useMutation({
+    mutationFn: () => getSimilarTraces(traceId, { limit: 5, historyLimit: 200 }),
+    onSuccess: (data) => setSimilarTraces(data),
   })
 
   const applySuggestionMutation = useMutation({
@@ -424,6 +433,23 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
             Explain Regression
           </button>
         </div>
+        <button
+          onClick={() => similarTracesMutation.mutate()}
+          disabled={similarTracesMutation.isPending}
+          className={clsx(
+            'w-full flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg transition-colors',
+            similarTracesMutation.isPending
+              ? 'bg-dark-700 text-muted-400 cursor-wait'
+              : 'bg-dark-900 border border-dark-700 text-muted-200 hover:bg-dark-700'
+          )}
+        >
+          {similarTracesMutation.isPending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Search className="h-4 w-4" />
+          )}
+          Find Similar Incidents
+        </button>
 
         <div>
           <div className="mb-1 flex items-center justify-between gap-2">
@@ -501,10 +527,13 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
           )}
         </div>
 
-        {(failureModesMutation.isError || regressionExplainMutation.isError) && (
+        {(failureModesMutation.isError || regressionExplainMutation.isError || similarTracesMutation.isError) && (
           <div className="bg-red-900/30 border border-red-800 rounded-lg px-3 py-2">
             <p className="text-xs text-red-400">
-              {failureModesMutation.error?.message || regressionExplainMutation.error?.message || 'Diagnostics request failed.'}
+              {failureModesMutation.error?.message
+                || regressionExplainMutation.error?.message
+                || similarTracesMutation.error?.message
+                || 'Diagnostics request failed.'}
             </p>
           </div>
         )}
@@ -549,6 +578,51 @@ export default function IntelligencePanel({ traceId }: IntelligencePanelProps) {
                 <p className="text-xs text-muted-400 mt-1">{hypothesis.recommendation}</p>
               </div>
             ))}
+          </div>
+        )}
+
+        {similarTraces && (
+          <div className="bg-dark-800 rounded-lg p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-muted-400 uppercase tracking-wide">Similar Incidents</p>
+              <span className="text-xs text-muted-300">{similarTraces.match_count} matches</span>
+            </div>
+            {similarTraces.matches.length === 0 ? (
+              <p className="text-xs text-muted-300">
+                {similarTraces.message || 'No similar incidents found for this trace.'}
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {similarTraces.matches.slice(0, 3).map((match) => (
+                  <div key={match.trace_id} className="bg-dark-900 rounded px-2 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <a
+                        href={`/traces/${encodeURIComponent(match.trace_id)}`}
+                        className="text-xs text-primary-300 hover:text-primary-200"
+                      >
+                        {match.name || match.trace_id}
+                      </a>
+                      <span className="text-xs text-muted-400">
+                        similarity {(match.similarity * 100).toFixed(1)}%
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-400">
+                      Status {match.status} · errors {match.metrics.error_count ?? 0}
+                    </p>
+                    {match.curation?.label && (
+                      <p className="mt-1 text-xs text-muted-400">
+                        Curation label: {match.curation.label}
+                      </p>
+                    )}
+                    {match.recommended_actions[0] && (
+                      <p className="mt-1 text-xs text-muted-300">
+                        Suggested fix: {match.recommended_actions[0]}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
