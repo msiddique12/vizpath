@@ -166,6 +166,109 @@ describe('TracesPage websocket security UX', () => {
     expect(screen.getByText('Cost budget')).toBeInTheDocument()
   })
 
+  it('renders incident feed entries from intelligence incidents endpoint', async () => {
+    globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = resolveUrl(input)
+      const requestMethod = init?.method ?? (input instanceof Request ? input.method : 'GET')
+
+      if (url.includes('/curation/traces')) {
+        return createJsonResponse([])
+      }
+
+      if (url.includes('/curation/labels/') && requestMethod === 'GET') {
+        return new Response(JSON.stringify({ detail: 'Label not found' }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+
+      if (url.includes('/traces/summary')) {
+        return createJsonResponse({
+          window_days: 7,
+          trace_count: 1,
+          success_rate: 100,
+          running_count: 0,
+          error_count: 0,
+          p50_duration_ms: 42,
+          p95_duration_ms: 120,
+          avg_tokens: 22,
+          avg_cost: 0.0009,
+        })
+      }
+
+      if (url.includes('/projects/me/budget/status')) {
+        return createJsonResponse({
+          month_start: new Date().toISOString(),
+          month_end: new Date().toISOString(),
+          tokens_used: 90,
+          cost_used: 0.9,
+          monthly_token_limit: 100,
+          monthly_cost_limit: 1.0,
+          token_usage_percent: 90,
+          cost_usage_percent: 90,
+          alert_threshold_percent: 80,
+          token_alert_triggered: true,
+          cost_alert_triggered: true,
+          alert_triggered: true,
+          hard_stop_enabled: true,
+        })
+      }
+
+      if (url.includes('/intelligence/incidents')) {
+        return createJsonResponse({
+          incidents: [
+            {
+              trace_id: 'trace-incident-1',
+              trace_name: 'Tool timeout regression',
+              trace_status: 'error',
+              created_at: new Date().toISOString(),
+              baseline_trace_id: 'trace-baseline-1',
+              risk_score: 84,
+              risk_level: 'high',
+              signal_count: 2,
+              top_signal: 'Reliability regression',
+              top_actions: ['Fix newly introduced erroring spans before other optimizations.'],
+              curation: null,
+            },
+          ],
+          total: 1,
+          limit: 5,
+          offset: 0,
+          generated_at: new Date().toISOString(),
+        })
+      }
+
+      return createJsonResponse({
+        traces: [
+          {
+            id: 'trace-1',
+            name: 'Demo trace',
+            status: 'success',
+            start_time: new Date().toISOString(),
+            end_time: new Date().toISOString(),
+            duration_ms: 45,
+            metadata: {},
+            total_tokens: 20,
+            total_cost: 0.001,
+            span_count: 5,
+            error_count: 0,
+            created_at: new Date().toISOString(),
+          },
+        ],
+        total: 1,
+        limit: 50,
+        offset: 0,
+      })
+    }) as unknown as typeof fetch
+
+    _renderWithProviders(<TracesPage />, ['/traces'])
+
+    await waitFor(() => expect(screen.getByText('Tool timeout regression')).toBeInTheDocument())
+    expect(screen.getByText('Incident Feed')).toBeInTheDocument()
+    expect(screen.getByText('Reliability regression')).toBeInTheDocument()
+    expect(screen.getByText('risk 84')).toBeInTheDocument()
+  })
+
   it('allows users to reconnect with a runtime websocket API key', async () => {
     const renderResult = _renderWithProviders(<TracesPage />, ['/traces'])
 

@@ -20,6 +20,7 @@ import clsx from 'clsx'
 import {
   createOrUpdateLabel,
   getCuratedTraces,
+  getIntelligenceIncidents,
   getLabel,
   getProjectBudgetStatus,
   getTraceSummary,
@@ -730,6 +731,14 @@ export default function TracesPage() {
     typeof budgetStatusData.alert_threshold_percent === 'number' &&
     typeof budgetStatusData.hard_stop_enabled === 'boolean'
 
+  const incidentsQuery = useQuery({
+    queryKey: ['intelligence-incidents'],
+    queryFn: () => getIntelligenceIncidents({ limit: 5, minRisk: 1 }),
+    refetchInterval: connected ? false : 10000,
+    retry: false,
+  })
+  const incidentRows = incidentsQuery.data?.incidents ?? []
+
   const pinnedTraceIdSet = useMemo(() => new Set(pinnedTraceIds), [pinnedTraceIds])
   const visibleTraces = useMemo(() => {
     const traces = data?.traces || []
@@ -1204,6 +1213,76 @@ export default function TracesPage() {
           )}
         </div>
       )}
+
+      <div className="mb-4 bg-dark-900 rounded-lg border border-dark-700 p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-medium text-muted-200">Incident Feed</h2>
+          {incidentsQuery.isFetching && <Loader2 className="h-4 w-4 animate-spin text-muted-500" />}
+        </div>
+        {incidentsQuery.isError && (
+          <p className="text-xs text-amber-300">
+            Could not load incident feed. Trace ingestion and guardrails continue normally.
+          </p>
+        )}
+        {!incidentsQuery.isError && incidentRows.length === 0 && (
+          <p className="text-xs text-muted-400">
+            No active high-risk regression incidents.
+          </p>
+        )}
+        {incidentRows.length > 0 && (
+          <div className="space-y-2">
+            {incidentRows.map((incident) => (
+              <div
+                key={incident.trace_id}
+                className="rounded-lg border border-dark-700 bg-dark-800 p-3 flex items-start justify-between gap-3"
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <Link
+                      to={`/traces/${encodeURIComponent(incident.trace_id)}`}
+                      className="text-sm text-primary-300 hover:text-primary-200 truncate"
+                    >
+                      {incident.trace_name || incident.trace_id}
+                    </Link>
+                    <span className="text-xs text-muted-500">
+                      {incident.created_at
+                        ? formatDistanceToNow(new Date(incident.created_at), { addSuffix: true })
+                        : ''}
+                    </span>
+                  </div>
+                  {incident.top_signal && (
+                    <p className="mt-1 text-xs text-muted-300">{incident.top_signal}</p>
+                  )}
+                  {incident.top_actions[0] && (
+                    <p className="mt-1 text-xs text-muted-400">
+                      Next step: {incident.top_actions[0]}
+                    </p>
+                  )}
+                </div>
+                <div className="shrink-0 flex flex-col items-end gap-1">
+                  <span
+                    className={clsx(
+                      'px-2 py-0.5 rounded-full text-xs capitalize',
+                      incident.risk_level === 'critical'
+                        ? 'bg-red-900/40 text-red-300'
+                        : incident.risk_level === 'high'
+                          ? 'bg-amber-900/40 text-amber-300'
+                          : incident.risk_level === 'medium'
+                            ? 'bg-yellow-900/35 text-yellow-300'
+                            : 'bg-dark-700 text-muted-300'
+                    )}
+                  >
+                    {incident.risk_level}
+                  </span>
+                  <span className="text-xs text-muted-400">
+                    risk {incident.risk_score}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="mb-4 bg-dark-900 rounded-lg border border-dark-700 p-4 space-y-3">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">

@@ -1092,6 +1092,32 @@ export interface IntelligenceStatusResponse {
   }
 }
 
+export interface IntelligenceIncident {
+  trace_id: string
+  trace_name: string
+  trace_status: 'running' | 'success' | 'error'
+  created_at: string | null
+  baseline_trace_id: string | null
+  risk_score: number
+  risk_level: 'none' | 'low' | 'medium' | 'high' | 'critical'
+  signal_count: number
+  top_signal: string | null
+  top_actions: string[]
+  curation: {
+    label: string | null
+    quality_score: number | null
+    notes: string | null
+  } | null
+}
+
+export interface IntelligenceIncidentsResponse {
+  incidents: IntelligenceIncident[]
+  total: number
+  limit: number
+  offset: number
+  generated_at: string
+}
+
 export interface StoryModeSeedResponse {
   scenario: 'agent_regression'
   seeded: number
@@ -1119,6 +1145,18 @@ export async function getLatestStoryMode(): Promise<StoryModeLatestResponse> {
 
 export async function getIntelligenceStatus(): Promise<IntelligenceStatusResponse> {
   return fetchApi('/intelligence/status')
+}
+
+export async function getIntelligenceIncidents(options?: {
+  limit?: number
+  offset?: number
+  minRisk?: number
+}): Promise<IntelligenceIncidentsResponse> {
+  const params = new URLSearchParams()
+  params.set('limit', String(options?.limit ?? 20))
+  params.set('offset', String(options?.offset ?? 0))
+  params.set('min_risk', String(options?.minRisk ?? 1))
+  return fetchApi(`/intelligence/incidents?${params}`)
 }
 
 export async function seedStoryMode(
