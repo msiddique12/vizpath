@@ -61,6 +61,19 @@ describe('TracesPage websocket security UX', () => {
       if (url.includes('/curation/labels') && requestMethod === 'POST') {
         const body = typeof init?.body === 'string' ? JSON.parse(init.body) : {}
         return createJsonResponse({
+          trace_id: body.trace_id ?? 'trace-incident-1',
+          label: body.label ?? null,
+          quality_score: null,
+          notes: null,
+          exported: false,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+      }
+
+      if (url.includes('/curation/labels') && requestMethod === 'POST') {
+        const body = typeof init?.body === 'string' ? JSON.parse(init.body) : {}
+        return createJsonResponse({
           trace_id: body.trace_id ?? 'trace-1',
           label: body.label ?? null,
           quality_score: null,
@@ -267,6 +280,22 @@ describe('TracesPage websocket security UX', () => {
     expect(screen.getByText('Incident Feed')).toBeInTheDocument()
     expect(screen.getByText('Reliability regression')).toBeInTheDocument()
     expect(screen.getByText('risk 84')).toBeInTheDocument()
+
+    const compareLink = screen.getByRole('link', { name: 'Compare' })
+    expect(compareLink.getAttribute('href')).toBe('/compare?traceA=trace-baseline-1&traceB=trace-incident-1')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mark failure' }))
+    await waitFor(() => {
+      const calls = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls
+      const labelCall = calls.find(([input, init]) => {
+        const url = resolveUrl(input as RequestInfo | URL)
+        return url.includes('/curation/labels') && (init as RequestInit | undefined)?.method === 'POST'
+      })
+      expect(labelCall).toBeDefined()
+      const body = JSON.parse(String((labelCall?.[1] as RequestInit | undefined)?.body ?? '{}'))
+      expect(body.trace_id).toBe('trace-incident-1')
+      expect(body.label).toBe('failure')
+    })
   })
 
   it('allows users to reconnect with a runtime websocket API key', async () => {

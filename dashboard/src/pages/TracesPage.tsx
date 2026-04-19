@@ -1232,10 +1232,10 @@ export default function TracesPage() {
         {incidentRows.length > 0 && (
           <div className="space-y-2">
             {incidentRows.map((incident) => (
-              <div
-                key={incident.trace_id}
-                className="rounded-lg border border-dark-700 bg-dark-800 p-3 flex items-start justify-between gap-3"
-              >
+                <div
+                  key={incident.trace_id}
+                  className="rounded-lg border border-dark-700 bg-dark-800 p-3 flex items-start justify-between gap-3"
+                >
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <Link
@@ -1258,6 +1258,30 @@ export default function TracesPage() {
                       Next step: {incident.top_actions[0]}
                     </p>
                   )}
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    {incident.baseline_trace_id && (
+                      <Link
+                        to={`/compare?traceA=${encodeURIComponent(incident.baseline_trace_id)}&traceB=${encodeURIComponent(incident.trace_id)}`}
+                        className="inline-flex items-center gap-1 rounded-md border border-dark-600 px-2 py-1 text-xs text-muted-200 hover:text-muted-100"
+                      >
+                        <Link2 className="h-3 w-3" />
+                        Compare
+                      </Link>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleQuickLabel(incident.trace_id, 'failure')}
+                      disabled={Boolean(pendingQuickLabels[incident.trace_id])}
+                      className={clsx(
+                        'rounded-md border px-2 py-1 text-xs transition-colors',
+                        pendingQuickLabels[incident.trace_id]
+                          ? 'border-dark-700 text-muted-500 cursor-not-allowed'
+                          : 'border-red-800 text-red-300 hover:text-red-200'
+                      )}
+                    >
+                      {pendingQuickLabels[incident.trace_id] ? 'Saving...' : 'Mark failure'}
+                    </button>
+                  </div>
                 </div>
                 <div className="shrink-0 flex flex-col items-end gap-1">
                   <span
