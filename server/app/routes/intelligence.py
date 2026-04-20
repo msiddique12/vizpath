@@ -5,13 +5,14 @@ import logging
 import re
 import statistics
 import time
+from copy import deepcopy
 from datetime import datetime, timezone
 from math import isfinite
 from threading import Lock
 from typing import Any
 
 import numpy as np
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
@@ -199,6 +200,7 @@ _FAILURE_MODE_BASE_RECOMMENDATIONS = {
 _INTELLIGENCE_SUMMARY_CACHE_TTL_SECONDS = 120
 _intelligence_summary_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _intelligence_summary_cache_lock = Lock()
+_INCIDENT_STATUSES = {"open", "investigating", "resolved"}
 
 
 def _clear_intelligence_summary_cache() -> None:
@@ -1820,6 +1822,13 @@ class SimilarTracesRequest(BaseModel):
     min_similarity: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
+class IncidentUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: str | None = Field(default=None, pattern="^(open|investigating|resolved)$")
+    owner: str | None = Field(default=None, max_length=120)
+
+
 # --- Endpoints ---
 
 
@@ -2215,6 +2224,85 @@ async def similar_traces(
     }
 
 
+def _normalize_incident_workflow(guardrail: dict[str, Any]) -> dict[str, Any]:
+    """Return normalized incident workflow metadata."""
+    workflow = guardrail.get("workflow")
+    if not isinstance(workflow, dict):
+        workflow = {}
+
+    status = str(workflow.get("status") or "open").strip().lower()
+    if status not in _INCIDENT_STATUSES:
+        status = "open"
+
+    owner = workflow.get("owner")
+    owner_value = str(owner).strip() if isinstance(owner, str) else ""
+    if not owner_value:
+        owner_value = None
+
+    opened_at = workflow.get("opened_at")
+    opened_at_value = str(opened_at).strip() if isinstance(opened_at, str) and opened_at.strip() else None
+    if opened_at_value is None:
+        evaluated_at = guardrail.get("evaluated_at")
+        if isinstance(evaluated_at, str) and evaluated_at.strip():
+            opened_at_value = evaluated_at
+        else:
+            opened_at_value = datetime.now(timezone.utc).isoformat()
+
+    investigating_at = workflow.get("investigating_at")
+    investigating_at_value = (
+        str(investigating_at).strip()
+        if isinstance(investigating_at, str) and investigating_at.strip()
+        else None
+    )
+
+    resolved_at = workflow.get("resolved_at")
+    resolved_at_value = str(resolved_at).strip() if isinstance(resolved_at, str) and resolved_at.strip() else None
+
+    updated_at = workflow.get("updated_at")
+    updated_at_value = str(updated_at).strip() if isinstance(updated_at, str) and updated_at.strip() else opened_at_value
+
+    return {
+        "status": status,
+        "owner": owner_value,
+        "opened_at": opened_at_value,
+        "investigating_at": investigating_at_value,
+        "resolved_at": resolved_at_value,
+        "updated_at": updated_at_value,
+    }
+
+
+def _build_incident_item(trace: Trace, guardrail: dict[str, Any]) -> dict[str, Any]:
+    """Build API response payload for a single incident."""
+    risk_score = int(_safe_number(guardrail.get("risk_score")))
+    signals = guardrail.get("signals")
+    signal_count = len(signals) if isinstance(signals, list) else 0
+    top_signal_title = None
+    if signal_count > 0 and isinstance(signals[0], dict):
+        top_signal_title = signals[0].get("title")
+    actions = guardrail.get("top_actions")
+    top_actions = [str(action) for action in actions[:2]] if isinstance(actions, list) else []
+    workflow = _normalize_incident_workflow(guardrail)
+
+    return {
+        "trace_id": str(trace.id),
+        "trace_name": trace.name,
+        "trace_status": trace.status,
+        "created_at": trace.created_at.isoformat() if trace.created_at else None,
+        "baseline_trace_id": guardrail.get("baseline_trace_id"),
+        "risk_score": risk_score,
+        "risk_level": str(guardrail.get("risk_level") or "none"),
+        "signal_count": signal_count,
+        "top_signal": top_signal_title,
+        "top_actions": top_actions,
+        "incident_status": workflow["status"],
+        "owner": workflow["owner"],
+        "opened_at": workflow["opened_at"],
+        "investigating_at": workflow["investigating_at"],
+        "resolved_at": workflow["resolved_at"],
+        "incident_updated_at": workflow["updated_at"],
+    }
+
+
 @router.get("/incidents")
 async def intelligence_incidents(
     project: Project = Depends(verify_api_key),
@@ -2222,6 +2310,7 @@ async def intelligence_incidents(
     limit: int = Query(default=20, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     min_risk: int = Query(default=1, ge=0, le=100),
+    status: str | None = Query(default=None, pattern="^(open|investigating|resolved)$"),
 ) -> dict[str, Any]:
     """List traces with persisted regression guardrail risk signals."""
     traces = (
@@ -2241,33 +2330,14 @@ async def intelligence_incidents(
         if guardrail.get("status") != "risk_detected":
             continue
 
-        risk_score = int(_safe_number(guardrail.get("risk_score")))
-        if risk_score < min_risk:
+        incident = _build_incident_item(trace, guardrail)
+        if int(incident["risk_score"]) < min_risk:
             continue
 
-        signals = guardrail.get("signals")
-        signal_count = len(signals) if isinstance(signals, list) else 0
-        top_signal_title = None
-        if signal_count > 0 and isinstance(signals[0], dict):
-            top_signal_title = signals[0].get("title")
+        if status is not None and incident["incident_status"] != status:
+            continue
 
-        actions = guardrail.get("top_actions")
-        top_actions = [str(action) for action in actions[:2]] if isinstance(actions, list) else []
-
-        all_incidents.append(
-            {
-                "trace_id": str(trace.id),
-                "trace_name": trace.name,
-                "trace_status": trace.status,
-                "created_at": trace.created_at.isoformat() if trace.created_at else None,
-                "baseline_trace_id": guardrail.get("baseline_trace_id"),
-                "risk_score": risk_score,
-                "risk_level": str(guardrail.get("risk_level") or "none"),
-                "signal_count": signal_count,
-                "top_signal": top_signal_title,
-                "top_actions": top_actions,
-            }
-        )
+        all_incidents.append(incident)
 
     all_incidents.sort(
         key=lambda item: (
@@ -2303,6 +2373,72 @@ async def intelligence_incidents(
         "offset": offset,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+@router.patch("/incidents/{trace_id}")
+async def update_incident(
+    req: IncidentUpdateRequest,
+    trace_id: str = Path(min_length=1, max_length=128, pattern=ID_PATTERN),
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Update workflow state for a regression incident."""
+    trace = (
+        db.query(Trace)
+        .filter(Trace.id == trace_id, Trace.project_id == project.id)
+        .first()
+    )
+    if not trace:
+        raise HTTPException(status_code=404, detail="Trace not found")
+
+    metadata = deepcopy(trace.trace_metadata or {})
+    guardrail = metadata.get("regression_guardrail")
+    if not isinstance(guardrail, dict) or guardrail.get("status") != "risk_detected":
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    workflow = _normalize_incident_workflow(guardrail)
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    if "status" in req.model_fields_set and req.status is not None:
+        next_status = req.status
+        previous_status = workflow["status"]
+        workflow["status"] = next_status
+        if next_status == "investigating" and not workflow["investigating_at"]:
+            workflow["investigating_at"] = now_iso
+        if next_status == "resolved":
+            workflow["resolved_at"] = now_iso
+        if previous_status == "resolved" and next_status != "resolved":
+            workflow["resolved_at"] = None
+
+    if "owner" in req.model_fields_set:
+        owner = req.owner
+        owner_value = owner.strip() if isinstance(owner, str) else ""
+        workflow["owner"] = owner_value or None
+
+    workflow["updated_at"] = now_iso
+    guardrail["workflow"] = workflow
+    metadata["regression_guardrail"] = guardrail
+    trace.trace_metadata = metadata
+    db.commit()
+    db.refresh(trace)
+
+    persisted_metadata = trace.trace_metadata or {}
+    persisted_guardrail = persisted_metadata.get("regression_guardrail")
+    if not isinstance(persisted_guardrail, dict):
+        persisted_guardrail = guardrail
+
+    item = _build_incident_item(trace, persisted_guardrail)
+    label = db.query(CuratedLabel).filter(CuratedLabel.trace_id == trace_id).first()
+    item["curation"] = (
+        {
+            "label": label.label,
+            "quality_score": label.quality_score,
+            "notes": label.notes,
+        }
+        if label
+        else None
+    )
+    return item
 
 
 @router.get("/status")

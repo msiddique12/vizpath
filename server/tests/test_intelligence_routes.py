@@ -451,6 +451,58 @@ class TestIncidentsEndpoint:
         assert response_b.status_code == 200
         assert response_b.json()["total"] == 0
 
+    def test_incident_workflow_patch_and_status_filter(self, client):
+        create_response = client.post("/api/v1/projects/", json={"name": "intelligence-incidents-workflow"})
+        assert create_response.status_code == 201
+        api_key = create_response.json()["api_key"]
+        headers = {"X-API-Key": api_key}
+
+        _post_trace_spans(client, "trace-inc-workflow-base", 280.0, status="success", llm_calls=1, headers=headers)
+        _post_trace_spans(client, "trace-inc-workflow-risk", 1500.0, status="error", llm_calls=3, headers=headers)
+
+        update_response = client.patch(
+            "/api/v1/intelligence/incidents/trace-inc-workflow-risk",
+            json={"status": "investigating", "owner": "oncall-sre"},
+            headers=headers,
+        )
+        assert update_response.status_code == 200
+        updated = update_response.json()
+        assert updated["trace_id"] == "trace-inc-workflow-risk"
+        assert updated["incident_status"] == "investigating"
+        assert updated["owner"] == "oncall-sre"
+        assert updated["investigating_at"] is not None
+        assert updated["resolved_at"] is None
+
+        investigating_list = client.get(
+            "/api/v1/intelligence/incidents",
+            params={"status": "investigating", "min_risk": 0},
+            headers=headers,
+        )
+        assert investigating_list.status_code == 200
+        investigating_payload = investigating_list.json()
+        assert any(
+            row["trace_id"] == "trace-inc-workflow-risk" for row in investigating_payload["incidents"]
+        ), investigating_payload
+
+        resolve_response = client.patch(
+            "/api/v1/intelligence/incidents/trace-inc-workflow-risk",
+            json={"status": "resolved", "owner": ""},
+            headers=headers,
+        )
+        assert resolve_response.status_code == 200
+        resolved = resolve_response.json()
+        assert resolved["incident_status"] == "resolved"
+        assert resolved["owner"] is None
+        assert resolved["resolved_at"] is not None
+
+        open_list = client.get(
+            "/api/v1/intelligence/incidents",
+            params={"status": "open", "min_risk": 0},
+            headers=headers,
+        )
+        assert open_list.status_code == 200
+        assert all(row["trace_id"] != "trace-inc-workflow-risk" for row in open_list.json()["incidents"])
+
 
 class TestCompareEndpoint:
     def test_compare_success_with_regression_signals(self, client, test_db):
