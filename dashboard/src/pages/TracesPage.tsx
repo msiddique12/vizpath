@@ -21,10 +21,12 @@ import {
   createOrUpdateLabel,
   getCuratedTraces,
   getIntelligenceIncidents,
+  IntelligenceIncidentStatus,
   getLabel,
   getProjectBudgetStatus,
   getTraceSummary,
   getTraces,
+  updateIntelligenceIncident,
 } from '@/lib/api'
 import { getEffectiveApiKey } from '@/lib/apiKey'
 import { Trace, SpanStatus } from '@/lib/types'
@@ -57,6 +59,7 @@ type SavedFilterPreset = {
   filters: FilterState
 }
 type QuickLabelValue = 'good' | 'needs_improvement' | 'failure'
+type IncidentStatusFilter = 'all' | IntelligenceIncidentStatus
 
 const QUICK_LABEL_OPTIONS: Array<{ value: QuickLabelValue; label: string }> = [
   { value: 'good', label: 'Good' },
@@ -556,6 +559,9 @@ export default function TracesPage() {
   const [openNoteEditors, setOpenNoteEditors] = useState<Record<string, boolean>>({})
   const [loadingNotes, setLoadingNotes] = useState<Record<string, boolean>>({})
   const [pendingNoteSaves, setPendingNoteSaves] = useState<Record<string, boolean>>({})
+  const [incidentStatusFilter, setIncidentStatusFilter] = useState<IncidentStatusFilter>('open')
+  const [incidentOwners, setIncidentOwners] = useState<Record<string, string>>({})
+  const [pendingIncidentUpdates, setPendingIncidentUpdates] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     const parsed = getFiltersFromSearchParams(searchParams)
@@ -732,12 +738,17 @@ export default function TracesPage() {
     typeof budgetStatusData.hard_stop_enabled === 'boolean'
 
   const incidentsQuery = useQuery({
-    queryKey: ['intelligence-incidents'],
-    queryFn: () => getIntelligenceIncidents({ limit: 5, minRisk: 1 }),
+    queryKey: ['intelligence-incidents', incidentStatusFilter],
+    queryFn: () =>
+      getIntelligenceIncidents({
+        limit: 5,
+        minRisk: 1,
+        status: incidentStatusFilter === 'all' ? undefined : incidentStatusFilter,
+      }),
     refetchInterval: connected ? false : 10000,
     retry: false,
   })
-  const incidentRows = incidentsQuery.data?.incidents ?? []
+  const incidentRows = useMemo(() => incidentsQuery.data?.incidents ?? [], [incidentsQuery.data])
 
   const pinnedTraceIdSet = useMemo(() => new Set(pinnedTraceIds), [pinnedTraceIds])
   const visibleTraces = useMemo(() => {
@@ -906,6 +917,32 @@ export default function TracesPage() {
     },
   })
 
+  const incidentWorkflowMutation = useMutation({
+    mutationFn: ({
+      traceId,
+      status,
+      owner,
+    }: {
+      traceId: string
+      status?: IntelligenceIncidentStatus
+      owner?: string | null
+    }) => updateIntelligenceIncident(traceId, { status, owner }),
+    onMutate: ({ traceId }) => {
+      setPendingIncidentUpdates((prev) => ({ ...prev, [traceId]: true }))
+    },
+    onSuccess: (result) => {
+      setIncidentOwners((prev) => ({ ...prev, [result.trace_id]: result.owner ?? '' }))
+      queryClient.invalidateQueries({ queryKey: ['intelligence-incidents'] })
+    },
+    onSettled: (_result, _error, variables) => {
+      setPendingIncidentUpdates((prev) => {
+        const next = { ...prev }
+        delete next[variables.traceId]
+        return next
+      })
+    },
+  })
+
   const applyFilters = (nextFilters: FilterState) => {
     setSearch(nextFilters.search)
     setStatusFilter(nextFilters.statusFilter)
@@ -950,6 +987,24 @@ export default function TracesPage() {
       return
     }
     quickLabelMutation.mutate({ traceId, label })
+  }
+
+  const handleIncidentStatusChange = (traceId: string, status: IntelligenceIncidentStatus) => {
+    if (pendingIncidentUpdates[traceId]) {
+      return
+    }
+    incidentWorkflowMutation.mutate({ traceId, status })
+  }
+
+  const handleIncidentOwnerChange = (traceId: string, owner: string) => {
+    setIncidentOwners((prev) => ({ ...prev, [traceId]: owner }))
+  }
+
+  const handleIncidentOwnerSave = (traceId: string) => {
+    if (pendingIncidentUpdates[traceId]) {
+      return
+    }
+    incidentWorkflowMutation.mutate({ traceId, owner: incidentOwners[traceId] ?? '' })
   }
 
   const handleToggleTraceSelection = (traceId: string) => {
@@ -1023,6 +1078,26 @@ export default function TracesPage() {
     const visibleTraceIds = new Set(visibleTraces.map((trace) => trace.id))
     setSelectedTraceIds((prev) => prev.filter((traceId) => visibleTraceIds.has(traceId)))
   }, [visibleTraces])
+
+  useEffect(() => {
+    setIncidentOwners((prev) => {
+      let changed = false
+      const next = { ...prev }
+
+      incidentRows.forEach((incident) => {
+        if (pendingIncidentUpdates[incident.trace_id]) {
+          return
+        }
+        const ownerValue = incident.owner ?? ''
+        if (next[incident.trace_id] !== ownerValue) {
+          next[incident.trace_id] = ownerValue
+          changed = true
+        }
+      })
+
+      return changed ? next : prev
+    })
+  }, [incidentRows, pendingIncidentUpdates])
 
   if (isLoading) {
     return (
@@ -1217,7 +1292,20 @@ export default function TracesPage() {
       <div className="mb-4 bg-dark-900 rounded-lg border border-dark-700 p-4">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-medium text-muted-200">Incident Feed</h2>
-          {incidentsQuery.isFetching && <Loader2 className="h-4 w-4 animate-spin text-muted-500" />}
+          <div className="flex items-center gap-2">
+            <select
+              aria-label="Incident status filter"
+              value={incidentStatusFilter}
+              onChange={(e) => setIncidentStatusFilter(e.target.value as IncidentStatusFilter)}
+              className="bg-dark-800 border border-dark-700 rounded-lg px-2 py-1 text-xs text-muted-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            >
+              <option value="open">Open</option>
+              <option value="investigating">Investigating</option>
+              <option value="resolved">Resolved</option>
+              <option value="all">All</option>
+            </select>
+            {incidentsQuery.isFetching && <Loader2 className="h-4 w-4 animate-spin text-muted-500" />}
+          </div>
         </div>
         {incidentsQuery.isError && (
           <p className="text-xs text-amber-300">
@@ -1226,16 +1314,18 @@ export default function TracesPage() {
         )}
         {!incidentsQuery.isError && incidentRows.length === 0 && (
           <p className="text-xs text-muted-400">
-            No active high-risk regression incidents.
+            {incidentStatusFilter === 'all'
+              ? 'No high-risk regression incidents.'
+              : `No ${incidentStatusFilter} high-risk regression incidents.`}
           </p>
         )}
         {incidentRows.length > 0 && (
           <div className="space-y-2">
             {incidentRows.map((incident) => (
-                <div
-                  key={incident.trace_id}
-                  className="rounded-lg border border-dark-700 bg-dark-800 p-3 flex items-start justify-between gap-3"
-                >
+              <div
+                key={incident.trace_id}
+                className="rounded-lg border border-dark-700 bg-dark-800 p-3 flex items-start justify-between gap-3"
+              >
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <Link
@@ -1258,6 +1348,9 @@ export default function TracesPage() {
                       Next step: {incident.top_actions[0]}
                     </p>
                   )}
+                  <p className="mt-1 text-xs text-muted-500">
+                    Owner: {incident.owner || 'Unassigned'}
+                  </p>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     {incident.baseline_trace_id && (
                       <Link
@@ -1282,6 +1375,42 @@ export default function TracesPage() {
                       {pendingQuickLabels[incident.trace_id] ? 'Saving...' : 'Mark failure'}
                     </button>
                   </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <select
+                      aria-label={`Incident status for ${incident.trace_id}`}
+                      value={incident.incident_status}
+                      onChange={(e) =>
+                        handleIncidentStatusChange(incident.trace_id, e.target.value as IntelligenceIncidentStatus)
+                      }
+                      disabled={Boolean(pendingIncidentUpdates[incident.trace_id])}
+                      className="bg-dark-900 border border-dark-700 rounded-md px-2 py-1 text-xs text-muted-100 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50"
+                    >
+                      <option value="open">Open</option>
+                      <option value="investigating">Investigating</option>
+                      <option value="resolved">Resolved</option>
+                    </select>
+                    <input
+                      aria-label={`Incident owner for ${incident.trace_id}`}
+                      value={incidentOwners[incident.trace_id] ?? ''}
+                      onChange={(e) => handleIncidentOwnerChange(incident.trace_id, e.target.value)}
+                      placeholder="Owner"
+                      disabled={Boolean(pendingIncidentUpdates[incident.trace_id])}
+                      className="bg-dark-900 border border-dark-700 rounded-md px-2 py-1 text-xs text-muted-100 placeholder:text-muted-500 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleIncidentOwnerSave(incident.trace_id)}
+                      disabled={Boolean(pendingIncidentUpdates[incident.trace_id])}
+                      className={clsx(
+                        'rounded-md border px-2 py-1 text-xs transition-colors',
+                        pendingIncidentUpdates[incident.trace_id]
+                          ? 'border-dark-700 text-muted-500 cursor-not-allowed'
+                          : 'border-dark-600 text-muted-300 hover:text-muted-100'
+                      )}
+                    >
+                      Save owner
+                    </button>
+                  </div>
                 </div>
                 <div className="shrink-0 flex flex-col items-end gap-1">
                   <span
@@ -1297,6 +1426,9 @@ export default function TracesPage() {
                     )}
                   >
                     {incident.risk_level}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full text-xs capitalize bg-dark-700 text-muted-200">
+                    {incident.incident_status}
                   </span>
                   <span className="text-xs text-muted-400">
                     risk {incident.risk_score}

@@ -71,19 +71,6 @@ describe('TracesPage websocket security UX', () => {
         })
       }
 
-      if (url.includes('/curation/labels') && requestMethod === 'POST') {
-        const body = typeof init?.body === 'string' ? JSON.parse(init.body) : {}
-        return createJsonResponse({
-          trace_id: body.trace_id ?? 'trace-1',
-          label: body.label ?? null,
-          quality_score: null,
-          notes: null,
-          exported: false,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-      }
-
       if (url.includes('/traces/summary')) {
         return createJsonResponse({
           window_days: 7,
@@ -180,6 +167,9 @@ describe('TracesPage websocket security UX', () => {
   })
 
   it('renders incident feed entries from intelligence incidents endpoint', async () => {
+    let incidentStatus: 'open' | 'investigating' | 'resolved' = 'open'
+    let incidentOwner: string | null = null
+
     globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = resolveUrl(input)
       const requestMethod = init?.method ?? (input instanceof Request ? input.method : 'GET')
@@ -227,6 +217,35 @@ describe('TracesPage websocket security UX', () => {
         })
       }
 
+      if (url.includes('/intelligence/incidents/trace-incident-1') && requestMethod === 'PATCH') {
+        const body = typeof init?.body === 'string' ? JSON.parse(init.body) : {}
+        if (typeof body.status === 'string') {
+          incidentStatus = body.status
+        }
+        if (Object.prototype.hasOwnProperty.call(body, 'owner')) {
+          incidentOwner = typeof body.owner === 'string' && body.owner.trim() ? body.owner.trim() : null
+        }
+        return createJsonResponse({
+          trace_id: 'trace-incident-1',
+          trace_name: 'Tool timeout regression',
+          trace_status: 'error',
+          created_at: new Date().toISOString(),
+          baseline_trace_id: 'trace-baseline-1',
+          risk_score: 84,
+          risk_level: 'high',
+          signal_count: 2,
+          top_signal: 'Reliability regression',
+          top_actions: ['Fix newly introduced erroring spans before other optimizations.'],
+          incident_status: incidentStatus,
+          owner: incidentOwner,
+          opened_at: new Date().toISOString(),
+          investigating_at: incidentStatus !== 'open' ? new Date().toISOString() : null,
+          resolved_at: incidentStatus === 'resolved' ? new Date().toISOString() : null,
+          incident_updated_at: new Date().toISOString(),
+          curation: null,
+        })
+      }
+
       if (url.includes('/intelligence/incidents')) {
         return createJsonResponse({
           incidents: [
@@ -241,6 +260,12 @@ describe('TracesPage websocket security UX', () => {
               signal_count: 2,
               top_signal: 'Reliability regression',
               top_actions: ['Fix newly introduced erroring spans before other optimizations.'],
+              incident_status: incidentStatus,
+              owner: incidentOwner,
+              opened_at: new Date().toISOString(),
+              investigating_at: incidentStatus !== 'open' ? new Date().toISOString() : null,
+              resolved_at: incidentStatus === 'resolved' ? new Date().toISOString() : null,
+              incident_updated_at: new Date().toISOString(),
               curation: null,
             },
           ],
@@ -283,6 +308,37 @@ describe('TracesPage websocket security UX', () => {
 
     const compareLink = screen.getByRole('link', { name: 'Compare' })
     expect(compareLink.getAttribute('href')).toBe('/compare?traceA=trace-baseline-1&traceB=trace-incident-1')
+
+    fireEvent.change(screen.getByLabelText('Incident status for trace-incident-1'), {
+      target: { value: 'investigating' },
+    })
+    await waitFor(() => {
+      const calls = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls
+      const workflowCall = calls.find(([input, init]) => {
+        const requestUrl = resolveUrl(input as RequestInfo | URL)
+        return requestUrl.includes('/intelligence/incidents/trace-incident-1') && (init as RequestInit | undefined)?.method === 'PATCH'
+      })
+      expect(workflowCall).toBeDefined()
+      const body = JSON.parse(String((workflowCall?.[1] as RequestInit | undefined)?.body ?? '{}'))
+      expect(body.status).toBe('investigating')
+    })
+
+    fireEvent.change(screen.getByLabelText('Incident owner for trace-incident-1'), {
+      target: { value: 'oncall-sre' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save owner' }))
+    await waitFor(() => {
+      const calls = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls
+      const ownerCall = calls
+        .filter(([input, init]) => {
+          const requestUrl = resolveUrl(input as RequestInfo | URL)
+          return requestUrl.includes('/intelligence/incidents/trace-incident-1') && (init as RequestInit | undefined)?.method === 'PATCH'
+        })
+        .at(-1)
+      expect(ownerCall).toBeDefined()
+      const body = JSON.parse(String((ownerCall?.[1] as RequestInit | undefined)?.body ?? '{}'))
+      expect(body.owner).toBe('oncall-sre')
+    })
 
     fireEvent.click(screen.getByRole('button', { name: 'Mark failure' }))
     await waitFor(() => {

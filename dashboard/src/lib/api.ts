@@ -1092,6 +1092,8 @@ export interface IntelligenceStatusResponse {
   }
 }
 
+export type IntelligenceIncidentStatus = 'open' | 'investigating' | 'resolved'
+
 export interface IntelligenceIncident {
   trace_id: string
   trace_name: string
@@ -1103,6 +1105,12 @@ export interface IntelligenceIncident {
   signal_count: number
   top_signal: string | null
   top_actions: string[]
+  incident_status: IntelligenceIncidentStatus
+  owner: string | null
+  opened_at: string | null
+  investigating_at: string | null
+  resolved_at: string | null
+  incident_updated_at: string | null
   curation: {
     label: string | null
     quality_score: number | null
@@ -1151,12 +1159,29 @@ export async function getIntelligenceIncidents(options?: {
   limit?: number
   offset?: number
   minRisk?: number
+  status?: IntelligenceIncidentStatus
 }): Promise<IntelligenceIncidentsResponse> {
   const params = new URLSearchParams()
   params.set('limit', String(options?.limit ?? 20))
   params.set('offset', String(options?.offset ?? 0))
   params.set('min_risk', String(options?.minRisk ?? 1))
+  if (options?.status) {
+    params.set('status', options.status)
+  }
   return fetchApi(`/intelligence/incidents?${params}`)
+}
+
+export async function updateIntelligenceIncident(
+  traceId: string,
+  update: {
+    status?: IntelligenceIncidentStatus
+    owner?: string | null
+  }
+): Promise<IntelligenceIncident> {
+  return fetchApi(`/intelligence/incidents/${encodeURIComponent(traceId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(update),
+  })
 }
 
 export async function seedStoryMode(
