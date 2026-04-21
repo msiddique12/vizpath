@@ -1,5 +1,7 @@
 """Tests for asynchronous alert notification dispatcher."""
 
+from dataclasses import replace
+
 import app.alert_dispatcher as dispatcher
 from app.alert_dispatcher import AlertNotificationJob
 
@@ -49,3 +51,30 @@ def test_process_job_retries_and_records_success(monkeypatch):
 
     assert send_attempts["count"] == 2
     assert outcomes == [True]
+
+
+def test_post_webhook_json_formats_slack_payload(monkeypatch):
+    """Slack destination jobs should post Slack-compatible payloads."""
+
+    class _Response:
+        status_code = 200
+
+    captured: dict[str, object] = {}
+
+    def _fake_post(url, json, headers=None, timeout=None, follow_redirects=None, trust_env=None):
+        captured["url"] = url
+        captured["json"] = json
+        captured["headers"] = headers
+        return _Response()
+
+    monkeypatch.setattr(dispatcher, "validate_webhook_target_url", lambda url, **_kwargs: url)
+    monkeypatch.setattr(dispatcher.httpx, "post", _fake_post)
+
+    job = replace(_make_job(), destination_kind="slack_webhook")
+
+    assert dispatcher._post_webhook_json(job) is True
+    assert captured["url"] == "https://example.com/alerts"
+    payload = captured["json"]
+    assert isinstance(payload, dict)
+    assert "text" in payload
+    assert "blocks" in payload

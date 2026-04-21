@@ -317,7 +317,7 @@ export interface AlertEvaluationResponse {
 export interface AlertDestination {
   id: string
   name: string
-  kind: 'webhook'
+  kind: 'webhook' | 'slack_webhook'
   target_url: string
   is_active: boolean
   created_at: string
@@ -475,7 +475,7 @@ export async function getAlertDestinations(): Promise<AlertDestination[]> {
 
 export async function createAlertDestination(payload: {
   name: string
-  kind?: 'webhook'
+  kind?: 'webhook' | 'slack_webhook'
   target_url: string
   secret_token?: string
   is_active?: boolean
@@ -490,7 +490,7 @@ export async function updateAlertDestination(
   destinationId: string,
   payload: {
     name?: string
-    kind?: 'webhook'
+    kind?: 'webhook' | 'slack_webhook'
     target_url?: string
     secret_token?: string | null
     is_active?: boolean

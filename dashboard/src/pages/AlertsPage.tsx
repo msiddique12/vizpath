@@ -98,6 +98,7 @@ export default function AlertsPage() {
   const [cooldownMinutes, setCooldownMinutes] = useState('60')
 
   const [destinationName, setDestinationName] = useState('')
+  const [destinationKind, setDestinationKind] = useState<'webhook' | 'slack_webhook'>('webhook')
   const [destinationUrl, setDestinationUrl] = useState('')
   const [destinationToken, setDestinationToken] = useState('')
   const [eventTypeFilter, setEventTypeFilter] = useState<AlertEventType | 'all'>('all')
@@ -180,6 +181,7 @@ export default function AlertsPage() {
       queryClient.invalidateQueries({ queryKey: ['alerts-events'] })
       setActionStatus('Alert destination created.')
       setDestinationName('')
+      setDestinationKind('webhook')
       setDestinationUrl('')
       setDestinationToken('')
       setDestinationError(null)
@@ -323,7 +325,7 @@ export default function AlertsPage() {
 
     createDestinationMutation.mutate({
       name: destinationName.trim(),
-      kind: 'webhook',
+      kind: destinationKind,
       target_url: destinationUrl.trim(),
       secret_token: destinationToken.trim() || undefined,
       is_active: true,
@@ -591,10 +593,23 @@ export default function AlertsPage() {
             aria-label="Destination name"
             className="rounded-lg border border-dark-700 bg-dark-800 px-3 py-2 text-sm text-muted-100 placeholder:text-muted-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
           />
+          <select
+            value={destinationKind}
+            onChange={(event) => setDestinationKind(event.target.value as 'webhook' | 'slack_webhook')}
+            aria-label="Destination kind"
+            className="rounded-lg border border-dark-700 bg-dark-800 px-3 py-2 text-sm text-muted-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            <option value="webhook">Webhook (JSON)</option>
+            <option value="slack_webhook">Slack Webhook</option>
+          </select>
           <input
             value={destinationUrl}
             onChange={(event) => setDestinationUrl(event.target.value)}
-            placeholder="https://example.com/webhook"
+            placeholder={
+              destinationKind === 'slack_webhook'
+                ? 'https://hooks.slack.com/services/...'
+                : 'https://example.com/webhook'
+            }
             aria-label="Webhook URL"
             className="rounded-lg border border-dark-700 bg-dark-800 px-3 py-2 text-sm text-muted-100 placeholder:text-muted-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
           />
@@ -635,6 +650,9 @@ export default function AlertsPage() {
                 <div className="min-w-0">
                   <p className="text-sm text-muted-100">{destination.name}</p>
                   <p className="text-xs text-muted-400 truncate">{destination.target_url}</p>
+                  <p className="text-xs text-muted-500 mt-0.5">
+                    {destination.kind === 'slack_webhook' ? 'Slack webhook' : 'Webhook'}
+                  </p>
                 </div>
                 <div className="flex items-center gap-2">
                   <button

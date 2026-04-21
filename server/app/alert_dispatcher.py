@@ -58,22 +58,56 @@ def _post_webhook_json(job: AlertNotificationJob) -> bool:
     headers: dict[str, str] = {}
     if job.secret_token:
         headers["Authorization"] = f"Bearer {job.secret_token}"
+    summary = (
+        f"Vizpath alert breached: {job.rule_name} "
+        f"({job.metric} {job.operator} {job.threshold}, current={job.current_value})"
+    )
+    if job.destination_kind == "webhook":
+        body = {
+            "type": "alert_breach",
+            "generated_at": job.generated_at,
+            "project_id": job.project_id,
+            "rule": {
+                "id": job.rule_id,
+                "name": job.rule_name,
+                "metric": job.metric,
+                "operator": job.operator,
+                "threshold": job.threshold,
+            },
+            "current_value": job.current_value,
+        }
+    elif job.destination_kind == "slack_webhook":
+        body = {
+            "text": summary,
+            "blocks": [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"*{summary}*",
+                    },
+                },
+                {
+                    "type": "context",
+                    "elements": [
+                        {
+                            "type": "mrkdwn",
+                            "text": (
+                                f"project_id={job.project_id} • "
+                                f"generated_at={job.generated_at}"
+                            ),
+                        }
+                    ],
+                },
+            ],
+        }
+    else:
+        logger.warning("Unsupported alert destination kind: %s", job.destination_kind)
+        return False
     try:
         response = httpx.post(
             safe_target_url,
-            json={
-                "type": "alert_breach",
-                "generated_at": job.generated_at,
-                "project_id": job.project_id,
-                "rule": {
-                    "id": job.rule_id,
-                    "name": job.rule_name,
-                    "metric": job.metric,
-                    "operator": job.operator,
-                    "threshold": job.threshold,
-                },
-                "current_value": job.current_value,
-            },
+            json=body,
             headers=headers or None,
             timeout=5.0,
             follow_redirects=False,

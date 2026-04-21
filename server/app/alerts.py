@@ -41,7 +41,7 @@ ALERT_METRICS = (
     "budget_usage_percent",
 )
 ALERT_OPERATORS = ("gt", "gte", "lt", "lte")
-ALERT_DESTINATION_KINDS = ("webhook",)
+ALERT_DESTINATION_KINDS = ("webhook", "slack_webhook")
 ALERT_EVENT_TYPES = (
     "breach",
     "notification_queued",
@@ -303,13 +303,67 @@ def _post_webhook_json(
         return False
 
 
+def _slack_payload_from_alert_payload(payload: dict[str, object]) -> dict[str, object]:
+    rule = payload.get("rule")
+    rule_name = "unknown-rule"
+    metric = "metric"
+    operator = "op"
+    threshold = "?"
+    if isinstance(rule, dict):
+        rule_name = str(rule.get("name") or rule_name)
+        metric = str(rule.get("metric") or metric)
+        operator = str(rule.get("operator") or operator)
+        threshold = str(rule.get("threshold") or threshold)
+    current_value = str(payload.get("current_value") or "?")
+    generated_at = str(payload.get("generated_at") or "")
+    project_id = str(payload.get("project_id") or "")
+
+    summary = (
+        f"Vizpath alert breached: {rule_name} ({metric} {operator} {threshold}, "
+        f"current={current_value})"
+    )
+    return {
+        "text": summary,
+        "blocks": [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*{summary}*",
+                },
+            },
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": f"project_id={project_id} • generated_at={generated_at}",
+                    }
+                ],
+            },
+        ],
+    }
+
+
+def _payload_for_destination_kind(
+    destination_kind: str,
+    payload: dict[str, object],
+) -> dict[str, object] | None:
+    if destination_kind == "webhook":
+        return payload
+    if destination_kind == "slack_webhook":
+        return _slack_payload_from_alert_payload(payload)
+    return None
+
+
 def _notify_destinations(
     destinations: list[ProjectAlertDestination],
     payload: dict[str, object],
 ) -> list[AlertDestinationDeliveryResult]:
     results: list[AlertDestinationDeliveryResult] = []
     for destination in destinations:
-        if destination.kind != "webhook":
+        destination_payload = _payload_for_destination_kind(destination.kind, payload)
+        if destination_payload is None:
             results.append(
                 AlertDestinationDeliveryResult(destination=destination, delivered=False)
             )
@@ -330,7 +384,7 @@ def _notify_destinations(
                 destination=destination,
                 delivered=_post_webhook_json(
                     destination.target_url,
-                    payload,
+                    destination_payload,
                     secret_token,
                 ),
             )
@@ -671,12 +725,12 @@ def replay_failed_alert_event(
             delivered=False,
             message="Destination is inactive; enable it before replay.",
         )
-    if destination.kind != "webhook":
+    if destination.kind not in {"webhook", "slack_webhook"}:
         return AlertReplayResult(
             replayed=False,
             queued=False,
             delivered=False,
-            message="Only webhook destinations are replayable.",
+            message="Only webhook and Slack webhook destinations are replayable.",
         )
 
     rule = (

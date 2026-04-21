@@ -492,6 +492,64 @@ def test_alert_notify_async_enqueues_jobs(client, monkeypatch):
     assert len(queued_events.json()) >= 1
 
 
+def test_alert_notify_slack_destination_formats_payload(client, monkeypatch):
+    """Slack webhook destinations should receive Slack-compatible payloads."""
+    api_key = _create_project(client, "alerts-notify-slack")
+    headers = {"X-API-Key": api_key}
+
+    _ingest_trace_span(client, api_key=api_key, suffix="slack-err", status="error")
+    rule_response = client.post(
+        "/api/v1/projects/me/alerts",
+        headers=headers,
+        json={
+            "name": "Error rate >= 50%",
+            "metric": "error_rate_percent",
+            "operator": "gte",
+            "threshold": 50,
+            "window_days": 30,
+            "is_active": True,
+        },
+    )
+    assert rule_response.status_code == 201
+
+    destination_response = client.post(
+        "/api/v1/projects/me/alerts/destinations",
+        headers=headers,
+        json={
+            "name": "Slack destination",
+            "kind": "slack_webhook",
+            "target_url": "https://hooks.slack.com/services/T000/B000/XXXX",
+            "is_active": True,
+        },
+    )
+    assert destination_response.status_code == 201
+
+    delivered_payloads: list[tuple[str, dict[str, object], str | None]] = []
+
+    def _mock_post_webhook_json(target_url, payload, secret_token=None):
+        delivered_payloads.append((target_url, payload, secret_token))
+        return True
+
+    monkeypatch.setattr(alert_service, "_post_webhook_json", _mock_post_webhook_json)
+
+    evaluate_response = client.get(
+        "/api/v1/projects/me/alerts/evaluate",
+        headers=headers,
+        params={"persist": "true", "notify": "true"},
+    )
+    assert evaluate_response.status_code == 200
+    evaluate_payload = evaluate_response.json()
+    assert evaluate_payload["alert_count"] == 1
+    assert evaluate_payload["notifications_sent"] == 1
+
+    assert len(delivered_payloads) == 1
+    target_url, slack_payload, _secret = delivered_payloads[0]
+    assert target_url.startswith("https://hooks.slack.com/services/")
+    assert "text" in slack_payload
+    assert "Vizpath alert breached" in str(slack_payload["text"])
+    assert isinstance(slack_payload.get("blocks"), list)
+
+
 def test_alert_metrics_include_incident_and_budget_signals(client):
     """Alert evaluation should compute incident risk and budget pressure metrics."""
     api_key = _create_project(client, "alerts-incident-budget-metrics")
