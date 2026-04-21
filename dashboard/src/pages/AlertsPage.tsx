@@ -30,6 +30,31 @@ const METRIC_OPTIONS: Array<{ value: AlertMetric; label: string; help: string }>
   { value: 'trace_count', label: 'Trace Count', help: 'Total traces in window' },
   { value: 'total_tokens', label: 'Total Tokens', help: 'Total tokens in window' },
   { value: 'total_cost', label: 'Total Cost ($)', help: 'Total cost in window' },
+  {
+    value: 'active_incident_count',
+    label: 'Active Incidents',
+    help: 'Open/investigating regression incidents in the window',
+  },
+  {
+    value: 'max_incident_risk_score',
+    label: 'Max Incident Risk',
+    help: 'Highest regression risk score among active incidents',
+  },
+  {
+    value: 'budget_token_usage_percent',
+    label: 'Budget Token Usage (%)',
+    help: 'Current month token usage as a percent of configured budget',
+  },
+  {
+    value: 'budget_cost_usage_percent',
+    label: 'Budget Cost Usage (%)',
+    help: 'Current month cost usage as a percent of configured budget',
+  },
+  {
+    value: 'budget_usage_percent',
+    label: 'Budget Usage Max (%)',
+    help: 'Higher of token usage% and cost usage% for the current month',
+  },
 ]
 
 const OPERATOR_OPTIONS: Array<{ value: AlertOperator; label: string }> = [
@@ -671,6 +696,14 @@ export default function AlertsPage() {
                 </p>
                 <p className="text-xs text-muted-500 mt-1">
                   Avg duration {windowMetric.avg_duration_ms.toFixed(1)}ms
+                </p>
+                <p className="text-xs text-muted-500 mt-1">
+                  Incidents {windowMetric.active_incident_count} · max risk{' '}
+                  {windowMetric.max_incident_risk_score.toFixed(1)}
+                </p>
+                <p className="text-xs text-muted-500 mt-1">
+                  Budget token {windowMetric.budget_token_usage_percent.toFixed(1)}% · cost{' '}
+                  {windowMetric.budget_cost_usage_percent.toFixed(1)}%
                 </p>
               </div>
             ))}

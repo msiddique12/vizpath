@@ -79,6 +79,11 @@ describe('AlertsPage', () => {
               avg_cost: 0.02,
               total_tokens: 400,
               total_cost: 0.04,
+              active_incident_count: 1,
+              max_incident_risk_score: 84,
+              budget_token_usage_percent: 120,
+              budget_cost_usage_percent: 60,
+              budget_usage_percent: 120,
             },
           ],
         })

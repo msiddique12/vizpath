@@ -259,6 +259,11 @@ export type AlertMetric =
   | 'trace_count'
   | 'total_tokens'
   | 'total_cost'
+  | 'active_incident_count'
+  | 'max_incident_risk_score'
+  | 'budget_token_usage_percent'
+  | 'budget_cost_usage_percent'
+  | 'budget_usage_percent'
 export type AlertOperator = 'gt' | 'gte' | 'lt' | 'lte'
 
 export interface AlertRule {
@@ -292,6 +297,11 @@ export interface AlertWindowMetrics {
   avg_cost: number
   total_tokens: number
   total_cost: number
+  active_incident_count: number
+  max_incident_risk_score: number
+  budget_token_usage_percent: number
+  budget_cost_usage_percent: number
+  budget_usage_percent: number
 }
 
 export interface AlertEvaluationResponse {
