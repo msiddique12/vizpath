@@ -51,6 +51,40 @@ def _ingest_trace_span(
     assert response.status_code == 201
 
 
+def _ingest_finalized_trace_span(
+    client,
+    *,
+    api_key: str,
+    suffix: str,
+    status: str,
+    duration_ms: float,
+    tokens: int = 250,
+    cost: float = 0.01,
+) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    response = client.post(
+        "/api/v1/traces/spans/batch",
+        headers={"X-API-Key": api_key},
+        json=[
+            {
+                "span_id": f"span-alert-final-{suffix}",
+                "trace_id": f"trace-alert-final-{suffix}",
+                "name": "alert-test-final",
+                "status": status,
+                "start_time": now,
+                "end_time": now,
+                "duration_ms": duration_ms,
+                "tokens": tokens,
+                "cost": cost,
+                "trace_status": status,
+                "trace_end_time": now,
+                "trace_duration_ms": duration_ms,
+            }
+        ],
+    )
+    assert response.status_code == 201
+
+
 def test_alert_rule_crud_lifecycle(client):
     """Project owners can create, update, list, and delete alert rules."""
     api_key = _create_project(client, "alerts-crud")
@@ -456,6 +490,97 @@ def test_alert_notify_async_enqueues_jobs(client, monkeypatch):
     )
     assert queued_events.status_code == 200
     assert len(queued_events.json()) >= 1
+
+
+def test_alert_metrics_include_incident_and_budget_signals(client):
+    """Alert evaluation should compute incident risk and budget pressure metrics."""
+    api_key = _create_project(client, "alerts-incident-budget-metrics")
+    headers = {"X-API-Key": api_key}
+
+    budget_response = client.put(
+        "/api/v1/projects/me/budget",
+        headers=headers,
+        json={
+            "monthly_token_limit": 200,
+            "monthly_cost_limit": 0.02,
+            "alert_threshold_percent": 80,
+            "hard_stop_enabled": False,
+        },
+    )
+    assert budget_response.status_code == 200
+
+    _ingest_finalized_trace_span(
+        client,
+        api_key=api_key,
+        suffix="baseline",
+        status="success",
+        duration_ms=150.0,
+        tokens=120,
+        cost=0.01,
+    )
+    _ingest_finalized_trace_span(
+        client,
+        api_key=api_key,
+        suffix="candidate",
+        status="error",
+        duration_ms=1900.0,
+        tokens=160,
+        cost=0.015,
+    )
+
+    for payload in (
+        {
+            "name": "Active incidents >= 1",
+            "metric": "active_incident_count",
+            "operator": "gte",
+            "threshold": 1,
+            "window_days": 30,
+            "is_active": True,
+        },
+        {
+            "name": "Risk score >= 1",
+            "metric": "max_incident_risk_score",
+            "operator": "gte",
+            "threshold": 1,
+            "window_days": 30,
+            "is_active": True,
+        },
+        {
+            "name": "Budget pressure >= 100%",
+            "metric": "budget_usage_percent",
+            "operator": "gte",
+            "threshold": 100,
+            "window_days": 30,
+            "is_active": True,
+        },
+    ):
+        create_rule = client.post(
+            "/api/v1/projects/me/alerts",
+            headers=headers,
+            json=payload,
+        )
+        assert create_rule.status_code == 201
+
+    evaluate_response = client.get(
+        "/api/v1/projects/me/alerts/evaluate",
+        headers=headers,
+    )
+    assert evaluate_response.status_code == 200
+    evaluation = evaluate_response.json()
+    assert evaluation["alert_count"] == 3
+
+    rule_by_name = {item["name"]: item for item in evaluation["rules"]}
+    assert rule_by_name["Active incidents >= 1"]["breached"] is True
+    assert rule_by_name["Active incidents >= 1"]["current_value"] >= 1.0
+    assert rule_by_name["Risk score >= 1"]["breached"] is True
+    assert rule_by_name["Risk score >= 1"]["current_value"] >= 1.0
+    assert rule_by_name["Budget pressure >= 100%"]["breached"] is True
+    assert rule_by_name["Budget pressure >= 100%"]["current_value"] >= 100.0
+
+    window_metrics = evaluation["window_metrics"][0]
+    assert window_metrics["active_incident_count"] >= 1
+    assert window_metrics["max_incident_risk_score"] >= 1.0
+    assert window_metrics["budget_usage_percent"] >= 100.0
 
 
 def test_alert_events_endpoint_lists_and_filters_event_history(client, monkeypatch):

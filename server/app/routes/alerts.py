@@ -115,6 +115,11 @@ class AlertWindowMetricsResponse(BaseModel):
     avg_cost: float
     total_tokens: int
     total_cost: float
+    active_incident_count: int
+    max_incident_risk_score: float
+    budget_token_usage_percent: float
+    budget_cost_usage_percent: float
+    budget_usage_percent: float
 
 
 class AlertEvaluationResponse(BaseModel):
@@ -340,6 +345,11 @@ def _to_window_metrics_response(metrics: AlertWindowMetrics) -> AlertWindowMetri
         avg_cost=metrics.avg_cost,
         total_tokens=metrics.total_tokens,
         total_cost=metrics.total_cost,
+        active_incident_count=metrics.active_incident_count,
+        max_incident_risk_score=metrics.max_incident_risk_score,
+        budget_token_usage_percent=metrics.budget_token_usage_percent,
+        budget_cost_usage_percent=metrics.budget_cost_usage_percent,
+        budget_usage_percent=metrics.budget_usage_percent,
     )
 
 

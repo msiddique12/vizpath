@@ -12,6 +12,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.alert_dispatcher import AlertNotificationJob, enqueue_alert_notification_job
+from app.budgeting import get_month_window, get_project_budget, get_project_month_usage
 from app.config import settings
 from app.models import (
     Project,
@@ -33,6 +34,11 @@ ALERT_METRICS = (
     "trace_count",
     "total_tokens",
     "total_cost",
+    "active_incident_count",
+    "max_incident_risk_score",
+    "budget_token_usage_percent",
+    "budget_cost_usage_percent",
+    "budget_usage_percent",
 )
 ALERT_OPERATORS = ("gt", "gte", "lt", "lte")
 ALERT_DESTINATION_KINDS = ("webhook",)
@@ -58,6 +64,11 @@ class AlertWindowMetrics:
     avg_cost: float
     total_tokens: int
     total_cost: float
+    active_incident_count: int
+    max_incident_risk_score: float
+    budget_token_usage_percent: float
+    budget_cost_usage_percent: float
+    budget_usage_percent: float
 
 
 @dataclass
@@ -167,6 +178,38 @@ def compute_window_metrics(db: Session, project_id: UUID, window_days: int) -> A
     avg_tokens = (sum(tokens) / len(tokens)) if tokens else 0.0
     avg_cost = (sum(costs) / len(costs)) if costs else 0.0
     error_rate_percent = (error_trace_count / trace_count) * 100 if trace_count else 0.0
+    active_incident_count = 0
+    max_incident_risk_score = 0.0
+    for trace in traces:
+        metadata = trace.trace_metadata if isinstance(trace.trace_metadata, dict) else {}
+        guardrail = metadata.get("regression_guardrail")
+        if not isinstance(guardrail, dict):
+            continue
+        if guardrail.get("status") != "risk_detected":
+            continue
+        workflow = guardrail.get("workflow")
+        workflow_status = None
+        if isinstance(workflow, dict):
+            status_value = workflow.get("status")
+            if isinstance(status_value, str):
+                workflow_status = status_value.strip().lower()
+        if workflow_status == "resolved":
+            continue
+        risk_score = float(guardrail.get("risk_score") or 0.0)
+        active_incident_count += 1
+        if risk_score > max_incident_risk_score:
+            max_incident_risk_score = risk_score
+
+    budget = get_project_budget(db, project_id)
+    month_start, month_end = get_month_window()
+    tokens_used, cost_used = get_project_month_usage(db, project_id, month_start, month_end)
+    budget_token_usage_percent = 0.0
+    budget_cost_usage_percent = 0.0
+    if budget and budget.monthly_token_limit:
+        budget_token_usage_percent = (tokens_used / float(budget.monthly_token_limit)) * 100.0
+    if budget and budget.monthly_cost_limit:
+        budget_cost_usage_percent = (cost_used / float(budget.monthly_cost_limit)) * 100.0
+    budget_usage_percent = max(budget_token_usage_percent, budget_cost_usage_percent)
 
     return AlertWindowMetrics(
         window_days=window_days,
@@ -177,6 +220,11 @@ def compute_window_metrics(db: Session, project_id: UUID, window_days: int) -> A
         avg_cost=avg_cost,
         total_tokens=sum(tokens),
         total_cost=sum(costs),
+        active_incident_count=active_incident_count,
+        max_incident_risk_score=max_incident_risk_score,
+        budget_token_usage_percent=budget_token_usage_percent,
+        budget_cost_usage_percent=budget_cost_usage_percent,
+        budget_usage_percent=budget_usage_percent,
     )
 
 
@@ -196,6 +244,16 @@ def metric_value(metrics: AlertWindowMetrics, metric: str) -> float:
         return float(metrics.avg_tokens)
     if metric == "avg_cost":
         return float(metrics.avg_cost)
+    if metric == "active_incident_count":
+        return float(metrics.active_incident_count)
+    if metric == "max_incident_risk_score":
+        return float(metrics.max_incident_risk_score)
+    if metric == "budget_token_usage_percent":
+        return float(metrics.budget_token_usage_percent)
+    if metric == "budget_cost_usage_percent":
+        return float(metrics.budget_cost_usage_percent)
+    if metric == "budget_usage_percent":
+        return float(metrics.budget_usage_percent)
     raise ValueError(f"Unsupported metric: {metric}")
 
 
