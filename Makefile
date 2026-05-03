@@ -1,4 +1,4 @@
-.PHONY: help install install-dev lint format typecheck test test-sdk test-server test-dashboard build bootstrap bootstrap-env bootstrap-deps check-env ci-check ci test-cov build-sdk build-dashboard db-migrate db-revision clean
+.PHONY: help install install-dev lint format typecheck test test-sdk test-server test-dashboard build bootstrap bootstrap-env bootstrap-deps check-env ci-check ci test-cov build-sdk build-dashboard db-migrate db-revision clean quickstart-compose
 
 # Default target
 help:
@@ -33,6 +33,7 @@ help:
 	@echo "Build:"
 	@echo "  make build        Build all packages"
 	@echo "  make clean        Remove build artifacts"
+	@echo "  make quickstart-compose  Start full Docker stack + seed demo traces"
 
 # Bootstrap for first-time contributors / OSS users
 bootstrap: bootstrap-env bootstrap-deps
@@ -166,3 +167,6 @@ clean:
 	find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
 	rm -rf dashboard/dist 2>/dev/null || true
 	rm -rf sdk/dist 2>/dev/null || true
+
+quickstart-compose:
+	./scripts/quickstart_compose.sh

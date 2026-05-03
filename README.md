@@ -27,15 +27,34 @@ vizpath is an open-source observability and intelligence platform for AI agents.
 
 ## Quick Start
 
-### One-Command Demo
+### Zero-Install Quickstart (Recommended)
 
 ```bash
 git clone <your-vizpath-repo-url>
 cd vizpath
-export NVIDIA_API_KEY="nvapi-..."  # Set this before demo.sh for intelligence features
-./demo.sh                          # Auto-installs deps and starts everything
+./scripts/quickstart_compose.sh
 # Dashboard: http://localhost:3000
 # API: http://localhost:8000
+```
+
+What this does:
+- Starts `postgres`, `redis`, `server`, and `dashboard` with Docker Compose
+- Creates a demo project API key
+- Seeds deterministic story-mode traces for an immediate dashboard walkthrough
+
+Stop services:
+
+```bash
+docker compose down
+```
+
+### One-Command Local Dev Demo (Non-Docker Server/Dashboard)
+
+```bash
+git clone <your-vizpath-repo-url>
+cd vizpath
+export NVIDIA_API_KEY="nvapi-..."  # Optional: enables LLM intelligence endpoints
+./demo.sh                          # Auto-installs deps and starts local services
 ```
 
 ### Open-Source Contributor Setup
