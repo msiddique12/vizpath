@@ -39,6 +39,7 @@ cd vizpath
 
 What this does:
 - Starts `postgres`, `redis`, `server`, and `dashboard` with Docker Compose
+- Runs `/api/v1/demo/preflight` and fails fast with actionable fix commands if setup is incomplete
 - Creates a demo project API key
 - Seeds deterministic story-mode traces for an immediate dashboard walkthrough
 
