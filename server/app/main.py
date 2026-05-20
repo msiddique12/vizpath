@@ -20,7 +20,7 @@ from app.alert_scheduler import run_alert_scheduler
 from app.config import settings
 from app.database import check_db_connection, engine, init_db
 from app.rate_limit import rate_limit_middleware
-from app.routes import alerts, curation, demo, intelligence, projects, traces, ws
+from app.routes import alerts, curation, demo, intelligence, product, projects, traces, ws
 from app.security import (
     build_error_response,
     redact_headers,
@@ -106,6 +106,7 @@ app.include_router(projects.router, prefix="/api/v1")
 app.include_router(alerts.router, prefix="/api/v1")
 app.include_router(curation.router, prefix="/api/v1")
 app.include_router(intelligence.router, prefix="/api/v1")
+app.include_router(product.router, prefix="/api/v1")
 app.include_router(demo.router, prefix="/api/v1")
 app.include_router(ws.router)
 
