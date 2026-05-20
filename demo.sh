@@ -67,7 +67,7 @@ if ! "$PYTHON_BIN" -c "import vizpath" 2>/dev/null; then
 fi
 
 # Check and install server dependencies (includes uvicorn)
-if ! "$PYTHON_BIN" -c "import uvicorn, fastapi, sqlalchemy, redis, pydantic_settings" 2>/dev/null; then
+if ! "$PYTHON_BIN" -c "import uvicorn, fastapi, sqlalchemy, redis, pydantic_settings; from cryptography.fernet import Fernet" 2>/dev/null; then
     echo -e "${BLUE}[Setup]${NC} Installing server dependencies..."
     "$PYTHON_BIN" -m pip install -q -e "$SCRIPT_DIR/server[dev]"
 fi
@@ -77,6 +77,13 @@ if [ ! -d "$SCRIPT_DIR/dashboard/node_modules" ]; then
     echo -e "${BLUE}[Setup]${NC} Installing dashboard dependencies..."
     (cd "$SCRIPT_DIR/dashboard" && npm install --silent)
 fi
+
+# Catch missing Python server dependencies before starting long-running processes.
+echo -e "${BLUE}[Setup]${NC} Verifying server imports..."
+(cd "$SCRIPT_DIR/server" && \
+DATABASE_URL=postgresql://vizpath:vizpath@localhost:${POSTGRES_HOST_PORT:-5433}/vizpath \
+REDIS_URL=redis://localhost:${REDIS_HOST_PORT:-6380} \
+"$PYTHON_BIN" -c "import app.main")
 
 # ============================================
 # Start services
@@ -106,10 +113,11 @@ fi
 # Start server in background
 echo -e "${BLUE}[3/3]${NC} Starting services..."
 cd "$SCRIPT_DIR/server"
-DATABASE_URL=postgresql://vizpath:vizpath@localhost:5432/vizpath \
-REDIS_URL=redis://localhost:6379 \
+DATABASE_URL=postgresql://vizpath:vizpath@localhost:${POSTGRES_HOST_PORT:-5433}/vizpath \
+REDIS_URL=redis://localhost:${REDIS_HOST_PORT:-6380} \
+ALLOW_UNAUTHENTICATED_DEV_FALLBACK=true \
 NVIDIA_LLM_MODEL=nvidia/llama-3.3-nemotron-super-49b-v1.5 \
-uvicorn app.main:app --reload --port 8000 &
+"$PYTHON_BIN" -m uvicorn app.main:app --reload --port 8000 &
 SERVER_PID=$!
 cd "$SCRIPT_DIR"
 
@@ -139,6 +147,15 @@ done
 if ! curl -sf "http://localhost:8000/health" > /dev/null 2>&1; then
     echo -e "${YELLOW}Error: API health check failed (http://localhost:8000/health).${NC}"
     exit 1
+fi
+
+if [ "${VIZPATH_SEED_STORY_MODE:-true}" != "false" ]; then
+    echo -e "${BLUE}[Demo]${NC} Seeding story-mode traces..."
+    if ! curl -sf -X POST "http://localhost:8000/api/v1/demo/story-mode" \
+        -H "Content-Type: application/json" \
+        -d '{"scenario":"agent_regression"}' > /dev/null; then
+        echo -e "${YELLOW}Warning: Could not seed story-mode traces. The app is still running.${NC}"
+    fi
 fi
 
 echo ""
