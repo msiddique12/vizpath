@@ -1,4 +1,4 @@
-import { TraceListResponse, TraceDetailResponse, Span } from './types'
+import { Trace, TraceListResponse, TraceDetailResponse, Span } from './types'
 import { getEffectiveApiKey } from './apiKey'
 
 const API_BASE = (() => {
@@ -648,6 +648,185 @@ export async function exportCuratedTraces(data: {
   include_input_output?: boolean
 }): Promise<{ format: string; count: number; traces: unknown[] }> {
   return fetchApi('/curation/export', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+// Product APIs
+
+export interface AgentScorecard {
+  window_days: number
+  trace_count: number
+  success_count: number
+  error_count: number
+  running_count: number
+  reliability_score: number
+  p50_duration_ms: number | null
+  p95_duration_ms: number | null
+  total_tokens: number
+  total_cost: number
+  avg_tokens_per_trace: number | null
+  avg_cost_per_trace: number | null
+  tool_success_rate: number | null
+  llm_call_count: number
+  tool_call_count: number
+}
+
+export interface ToolAnalyticsEntry {
+  name: string
+  call_count: number
+  success_count: number
+  error_count: number
+  success_rate: number
+  avg_duration_ms: number | null
+  total_tokens: number
+  total_cost: number
+}
+
+export interface ToolAnalyticsResponse {
+  window_days: number
+  tool_count: number
+  tools: ToolAnalyticsEntry[]
+  generated_at: string
+}
+
+export type DatasetFormat = 'chat' | 'tool_calls' | 'preference'
+
+export interface DatasetBuildResponse {
+  format: DatasetFormat
+  record_count: number
+  skipped_count: number
+  records: Array<Record<string, unknown>>
+  skipped: Array<{ trace_id: string; reason: string }>
+  generated_at: string
+}
+
+export type EvalAssertionProfile = 'balanced' | 'strict' | 'latency' | 'cost' | 'tooling'
+
+export interface EvalSuiteResponse {
+  name: string
+  assertion_profile: EvalAssertionProfile
+  case_count: number
+  cases: Array<Record<string, unknown>>
+  generated_at: string
+}
+
+export interface TraceSearchResult {
+  trace: Trace
+  score: number
+  matched_terms: string[]
+  matched_spans: Array<{
+    span_id: string
+    name: string
+    span_type: string
+    matched_terms: string[]
+  }>
+}
+
+export interface TraceSearchResponse {
+  query: string
+  result_count: number
+  results: TraceSearchResult[]
+  generated_at: string
+}
+
+export type GuardrailMetric =
+  | 'total_cost'
+  | 'total_tokens'
+  | 'duration_ms'
+  | 'error_count'
+  | 'llm_calls'
+  | 'tool_calls'
+  | 'span_count'
+export type GuardrailOperator = 'gt' | 'gte' | 'lt' | 'lte' | 'eq'
+
+export interface GuardrailPolicy {
+  id: string
+  name: string
+  metric: GuardrailMetric
+  operator: GuardrailOperator
+  threshold: number
+  severity: 'low' | 'medium' | 'high' | 'critical'
+}
+
+export interface GuardrailEvaluationResponse {
+  trace_count: number
+  policy_count: number
+  breach_count: number
+  results: Array<{
+    trace_id: string
+    trace_name: string
+    status: string
+    passed: boolean
+    metrics: Record<string, number>
+    policies: Array<{
+      policy_id: string
+      name: string
+      metric: GuardrailMetric
+      operator: GuardrailOperator
+      threshold: number
+      current_value: number
+      passed: boolean
+      severity: string
+    }>
+  }>
+  generated_at: string
+}
+
+export async function getAgentScorecard(windowDays = 7): Promise<AgentScorecard> {
+  return fetchApi(`/analytics/scorecard?window_days=${windowDays}`)
+}
+
+export async function getToolAnalytics(windowDays = 7): Promise<ToolAnalyticsResponse> {
+  return fetchApi(`/analytics/tools?window_days=${windowDays}`)
+}
+
+export async function buildDataset(data: {
+  trace_ids: string[]
+  format: DatasetFormat
+  include_failed?: boolean
+  min_quality_score?: number
+}): Promise<DatasetBuildResponse> {
+  return fetchApi('/datasets/build', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function buildEvalSuite(data: {
+  trace_ids: string[]
+  name: string
+  assertion_profile: EvalAssertionProfile
+}): Promise<EvalSuiteResponse> {
+  return fetchApi('/evals/suite', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function searchTraces(data: {
+  query: string
+  limit?: number
+  include_spans?: boolean
+}): Promise<TraceSearchResponse> {
+  return fetchApi('/search/traces', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function getDefaultGuardrails(): Promise<{ policies: GuardrailPolicy[] }> {
+  return fetchApi('/guardrails/defaults')
+}
+
+export async function evaluateGuardrails(data: {
+  trace_id?: string
+  policies?: GuardrailPolicy[]
+  window_days?: number
+  limit?: number
+}): Promise<GuardrailEvaluationResponse> {
+  return fetchApi('/guardrails/evaluate', {
     method: 'POST',
     body: JSON.stringify(data),
   })
