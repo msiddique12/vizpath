@@ -41,6 +41,12 @@ def test_trace_retention_must_be_positive():
     assert "TRACE_RETENTION_DAYS must be at least 1" in str(exc.value)
 
 
+def test_trace_retention_sweep_interval_must_be_positive():
+    with pytest.raises(ValidationError) as exc:
+        Settings(**BASE_SETTINGS, TRACE_RETENTION_SWEEP_INTERVAL_SECONDS=0)
+    assert "TRACE_RETENTION_SWEEP_INTERVAL_SECONDS must be at least 1" in str(exc.value)
+
+
 def test_burst_multiplier_must_be_positive():
     with pytest.raises(ValidationError) as exc:
         Settings(**BASE_SETTINGS, RATE_LIMIT_BURST_MULTIPLIER=0.0)

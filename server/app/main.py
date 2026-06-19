@@ -20,6 +20,7 @@ from app.alert_scheduler import run_alert_scheduler
 from app.config import settings
 from app.database import check_db_connection, engine, init_db
 from app.rate_limit import rate_limit_middleware
+from app.retention import run_trace_retention_sweeper
 from app.routes import alerts, curation, demo, intelligence, product, projects, traces, ws
 from app.security import (
     build_error_response,
@@ -42,6 +43,8 @@ async def lifespan(app: FastAPI):
     logger.info("vizpath server starting...")
     alert_scheduler_task: asyncio.Task[None] | None = None
     alert_scheduler_stop_event = asyncio.Event()
+    trace_retention_task: asyncio.Task[None] | None = None
+    trace_retention_stop_event = asyncio.Event()
 
     try:
         init_db()
@@ -60,6 +63,16 @@ async def lifespan(app: FastAPI):
             settings.alert_scheduler_notify,
         )
 
+    if settings.trace_retention_enabled:
+        trace_retention_task = asyncio.create_task(
+            run_trace_retention_sweeper(trace_retention_stop_event)
+        )
+        logger.info(
+            "Trace retention sweeper started: retention_days=%d interval_seconds=%d",
+            settings.trace_retention_days,
+            settings.trace_retention_sweep_interval_seconds,
+        )
+
     start_alert_notification_dispatcher()
 
     yield
@@ -74,6 +87,15 @@ async def lifespan(app: FastAPI):
             logger.warning("Alert scheduler shutdown timed out; task cancelled")
         else:
             logger.info("Alert scheduler stopped")
+    if trace_retention_task is not None:
+        trace_retention_stop_event.set()
+        try:
+            await asyncio.wait_for(trace_retention_task, timeout=5.0)
+        except asyncio.TimeoutError:
+            trace_retention_task.cancel()
+            logger.warning("Trace retention shutdown timed out; task cancelled")
+        else:
+            logger.info("Trace retention sweeper stopped")
     stop_alert_notification_dispatcher()
     engine.dispose()
     logger.info("Database connections closed")

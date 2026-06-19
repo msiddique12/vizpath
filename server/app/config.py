@@ -68,6 +68,11 @@ class Settings(BaseSettings):
     max_request_body_bytes: int = Field(default=1_048_576, alias="MAX_REQUEST_BODY_BYTES")
 
     trace_retention_days: int = Field(default=7, alias="TRACE_RETENTION_DAYS")
+    trace_retention_enabled: bool = Field(default=True, alias="TRACE_RETENTION_ENABLED")
+    trace_retention_sweep_interval_seconds: int = Field(
+        default=3600,
+        alias="TRACE_RETENTION_SWEEP_INTERVAL_SECONDS",
+    )
     alert_scheduler_enabled: bool = Field(default=False, alias="ALERT_SCHEDULER_ENABLED")
     alert_scheduler_interval_seconds: int = Field(
         default=300,
@@ -168,6 +173,13 @@ class Settings(BaseSettings):
     def validate_trace_retention_days(cls, v: int) -> int:
         if v < 1:
             raise ValueError("TRACE_RETENTION_DAYS must be at least 1")
+        return v
+
+    @field_validator("trace_retention_sweep_interval_seconds")
+    @classmethod
+    def validate_trace_retention_sweep_interval_seconds(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("TRACE_RETENTION_SWEEP_INTERVAL_SECONDS must be at least 1")
         return v
 
     @field_validator("rate_limit_burst_multiplier")
