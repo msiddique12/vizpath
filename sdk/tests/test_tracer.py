@@ -1,6 +1,8 @@
 """Tests for Tracer class."""
 
 
+from unittest.mock import MagicMock
+
 import pytest
 
 from vizpath.config import Config
@@ -56,6 +58,22 @@ class TestTracer:
 
         assert trace._context._metadata["user_id"] == "123"
         assert trace._context._metadata["version"] == "1.0"
+
+    def test_trace_end_reemits_ended_spans_with_final_trace_state(self):
+        tracer = Tracer(api_key="test-key")
+        tracer._client.send = MagicMock()
+
+        with tracer.trace("test-task") as trace:
+            with trace.span("step-1") as span:
+                span.set_output({"ok": True})
+            first_payload = tracer._client.send.call_args_list[0].args[0]
+            assert first_payload.trace_status == SpanStatus.RUNNING
+
+        assert tracer._client.send.call_count == 2
+        final_payload = tracer._client.send.call_args_list[-1].args[0]
+        assert final_payload.span_id == first_payload.span_id
+        assert final_payload.trace_status == SpanStatus.SUCCESS
+        assert final_payload.trace_end_time is not None
 
     def test_trace_error_propagation(self):
         tracer = Tracer(api_key="test-key")

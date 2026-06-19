@@ -137,6 +137,10 @@ class Trace:
             has_errors = any(s._status == SpanStatus.ERROR for s in self._context._spans)
             self._context._status = SpanStatus.ERROR if has_errors else SpanStatus.SUCCESS
 
+        for span in self._context._spans:
+            if span._ended:
+                self._context._client.send(span.to_data())
+
     def __enter__(self) -> Trace:
         return self
 

@@ -166,7 +166,22 @@ class SpanResponse(BaseModel):
 
 def get_or_create_trace(db: Session, trace_id: str, project_id: Any, span: SpanCreate) -> Trace:
     """Get existing trace or create a new one."""
-    trace = db.query(Trace).filter(Trace.id == trace_id).first()
+    trace = (
+        db.query(Trace)
+        .filter(Trace.id == trace_id, Trace.project_id == project_id)
+        .first()
+    )
+    foreign_trace = (
+        db.query(Trace.id)
+        .filter(Trace.id == trace_id, Trace.project_id != project_id)
+        .first()
+    )
+    if foreign_trace:
+        raise HTTPException(
+            status_code=409,
+            detail="Trace ID already exists for another project.",
+        )
+
     trace_name = (
         span.trace_name
         if span.trace_name
@@ -203,6 +218,59 @@ def get_or_create_trace(db: Session, trace_id: str, project_id: Any, span: SpanC
         trace.status = span.trace_status
 
     return trace
+
+
+def _upsert_span(db: Session, project_id: Any, span_data: SpanCreate) -> bool:
+    """Insert a span or update the same project's existing span idempotently."""
+    existing = db.query(Span).filter(Span.id == span_data.span_id).first()
+    if existing is None:
+        span = Span(
+            id=span_data.span_id,
+            trace_id=span_data.trace_id,
+            parent_id=span_data.parent_id if span_data.parent_id else None,
+            name=span_data.name,
+            span_type=span_data.span_type,
+            status=span_data.status,
+            start_time=span_data.start_time,
+            end_time=span_data.end_time,
+            duration_ms=span_data.duration_ms,
+            attributes=span_data.attributes,
+            events=span_data.events,
+            input=span_data.input,
+            output=span_data.output,
+            error=span_data.error,
+            tokens=span_data.tokens,
+            cost=span_data.cost,
+        )
+        db.add(span)
+        return True
+
+    trace = (
+        db.query(Trace)
+        .filter(Trace.id == existing.trace_id, Trace.project_id == project_id)
+        .first()
+    )
+    if trace is None or existing.trace_id != span_data.trace_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Span ID already exists for another trace or project.",
+        )
+
+    existing.parent_id = span_data.parent_id if span_data.parent_id else None
+    existing.name = span_data.name
+    existing.span_type = span_data.span_type
+    existing.status = span_data.status
+    existing.start_time = span_data.start_time
+    existing.end_time = span_data.end_time
+    existing.duration_ms = span_data.duration_ms
+    existing.attributes = span_data.attributes
+    existing.events = span_data.events
+    existing.input = span_data.input
+    existing.output = span_data.output
+    existing.error = span_data.error
+    existing.tokens = span_data.tokens
+    existing.cost = span_data.cost
+    return False
 
 
 def _topological_sort_spans(spans: list[SpanCreate]) -> list[SpanCreate]:
@@ -438,26 +506,7 @@ async def ingest_spans(
     for span_data in sorted_payload:
         trace = get_or_create_trace(db, span_data.trace_id, project.id, span_data)
         traces_updated.add(trace.id)
-
-        span = Span(
-            id=span_data.span_id,
-            trace_id=span_data.trace_id,
-            parent_id=span_data.parent_id if span_data.parent_id else None,
-            name=span_data.name,
-            span_type=span_data.span_type,
-            status=span_data.status,
-            start_time=span_data.start_time,
-            end_time=span_data.end_time,
-            duration_ms=span_data.duration_ms,
-            attributes=span_data.attributes,
-            events=span_data.events,
-            input=span_data.input,
-            output=span_data.output,
-            error=span_data.error,
-            tokens=span_data.tokens,
-            cost=span_data.cost,
-        )
-        db.add(span)
+        _upsert_span(db, project.id, span_data)
 
     # Ensure newly added spans are visible to aggregate queries below.
     db.flush()
@@ -465,7 +514,12 @@ async def ingest_spans(
     for trace_id in traces_updated:
         trace = db.query(Trace).filter(Trace.id == trace_id).first()
         if trace:
-            trace_spans = db.query(Span).filter(Span.trace_id == trace_id).all()
+            trace_spans = (
+                db.query(Span)
+                .join(Trace, Trace.id == Span.trace_id)
+                .filter(Span.trace_id == trace_id, Trace.project_id == project.id)
+                .all()
+            )
             stats = (
                 db.query(
                     func.count(Span.id).label("count"),
@@ -474,7 +528,8 @@ async def ingest_spans(
                     func.sum(case((Span.status == "error", 1), else_=0)).label("errors"),
                     func.max(Span.end_time).label("latest_end"),
                 )
-                .filter(Span.trace_id == trace_id)
+                .join(Trace, Trace.id == Span.trace_id)
+                .filter(Span.trace_id == trace_id, Trace.project_id == project.id)
                 .first()
             )
             trace.span_count = stats.count or 0
@@ -492,7 +547,12 @@ async def ingest_spans(
             # Update trace status based on span statuses
             has_running = (
                 db.query(Span.id)
-                .filter(Span.trace_id == trace_id, Span.status == "running")
+                .join(Trace, Trace.id == Span.trace_id)
+                .filter(
+                    Span.trace_id == trace_id,
+                    Span.status == "running",
+                    Trace.project_id == project.id,
+                )
                 .first()
             ) is not None
             if has_running:

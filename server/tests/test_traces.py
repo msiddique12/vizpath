@@ -247,6 +247,67 @@ class TestTraceIngestion:
         assert response.status_code == 201
         assert response.json()["ingested"] == 1
 
+    def test_duplicate_span_updates_trace_metadata_and_final_status(self, client):
+        now = datetime.now(timezone.utc).isoformat()
+        initial = [
+            {
+                "span_id": "span-finalize-1",
+                "trace_id": "trace-finalize-1",
+                "name": "step",
+                "status": "success",
+                "start_time": now,
+                "trace_name": "finalize-test",
+                "trace_status": "running",
+                "trace_metadata": {"phase": "initial"},
+            }
+        ]
+        response = client.post("/api/v1/traces/spans/batch", json=initial)
+        assert response.status_code == 201
+
+        final = [{**initial[0], "trace_status": "success", "trace_metadata": {"phase": "final"}}]
+        response = client.post("/api/v1/traces/spans/batch", json=final)
+        assert response.status_code == 201
+        assert response.json()["ingested"] == 1
+
+        detail = client.get("/api/v1/traces/trace-finalize-1")
+        assert detail.status_code == 200
+        assert detail.json()["trace"]["status"] == "success"
+        assert detail.json()["trace"]["metadata"]["phase"] == "final"
+        assert detail.json()["trace"]["span_count"] == 1
+
+    def test_trace_id_collision_across_projects_is_rejected(self, client):
+        first_project = client.post("/api/v1/projects/", json={"name": "collision-a"}).json()
+        second_project = client.post("/api/v1/projects/", json={"name": "collision-b"}).json()
+        now = datetime.now(timezone.utc).isoformat()
+
+        first_response = client.post(
+            "/api/v1/traces/spans/batch",
+            headers={"X-API-Key": first_project["api_key"]},
+            json=[
+                {
+                    "span_id": "span-collision-a",
+                    "trace_id": "trace-collision",
+                    "name": "step",
+                    "start_time": now,
+                }
+            ],
+        )
+        assert first_response.status_code == 201
+
+        second_response = client.post(
+            "/api/v1/traces/spans/batch",
+            headers={"X-API-Key": second_project["api_key"]},
+            json=[
+                {
+                    "span_id": "span-collision-b",
+                    "trace_id": "trace-collision",
+                    "name": "step",
+                    "start_time": now,
+                }
+            ],
+        )
+        assert second_response.status_code == 409
+
     def test_ingestion_sets_regression_guardrail_metadata(self, client):
         now = datetime.now(timezone.utc).isoformat()
 
