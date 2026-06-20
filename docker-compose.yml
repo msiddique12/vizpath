@@ -36,7 +36,10 @@ services:
       REDIS_URL: redis://redis:6379
       DEBUG: "true"
       AUTO_CREATE_TABLES: "true"
-      ALLOW_UNAUTHENTICATED_DEV_FALLBACK: "true"
+      ALLOW_UNAUTHENTICATED_DEV_FALLBACK: ${ALLOW_UNAUTHENTICATED_DEV_FALLBACK:-false}
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
+      NVIDIA_BASE_URL: ${NVIDIA_BASE_URL:-https://integrate.api.nvidia.com/v1}
+      NVIDIA_LLM_MODEL: ${NVIDIA_LLM_MODEL:-nvidia/llama-3.3-nemotron-super-49b-v1.5}
     depends_on:
       postgres:
         condition: service_healthy

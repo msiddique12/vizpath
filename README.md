@@ -54,9 +54,13 @@ docker compose down
 ```bash
 git clone <your-vizpath-repo-url>
 cd vizpath
-export NVIDIA_API_KEY="nvapi-..."  # Optional: enables LLM intelligence endpoints
-./demo.sh                          # Auto-installs deps and starts local services
+./demo.sh
 ```
+
+`./demo.sh` creates `.env` from `.env.example` when needed, loads local settings
+from `.env`, starts Postgres/Redis with Docker Compose, starts the FastAPI server
+and Vite dashboard, and seeds story-mode traces. Set `NVIDIA_API_KEY=nvapi-...`
+inside `.env` to enable LLM intelligence endpoints.
 
 ### Open-Source Contributor Setup
 

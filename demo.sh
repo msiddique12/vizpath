@@ -27,6 +27,35 @@ else
     exit 1
 fi
 
+# Create and load local environment settings. Explicit shell exports still win.
+if [ ! -f "$SCRIPT_DIR/.env" ]; then
+    if [ -f "$SCRIPT_DIR/.env.example" ]; then
+        echo -e "${BLUE}[Setup]${NC} Creating .env from .env.example"
+        cp "$SCRIPT_DIR/.env.example" "$SCRIPT_DIR/.env"
+    else
+        echo -e "${YELLOW}Error: .env.example is missing.${NC}"
+        exit 1
+    fi
+fi
+
+eval "$("$PYTHON_BIN" "$SCRIPT_DIR/scripts/export_env.py" --env "$SCRIPT_DIR/.env" --preserve-existing)"
+
+export POSTGRES_HOST_PORT="${POSTGRES_HOST_PORT:-5433}"
+export REDIS_HOST_PORT="${REDIS_HOST_PORT:-6380}"
+export DATABASE_URL="${DATABASE_URL:-postgresql://vizpath:vizpath@localhost:${POSTGRES_HOST_PORT}/vizpath}"
+export REDIS_URL="${REDIS_URL:-redis://localhost:${REDIS_HOST_PORT}}"
+export ALLOW_UNAUTHENTICATED_DEV_FALLBACK="${ALLOW_UNAUTHENTICATED_DEV_FALLBACK:-true}"
+export NVIDIA_BASE_URL="${NVIDIA_BASE_URL:-https://integrate.api.nvidia.com/v1}"
+export NVIDIA_LLM_MODEL="${NVIDIA_LLM_MODEL:-nvidia/llama-3.3-nemotron-super-49b-v1.5}"
+
+if [ "${NVIDIA_API_KEY:-}" = "your_nvidia_api_key_here" ] || [ "${NVIDIA_API_KEY:-}" = "nvidia_api_key_here" ]; then
+    echo -e "${YELLOW}Warning: NVIDIA_API_KEY is still a placeholder in .env; AI features will be disabled.${NC}"
+    export NVIDIA_API_KEY=""
+fi
+
+echo -e "${BLUE}[Setup]${NC} Validating .env"
+"$PYTHON_BIN" "$SCRIPT_DIR/scripts/check_env.py" --env "$SCRIPT_DIR/.env"
+
 # Verify npm is installed
 if ! command -v npm >/dev/null 2>&1; then
     echo -e "${YELLOW}Error: npm is not installed. Please install Node.js 20+.${NC}"
@@ -47,13 +76,6 @@ elif docker compose version >/dev/null 2>&1; then
 else
     echo -e "${YELLOW}Error: docker compose is not installed.${NC}"
     exit 1
-fi
-
-# Check for NVIDIA_API_KEY
-if [ -z "${NVIDIA_API_KEY:-}" ]; then
-    echo -e "${YELLOW}Warning: NVIDIA_API_KEY not set. Intelligence features will not work.${NC}"
-    echo "Set it with: export NVIDIA_API_KEY='nvapi-...'"
-    echo ""
 fi
 
 # ============================================
@@ -81,8 +103,6 @@ fi
 # Catch missing Python server dependencies before starting long-running processes.
 echo -e "${BLUE}[Setup]${NC} Verifying server imports..."
 (cd "$SCRIPT_DIR/server" && \
-DATABASE_URL=postgresql://vizpath:vizpath@localhost:${POSTGRES_HOST_PORT:-5433}/vizpath \
-REDIS_URL=redis://localhost:${REDIS_HOST_PORT:-6380} \
 "$PYTHON_BIN" -c "import app.main")
 
 # ============================================
@@ -113,10 +133,6 @@ fi
 # Start server in background
 echo -e "${BLUE}[3/3]${NC} Starting services..."
 cd "$SCRIPT_DIR/server"
-DATABASE_URL=postgresql://vizpath:vizpath@localhost:${POSTGRES_HOST_PORT:-5433}/vizpath \
-REDIS_URL=redis://localhost:${REDIS_HOST_PORT:-6380} \
-ALLOW_UNAUTHENTICATED_DEV_FALLBACK=true \
-NVIDIA_LLM_MODEL=nvidia/llama-3.3-nemotron-super-49b-v1.5 \
 "$PYTHON_BIN" -m uvicorn app.main:app --reload --port 8000 &
 SERVER_PID=$!
 cd "$SCRIPT_DIR"
@@ -167,8 +183,8 @@ echo -e "  ${BLUE}Dashboard:${NC}  http://localhost:3000"
 echo -e "  ${BLUE}API:${NC}        http://localhost:8000"
 echo -e "  ${BLUE}API Docs:${NC}   http://localhost:8000/docs"
 echo ""
-echo -e "${YELLOW}Run the demo agent:${NC}"
-echo "  python -m examples.code_agent.run 'How does the intelligence module work?'"
+echo -e "${YELLOW}Demo data:${NC} Story-mode traces are seeded automatically."
+echo "  Optional agent run: python -m examples.code_agent.run 'How does the intelligence module work?'"
 echo ""
 echo "Press Ctrl+C to stop all services"
 echo ""

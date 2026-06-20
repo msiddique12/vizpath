@@ -16,6 +16,31 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
+if [ ! -f "$ROOT_DIR/.env" ]; then
+  if [ -f "$ROOT_DIR/.env.example" ]; then
+    echo "[setup] Creating .env from .env.example"
+    cp "$ROOT_DIR/.env.example" "$ROOT_DIR/.env"
+  else
+    echo "Error: .env.example is missing."
+    exit 1
+  fi
+fi
+
+eval "$(python3 "$ROOT_DIR/scripts/export_env.py" --env "$ROOT_DIR/.env" --preserve-existing)"
+
+export POSTGRES_HOST_PORT="${POSTGRES_HOST_PORT:-5433}"
+export REDIS_HOST_PORT="${REDIS_HOST_PORT:-6380}"
+export NVIDIA_BASE_URL="${NVIDIA_BASE_URL:-https://integrate.api.nvidia.com/v1}"
+export NVIDIA_LLM_MODEL="${NVIDIA_LLM_MODEL:-nvidia/llama-3.3-nemotron-super-49b-v1.5}"
+
+if [[ "${NVIDIA_API_KEY:-}" == "your_nvidia_api_key_here" || "${NVIDIA_API_KEY:-}" == "nvidia_api_key_here" ]]; then
+  echo "Warning: NVIDIA_API_KEY is still a placeholder in .env; AI features will be disabled."
+  export NVIDIA_API_KEY=""
+fi
+
+echo "[setup] Validating .env"
+python3 "$ROOT_DIR/scripts/check_env.py" --env "$ROOT_DIR/.env"
+
 if command -v docker-compose >/dev/null 2>&1; then
   COMPOSE_CMD=(docker-compose)
 elif docker compose version >/dev/null 2>&1; then

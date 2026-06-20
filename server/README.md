@@ -34,7 +34,9 @@ alembic stamp head
 
 - `DATABASE_URL`: PostgreSQL connection string
 - `REDIS_URL`: Redis connection string
-- `OPENAI_API_KEY`: Optional, for AI features
+- `NVIDIA_API_KEY`: Optional, enables NIM-backed intelligence features
+- `NVIDIA_BASE_URL`: Optional, NVIDIA NIM-compatible API base URL
+- `NVIDIA_LLM_MODEL`: Optional, model used by intelligence features
 - `ENFORCE_MIGRATION_HEAD`: `true` to fail startup when DB revision is not at Alembic head
 
 ## API Docs

@@ -70,13 +70,16 @@ def validate_config(values: dict[str, str]) -> tuple[list[str], list[str]]:
         elif parsed.scheme not in {"redis", "rediss", "memory"}:
             warnings.append("REDIS_URL should use redis:// or rediss:// when using Redis")
 
-    port = values.get("PORT")
-    if port is not None:
+    port_fields = ("PORT", "POSTGRES_HOST_PORT", "REDIS_HOST_PORT")
+    for field in port_fields:
+        port = values.get(field)
+        if port is None:
+            continue
         port_value = _positive_int_string(port)
         if port_value is None:
-            errors.append("PORT must be an integer")
+            errors.append(f"{field} must be an integer")
         elif not 1 <= port_value <= 65535:
-            errors.append("PORT must be between 1 and 65535")
+            errors.append(f"{field} must be between 1 and 65535")
 
     rate_limit_burst = values.get("RATE_LIMIT_BURST_MULTIPLIER")
     if rate_limit_burst is not None:
@@ -106,6 +109,14 @@ def validate_config(values: dict[str, str]) -> tuple[list[str], list[str]]:
         elif retention < 1:
             errors.append("TRACE_RETENTION_DAYS must be at least 1")
 
+    trace_retention_sweep = values.get("TRACE_RETENTION_SWEEP_INTERVAL_SECONDS")
+    if trace_retention_sweep is not None:
+        sweep = _positive_int_string(trace_retention_sweep)
+        if sweep is None:
+            errors.append("TRACE_RETENTION_SWEEP_INTERVAL_SECONDS must be an integer")
+        elif sweep < 1:
+            errors.append("TRACE_RETENTION_SWEEP_INTERVAL_SECONDS must be at least 1")
+
     api_key = values.get("NVIDIA_API_KEY")
     if not api_key:
         warnings.append("NVIDIA_API_KEY is not set. Intelligence endpoints will be limited.")
@@ -125,13 +136,14 @@ def main() -> int:
     args = parser.parse_args()
 
     path = Path(args.env)
-    values = {**os.environ}
-
     if path.exists():
-        values.update(parse_env_file(path))
+        values = parse_env_file(path)
+        values.update(os.environ)
     elif path.name == ".env":
         print("No .env file found. Copy from .env.example and configure values first.")
         return 1
+    else:
+        values = {**os.environ}
 
     errors, warnings = validate_config(values)
 
