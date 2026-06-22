@@ -7,15 +7,17 @@ import re
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.auth import verify_api_key
 from app.database import get_db
-from app.models import CuratedLabel, Project, Span, Trace
+from app.models import CuratedLabel, EvalCase, EvalCaseResult, EvalRun, EvalSuite, Project, Span, Trace
+from app.security import audit_log
 
 router = APIRouter(tags=["Product"])
 
@@ -42,6 +44,15 @@ class EvalSuiteRequest(BaseModel):
         default="balanced",
         pattern="^(balanced|strict|latency|cost|tooling)$",
     )
+
+
+class EvalRunCreateRequest(BaseModel):
+    """Record a deterministic eval run against candidate traces."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(default="Candidate eval run", min_length=1, max_length=120)
+    candidate_trace_ids: list[str] = Field(min_length=1, max_length=500)
 
 
 class TraceSearchRequest(BaseModel):
@@ -97,6 +108,36 @@ def _serialize(value: Any, limit: int = 1200) -> str:
         return ""
     text = str(value)
     return text[:limit]
+
+
+_SENSITIVE_KEYS = {
+    "authorization",
+    "api_key",
+    "apikey",
+    "password",
+    "access_token",
+    "refresh_token",
+    "secret",
+    "private_key",
+    "token",
+}
+
+
+def _redact_sensitive_value(value: Any) -> Any:
+    """Redact sensitive fields in persisted eval and dataset artifacts."""
+    if isinstance(value, dict):
+        redacted: dict[str, Any] = {}
+        for key, nested in value.items():
+            if isinstance(key, str) and key.lower() in _SENSITIVE_KEYS:
+                redacted[key] = "[REDACTED]"
+            else:
+                redacted[key] = _redact_sensitive_value(nested)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_sensitive_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_redact_sensitive_value(item) for item in value]
+    return value
 
 
 def _load_trace_bundle(db: Session, project_id: Any, trace_id: str) -> tuple[Trace, list[Span]]:
@@ -192,6 +233,133 @@ def _compare(operator: str, value: float, threshold: float) -> bool:
     if operator == "lte":
         return value <= threshold
     return value == threshold
+
+
+def _build_eval_case_payload(
+    trace_id: str,
+    trace: Trace,
+    spans: list[Span],
+    assertion_profile: str,
+) -> dict[str, Any]:
+    metrics = _trace_metrics(trace, spans)
+    assertions = [
+        {"metric": "error_count", "operator": "eq", "threshold": 0},
+        {"metric": "span_count", "operator": "lte", "threshold": max(metrics["span_count"] + 2, 3)},
+    ]
+    if assertion_profile in {"balanced", "strict", "latency"} and metrics["duration_ms"] > 0:
+        multiplier = 1.1 if assertion_profile == "strict" else 1.5
+        assertions.append(
+            {
+                "metric": "duration_ms",
+                "operator": "lte",
+                "threshold": round(metrics["duration_ms"] * multiplier, 2),
+            }
+        )
+    if assertion_profile in {"balanced", "strict", "cost"} and metrics["total_cost"] > 0:
+        assertions.append(
+            {
+                "metric": "total_cost",
+                "operator": "lte",
+                "threshold": round(metrics["total_cost"] * 1.25, 6),
+            }
+        )
+    if assertion_profile in {"strict", "tooling"}:
+        assertions.append(
+            {
+                "metric": "tool_calls",
+                "operator": "lte",
+                "threshold": max(metrics["tool_calls"] + 1, 1),
+            }
+        )
+
+    return {
+        "id": f"eval-{trace_id}",
+        "source_trace_id": trace_id,
+        "name": trace.name,
+        "input": _redact_sensitive_value(_first_meaningful_input(spans)),
+        "expected_output": _redact_sensitive_value(_last_meaningful_output(spans)),
+        "baseline_metrics": metrics,
+        "assertions": assertions,
+    }
+
+
+def _serialize_eval_suite(suite: EvalSuite, *, include_cases: bool = False) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "id": str(suite.id),
+        "name": suite.name,
+        "assertion_profile": suite.assertion_profile,
+        "source_trace_ids": suite.source_trace_ids or [],
+        "case_count": len(suite.cases),
+        "run_count": len(suite.runs),
+        "created_at": suite.created_at.isoformat() if suite.created_at else None,
+        "updated_at": suite.updated_at.isoformat() if suite.updated_at else None,
+    }
+    if include_cases:
+        payload["cases"] = [
+            {
+                "id": str(case.id),
+                "source_trace_id": case.source_trace_id,
+                "name": case.name,
+                "input": case.input,
+                "expected_output": case.expected_output,
+                "baseline_metrics": case.baseline_metrics,
+                "assertions": case.assertions,
+            }
+            for case in suite.cases
+        ]
+        payload["runs"] = [_serialize_eval_run(run, include_results=False) for run in suite.runs]
+    return payload
+
+
+def _serialize_eval_run(run: EvalRun, *, include_results: bool = True) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "id": str(run.id),
+        "suite_id": str(run.suite_id),
+        "name": run.name,
+        "candidate_trace_ids": run.candidate_trace_ids or [],
+        "passed": run.passed,
+        "pass_count": run.pass_count,
+        "fail_count": run.fail_count,
+        "created_at": run.created_at.isoformat() if run.created_at else None,
+    }
+    if include_results:
+        payload["results"] = [
+            {
+                "id": str(result.id),
+                "case_id": str(result.case_id),
+                "candidate_trace_id": result.candidate_trace_id,
+                "passed": result.passed,
+                "metrics": result.metrics,
+                "assertion_results": result.assertion_results,
+            }
+            for result in run.results
+        ]
+    return payload
+
+
+def _evaluate_case_against_trace(case: EvalCase, trace: Trace, spans: list[Span]) -> dict[str, Any]:
+    metrics = _trace_metrics(trace, spans)
+    assertion_results = []
+    for assertion in case.assertions or []:
+        metric = str(assertion.get("metric", ""))
+        value = metrics.get(metric, 0.0)
+        operator = str(assertion.get("operator", "eq"))
+        threshold = float(assertion.get("threshold", 0.0))
+        passed = _compare(operator, float(value), threshold)
+        assertion_results.append(
+            {
+                "metric": metric,
+                "operator": operator,
+                "threshold": threshold,
+                "current_value": value,
+                "passed": passed,
+            }
+        )
+    return {
+        "metrics": metrics,
+        "assertion_results": assertion_results,
+        "passed": all(item["passed"] for item in assertion_results),
+    }
 
 
 def _default_guardrail_policies() -> list[GuardrailPolicy]:
@@ -416,48 +584,7 @@ async def build_eval_suite(
     cases = []
     for trace_id in payload.trace_ids:
         trace, spans = _load_trace_bundle(db, project.id, trace_id)
-        metrics = _trace_metrics(trace, spans)
-        assertions = [
-            {"metric": "error_count", "operator": "eq", "threshold": 0},
-            {"metric": "span_count", "operator": "lte", "threshold": max(metrics["span_count"] + 2, 3)},
-        ]
-        if payload.assertion_profile in {"balanced", "strict", "latency"} and metrics["duration_ms"] > 0:
-            multiplier = 1.1 if payload.assertion_profile == "strict" else 1.5
-            assertions.append(
-                {
-                    "metric": "duration_ms",
-                    "operator": "lte",
-                    "threshold": round(metrics["duration_ms"] * multiplier, 2),
-                }
-            )
-        if payload.assertion_profile in {"balanced", "strict", "cost"} and metrics["total_cost"] > 0:
-            assertions.append(
-                {
-                    "metric": "total_cost",
-                    "operator": "lte",
-                    "threshold": round(metrics["total_cost"] * 1.25, 6),
-                }
-            )
-        if payload.assertion_profile in {"strict", "tooling"}:
-            assertions.append(
-                {
-                    "metric": "tool_calls",
-                    "operator": "lte",
-                    "threshold": max(metrics["tool_calls"] + 1, 1),
-                }
-            )
-
-        cases.append(
-            {
-                "id": f"eval-{trace_id}",
-                "source_trace_id": trace_id,
-                "name": trace.name,
-                "input": _first_meaningful_input(spans),
-                "expected_output": _last_meaningful_output(spans),
-                "baseline_metrics": metrics,
-                "assertions": assertions,
-            }
-        )
+        cases.append(_build_eval_case_payload(trace_id, trace, spans, payload.assertion_profile))
 
     return {
         "name": payload.name,
@@ -466,6 +593,176 @@ async def build_eval_suite(
         "cases": cases,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+@router.post("/evals/suites", status_code=201)
+async def create_saved_eval_suite(
+    payload: EvalSuiteRequest,
+    request: Request,
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Persist an eval suite and its deterministic cases."""
+    suite = EvalSuite(
+        project_id=project.id,
+        name=payload.name.strip(),
+        assertion_profile=payload.assertion_profile,
+        source_trace_ids=payload.trace_ids,
+    )
+    db.add(suite)
+    db.flush()
+
+    for trace_id in payload.trace_ids:
+        trace, spans = _load_trace_bundle(db, project.id, trace_id)
+        case_payload = _build_eval_case_payload(trace_id, trace, spans, payload.assertion_profile)
+        db.add(
+            EvalCase(
+                suite_id=suite.id,
+                source_trace_id=trace_id,
+                name=case_payload["name"],
+                input=case_payload["input"],
+                expected_output=case_payload["expected_output"],
+                baseline_metrics=case_payload["baseline_metrics"],
+                assertions=case_payload["assertions"],
+            )
+        )
+
+    db.commit()
+    db.refresh(suite)
+    audit_log(
+        "eval_suite_created",
+        request_id=getattr(request.state, "request_id", None),
+        project_id=str(project.id),
+        suite_id=str(suite.id),
+        case_count=len(suite.cases),
+        assertion_profile=suite.assertion_profile,
+    )
+    return _serialize_eval_suite(suite, include_cases=True)
+
+
+@router.get("/evals/suites")
+async def list_saved_eval_suites(
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    """List saved eval suites for the current project."""
+    query = db.query(EvalSuite).filter(EvalSuite.project_id == project.id)
+    total = query.count()
+    suites = query.order_by(EvalSuite.created_at.desc()).offset(offset).limit(limit).all()
+    return {
+        "suites": [_serialize_eval_suite(suite) for suite in suites],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.get("/evals/suites/{suite_id}")
+async def get_saved_eval_suite(
+    suite_id: UUID,
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Get a saved eval suite with cases and recent runs."""
+    suite = (
+        db.query(EvalSuite)
+        .filter(EvalSuite.id == suite_id, EvalSuite.project_id == project.id)
+        .first()
+    )
+    if not suite:
+        raise HTTPException(status_code=404, detail="Eval suite not found")
+    return _serialize_eval_suite(suite, include_cases=True)
+
+
+@router.post("/evals/suites/{suite_id}/runs", status_code=201)
+async def create_eval_run(
+    payload: EvalRunCreateRequest,
+    request: Request,
+    suite_id: UUID,
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Record a deterministic eval run against existing candidate traces."""
+    suite = (
+        db.query(EvalSuite)
+        .filter(EvalSuite.id == suite_id, EvalSuite.project_id == project.id)
+        .first()
+    )
+    if not suite:
+        raise HTTPException(status_code=404, detail="Eval suite not found")
+
+    candidate_bundles: dict[str, tuple[Trace, list[Span]]] = {}
+    for trace_id in payload.candidate_trace_ids:
+        candidate_bundles[trace_id] = _load_trace_bundle(db, project.id, trace_id)
+
+    run = EvalRun(
+        suite_id=suite.id,
+        project_id=project.id,
+        name=payload.name.strip(),
+        candidate_trace_ids=payload.candidate_trace_ids,
+        passed=False,
+        pass_count=0,
+        fail_count=0,
+    )
+    db.add(run)
+    db.flush()
+
+    pass_count = 0
+    fail_count = 0
+    for case in suite.cases:
+        for candidate_trace_id, (candidate_trace, candidate_spans) in candidate_bundles.items():
+            evaluation = _evaluate_case_against_trace(case, candidate_trace, candidate_spans)
+            if evaluation["passed"]:
+                pass_count += 1
+            else:
+                fail_count += 1
+            db.add(
+                EvalCaseResult(
+                    run_id=run.id,
+                    case_id=case.id,
+                    candidate_trace_id=candidate_trace_id,
+                    passed=evaluation["passed"],
+                    metrics=evaluation["metrics"],
+                    assertion_results=evaluation["assertion_results"],
+                )
+            )
+
+    run.pass_count = pass_count
+    run.fail_count = fail_count
+    run.passed = fail_count == 0
+    db.commit()
+    db.refresh(run)
+    audit_log(
+        "eval_run_created",
+        request_id=getattr(request.state, "request_id", None),
+        project_id=str(project.id),
+        suite_id=str(suite.id),
+        run_id=str(run.id),
+        candidate_trace_count=len(payload.candidate_trace_ids),
+        pass_count=pass_count,
+        fail_count=fail_count,
+    )
+    return _serialize_eval_run(run)
+
+
+@router.get("/evals/runs/{run_id}")
+async def get_eval_run(
+    run_id: UUID,
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Get a saved eval run and its case results."""
+    run = (
+        db.query(EvalRun)
+        .filter(EvalRun.id == run_id, EvalRun.project_id == project.id)
+        .first()
+    )
+    if not run:
+        raise HTTPException(status_code=404, detail="Eval run not found")
+    return _serialize_eval_run(run)
 
 
 @router.post("/search/traces")

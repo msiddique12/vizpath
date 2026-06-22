@@ -82,6 +82,11 @@ class Project(Base):
         back_populates="project",
         cascade="all, delete-orphan",
     )
+    eval_suites = relationship(
+        "EvalSuite",
+        back_populates="project",
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self) -> str:
         return f"<Project(id={self.id}, name='{self.name}')>"
@@ -245,6 +250,104 @@ class TriageItem(Base):
             f"<TriageItem(project_id={self.project_id}, trace_id={self.trace_id}, "
             f"status={self.status})>"
         )
+
+
+class EvalSuite(Base):
+    """Saved deterministic eval suite generated from traces."""
+
+    __tablename__ = "eval_suites"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id"),
+        nullable=False,
+        index=True,
+    )
+    name = Column(String(120), nullable=False)
+    assertion_profile = Column(String(40), nullable=False)
+    source_trace_ids = Column(JSON, default=list, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
+
+    project = relationship("Project", back_populates="eval_suites")
+    cases = relationship("EvalCase", back_populates="suite", cascade="all, delete-orphan")
+    runs = relationship("EvalRun", back_populates="suite", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("ix_eval_suites_project_created", "project_id", "created_at"),
+    )
+
+
+class EvalCase(Base):
+    """Saved eval case within a suite."""
+
+    __tablename__ = "eval_cases"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    suite_id = Column(UUID(as_uuid=True), ForeignKey("eval_suites.id"), nullable=False, index=True)
+    source_trace_id = Column(String(64), ForeignKey("traces.id"), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    input = Column(JSON, nullable=True)
+    expected_output = Column(JSON, nullable=True)
+    baseline_metrics = Column(JSON, default=dict, nullable=False)
+    assertions = Column(JSON, default=list, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    suite = relationship("EvalSuite", back_populates="cases")
+    source_trace = relationship("Trace")
+    results = relationship("EvalCaseResult", back_populates="case", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("ix_eval_cases_suite_trace", "suite_id", "source_trace_id"),
+    )
+
+
+class EvalRun(Base):
+    """Saved eval run against candidate traces."""
+
+    __tablename__ = "eval_runs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    suite_id = Column(UUID(as_uuid=True), ForeignKey("eval_suites.id"), nullable=False, index=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False, index=True)
+    name = Column(String(120), nullable=False)
+    candidate_trace_ids = Column(JSON, default=list, nullable=False)
+    passed = Column(Boolean, default=False, nullable=False)
+    pass_count = Column(Integer, default=0, nullable=False)
+    fail_count = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    suite = relationship("EvalSuite", back_populates="runs")
+    results = relationship("EvalCaseResult", back_populates="run", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("ix_eval_runs_project_created", "project_id", "created_at"),
+        Index("ix_eval_runs_suite_created", "suite_id", "created_at"),
+    )
+
+
+class EvalCaseResult(Base):
+    """Result for one eval case in one run."""
+
+    __tablename__ = "eval_case_results"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    run_id = Column(UUID(as_uuid=True), ForeignKey("eval_runs.id"), nullable=False, index=True)
+    case_id = Column(UUID(as_uuid=True), ForeignKey("eval_cases.id"), nullable=False, index=True)
+    candidate_trace_id = Column(String(64), ForeignKey("traces.id"), nullable=False, index=True)
+    passed = Column(Boolean, default=False, nullable=False)
+    metrics = Column(JSON, default=dict, nullable=False)
+    assertion_results = Column(JSON, default=list, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    run = relationship("EvalRun", back_populates="results")
+    case = relationship("EvalCase", back_populates="results")
+    candidate_trace = relationship("Trace")
+
+    __table_args__ = (
+        Index("ix_eval_results_run_case", "run_id", "case_id"),
+    )
 
 
 class ProjectApiKey(Base):

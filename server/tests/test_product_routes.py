@@ -239,6 +239,125 @@ def test_eval_suite_generates_assertions_from_trace_metrics(client):
     )
 
 
+def test_saved_eval_suite_and_run_results_are_persisted(client):
+    api_key = _create_project(client, "saved-eval-project")
+    _ingest_trace(
+        client,
+        api_key,
+        "eval-baseline",
+        trace_name="Eval baseline",
+        metadata={"api_key": "metadata-secret"},
+    )
+    _ingest_trace(client, api_key, "eval-candidate-ok", trace_name="Eval candidate ok")
+    _ingest_trace(
+        client,
+        api_key,
+        "eval-candidate-fail",
+        status="error",
+        tool_status="error",
+        error="tool timeout",
+        trace_name="Eval candidate fail",
+    )
+
+    suite_response = client.post(
+        "/api/v1/evals/suites",
+        headers=_headers(api_key),
+        json={
+            "trace_ids": ["eval-baseline"],
+            "name": "Saved pricing regression",
+            "assertion_profile": "strict",
+        },
+    )
+    assert suite_response.status_code == 201
+    suite = suite_response.json()
+    assert suite["name"] == "Saved pricing regression"
+    assert suite["case_count"] == 1
+    assert suite["cases"][0]["input"] == {"task": "Investigate eval-baseline"}
+
+    list_response = client.get("/api/v1/evals/suites", headers=_headers(api_key))
+    assert list_response.status_code == 200
+    assert list_response.json()["total"] == 1
+
+    run_response = client.post(
+        f"/api/v1/evals/suites/{suite['id']}/runs",
+        headers=_headers(api_key),
+        json={
+            "name": "Candidate run",
+            "candidate_trace_ids": ["eval-candidate-ok", "eval-candidate-fail"],
+        },
+    )
+    assert run_response.status_code == 201
+    run = run_response.json()
+    assert run["suite_id"] == suite["id"]
+    assert run["pass_count"] == 1
+    assert run["fail_count"] == 1
+    assert run["passed"] is False
+    assert len(run["results"]) == 2
+
+    detail_response = client.get(f"/api/v1/evals/runs/{run['id']}", headers=_headers(api_key))
+    assert detail_response.status_code == 200
+    assert detail_response.json()["fail_count"] == 1
+
+
+def test_saved_eval_suites_are_project_isolated(client):
+    api_key_a = _create_project(client, "saved-eval-a")
+    api_key_b = _create_project(client, "saved-eval-b")
+    _ingest_trace(client, api_key_a, "eval-a")
+    _ingest_trace(client, api_key_b, "eval-b")
+
+    suite_response = client.post(
+        "/api/v1/evals/suites",
+        headers=_headers(api_key_a),
+        json={"trace_ids": ["eval-a"], "name": "A suite"},
+    )
+    assert suite_response.status_code == 201
+    suite_id = suite_response.json()["id"]
+
+    foreign_detail = client.get(f"/api/v1/evals/suites/{suite_id}", headers=_headers(api_key_b))
+    assert foreign_detail.status_code == 404
+
+    foreign_run = client.post(
+        f"/api/v1/evals/suites/{suite_id}/runs",
+        headers=_headers(api_key_b),
+        json={"candidate_trace_ids": ["eval-b"]},
+    )
+    assert foreign_run.status_code == 404
+
+
+def test_saved_eval_suite_redacts_sensitive_case_payloads(client):
+    api_key = _create_project(client, "saved-eval-redaction")
+    now = datetime.now(timezone.utc).isoformat()
+    response = client.post(
+        "/api/v1/traces/spans/batch",
+        headers=_headers(api_key),
+        json=[
+            {
+                "span_id": "eval-redact-span",
+                "trace_id": "eval-redact-trace",
+                "name": "llm.redact",
+                "span_type": "llm",
+                "status": "success",
+                "start_time": now,
+                "end_time": now,
+                "input": {"prompt": "hello", "api_key": "secret-key"},
+                "output": {"answer": "ok", "access_token": "secret-token"},
+                "trace_name": "Eval redaction trace",
+            }
+        ],
+    )
+    assert response.status_code == 201
+
+    suite_response = client.post(
+        "/api/v1/evals/suites",
+        headers=_headers(api_key),
+        json={"trace_ids": ["eval-redact-trace"], "name": "Redacted suite"},
+    )
+    assert suite_response.status_code == 201
+    case = suite_response.json()["cases"][0]
+    assert case["input"]["api_key"] == "[REDACTED]"
+    assert case["expected_output"]["access_token"] == "[REDACTED]"
+
+
 def test_trace_search_ranks_matches_and_preserves_project_isolation(client):
     api_key = _create_project(client, "search-project")
     other_api_key = _create_project(client, "other-search-project")
