@@ -3,10 +3,17 @@ import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Loader2 } from 'lucide-react'
 import clsx from 'clsx'
-import { createOrUpdateLabel, getCuratedTraces, getTraces } from '@/lib/api'
+import {
+  createTriageItem,
+  getCuratedTraces,
+  getTraces,
+  getTriageItems,
+  updateTriageItem,
+  type TriageItem,
+  type TriagePriority,
+  type TriageStatus,
+} from '@/lib/api'
 import { Trace } from '@/lib/types'
-
-type InboxLabel = 'failure' | 'needs_improvement'
 
 function inferFailureMode(trace: Trace): string {
   const searchable = `${trace.name} ${JSON.stringify(trace.metadata || {})}`.toLowerCase()
@@ -61,6 +68,12 @@ export default function FailureInboxPage() {
     refetchInterval: 10000,
   })
 
+  const triageQuery = useQuery({
+    queryKey: ['failure-inbox', 'triage'],
+    queryFn: () => getTriageItems({ limit: 300, offset: 0 }),
+    refetchInterval: 10000,
+  })
+
   const labelsByTraceId = useMemo(() => {
     const map: Record<string, string> = {}
     ;(curatedTracesQuery.data || []).forEach((row) => {
@@ -72,19 +85,45 @@ export default function FailureInboxPage() {
   }, [curatedTracesQuery.data])
 
   const labelMutation = useMutation({
-    mutationFn: ({ traceId, label }: { traceId: string; label: InboxLabel }) =>
-      createOrUpdateLabel({ trace_id: traceId, label }),
+    mutationFn: ({
+      trace,
+      item,
+      status,
+      priority,
+    }: {
+      trace: Trace
+      item?: TriageItem
+      status?: TriageStatus
+      priority?: TriagePriority
+    }) => {
+      if (item) {
+        return updateTriageItem(item.id, { status, priority })
+      }
+      return createTriageItem({
+        trace_id: trace.id,
+        status: status ?? 'open',
+        priority: priority ?? 'high',
+        failure_mode: inferFailureMode(trace),
+        title: trace.name,
+      })
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['failure-inbox', 'curation'] })
-      queryClient.invalidateQueries({ queryKey: ['curated-traces'] })
-      queryClient.invalidateQueries({ queryKey: ['curation-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['failure-inbox', 'triage'] })
     },
   })
+
+  const triageByTraceId = useMemo(() => {
+    const map: Record<string, TriageItem> = {}
+    ;(triageQuery.data?.items || []).forEach((item) => {
+      map[item.trace_id] = item
+    })
+    return map
+  }, [triageQuery.data?.items])
 
   const groupedFailures = useMemo(() => {
     const groups = new Map<string, Trace[]>()
     ;(tracesQuery.data?.traces || []).forEach((trace) => {
-      const mode = inferFailureMode(trace)
+      const mode = triageByTraceId[trace.id]?.failure_mode || inferFailureMode(trace)
       const existing = groups.get(mode)
       if (existing) {
         existing.push(trace)
@@ -96,7 +135,7 @@ export default function FailureInboxPage() {
     return Array.from(groups.entries())
       .map(([mode, traces]) => ({ mode, traces }))
       .sort((a, b) => b.traces.length - a.traces.length)
-  }, [tracesQuery.data?.traces])
+  }, [tracesQuery.data?.traces, triageByTraceId])
 
   if (tracesQuery.isLoading) {
     return (
@@ -160,24 +199,58 @@ export default function FailureInboxPage() {
                       >
                         {labelsByTraceId[trace.id] ? `Label: ${labelsByTraceId[trace.id]}` : 'Unlabeled'}
                       </span>
+                      <span className="px-2 py-0.5 text-xs rounded-full border bg-dark-800 border-dark-700 text-muted-300">
+                        Triage: {triageByTraceId[trace.id]?.status ?? 'not created'}
+                      </span>
                       <button
                         type="button"
-                        onClick={() => labelMutation.mutate({ traceId: trace.id, label: 'failure' })}
+                        onClick={() =>
+                          labelMutation.mutate({
+                            trace,
+                            item: triageByTraceId[trace.id],
+                            status: 'open',
+                            priority: 'high',
+                          })
+                        }
                         disabled={labelMutation.isPending}
-                        aria-label={`Label trace ${trace.id} as failure`}
+                        aria-label={`Open triage item for trace ${trace.id}`}
                         className="px-2.5 py-1 text-xs rounded border border-red-700 text-red-300 hover:bg-red-900/20 disabled:opacity-60"
                       >
-                        Mark failure
+                        Open triage
                       </button>
                       <button
                         type="button"
-                        onClick={() => labelMutation.mutate({ traceId: trace.id, label: 'needs_improvement' })}
+                        onClick={() =>
+                          labelMutation.mutate({
+                            trace,
+                            item: triageByTraceId[trace.id],
+                            status: 'investigating',
+                            priority: 'critical',
+                          })
+                        }
                         disabled={labelMutation.isPending}
-                        aria-label={`Label trace ${trace.id} as needs improvement`}
+                        aria-label={`Investigate trace ${trace.id}`}
                         className="px-2.5 py-1 text-xs rounded border border-amber-700 text-amber-300 hover:bg-amber-900/20 disabled:opacity-60"
                       >
-                        Needs review
+                        Investigating
                       </button>
+                      {triageByTraceId[trace.id] && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            labelMutation.mutate({
+                              trace,
+                              item: triageByTraceId[trace.id],
+                              status: 'resolved',
+                            })
+                          }
+                          disabled={labelMutation.isPending}
+                          aria-label={`Resolve triage item for trace ${trace.id}`}
+                          className="px-2.5 py-1 text-xs rounded border border-green-700 text-green-300 hover:bg-green-900/20 disabled:opacity-60"
+                        >
+                          Resolve
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}

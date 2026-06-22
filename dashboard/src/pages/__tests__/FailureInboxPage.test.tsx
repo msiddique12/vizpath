@@ -42,6 +42,55 @@ describe('FailureInboxPage', () => {
         })
       }
 
+      if (url.includes('/triage/items') && method === 'GET') {
+        return createJsonResponse({
+          items: [
+            {
+              id: 'triage-timeout',
+              trace_id: 'trace-timeout',
+              trace_name: 'Timeout while calling api',
+              trace_status: 'error',
+              status: 'open',
+              priority: 'high',
+              owner: null,
+              failure_mode: 'Timeout / slow execution',
+              title: 'Timeout while calling api',
+              notes: null,
+              linked_trace_ids: [],
+              resolved_at: null,
+              resolved_by: null,
+              created_at: new Date().toISOString(),
+              updated_at: null,
+            },
+          ],
+          total: 1,
+          limit: 300,
+          offset: 0,
+          generated_at: new Date().toISOString(),
+        })
+      }
+
+      if (url.includes('/triage/items') && method === 'POST') {
+        const body = typeof init?.body === 'string' ? JSON.parse(init.body) : {}
+        return createJsonResponse({
+          id: 'triage-created',
+          trace_id: body.trace_id,
+          trace_name: 'JSON parse failure',
+          trace_status: 'error',
+          status: body.status ?? 'open',
+          priority: body.priority ?? 'high',
+          owner: null,
+          failure_mode: body.failure_mode ?? null,
+          title: body.title ?? 'JSON parse failure',
+          notes: null,
+          linked_trace_ids: [],
+          resolved_at: null,
+          resolved_by: null,
+          created_at: new Date().toISOString(),
+          updated_at: null,
+        })
+      }
+
       if (url.includes('/curation/traces')) {
         return createJsonResponse([
           {
@@ -100,30 +149,31 @@ describe('FailureInboxPage', () => {
     globalThis.fetch = originalFetch
   })
 
-  it('groups failures and supports one-click labeling', async () => {
+  it('groups failures and supports one-click triage creation', async () => {
     renderWithProviders(<FailureInboxPage />, ['/inbox'])
 
     await waitFor(() => expect(screen.getByText('Failure Inbox')).toBeInTheDocument())
     expect(screen.getByText('Timeout / slow execution')).toBeInTheDocument()
     expect(screen.getByText('Output parsing failure')).toBeInTheDocument()
     expect(screen.getByText('Label: needs_improvement')).toBeInTheDocument()
+    expect(screen.getByText('Triage: open')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Label trace trace-parse as failure' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open triage item for trace trace-parse' }))
 
     await waitFor(() => {
       const calls = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls
-      const labelCall = calls.find(([input, init]) => {
+      const triageCall = calls.find(([input, init]) => {
         const url = resolveUrl(input as RequestInfo | URL)
-        if (!url.includes('/curation/labels') || (init as RequestInit | undefined)?.method !== 'POST') {
+        if (!url.includes('/triage/items') || (init as RequestInit | undefined)?.method !== 'POST') {
           return false
         }
         const body = typeof (init as RequestInit | undefined)?.body === 'string'
           ? JSON.parse((init as RequestInit).body as string)
           : {}
-        return body.trace_id === 'trace-parse' && body.label === 'failure'
+        return body.trace_id === 'trace-parse' && body.status === 'open'
       })
 
-      expect(labelCall).toBeDefined()
+      expect(triageCall).toBeDefined()
     })
   })
 })

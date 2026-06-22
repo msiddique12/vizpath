@@ -5,8 +5,14 @@ import clsx from 'clsx'
 import {
   buildDataset,
   buildEvalSuite,
+  createDatasetBuild,
+  createEvalRun,
+  createSavedEvalSuite,
+  downloadDatasetBuild,
   DatasetFormat,
   EvalAssertionProfile,
+  getDatasetBuilds,
+  getSavedEvalSuites,
   getTraces,
 } from '@/lib/api'
 
@@ -35,10 +41,21 @@ export default function DatasetsPage() {
   const [minQualityScore, setMinQualityScore] = useState('')
   const [evalName, setEvalName] = useState('Trace regression suite')
   const [evalProfile, setEvalProfile] = useState<EvalAssertionProfile>('balanced')
+  const [selectedSuiteId, setSelectedSuiteId] = useState('')
 
   const tracesQuery = useQuery({
     queryKey: ['traces', 'dataset-builder'],
     queryFn: () => getTraces(100, 0, undefined, { sort_by: 'created_at', sort_order: 'desc' }),
+  })
+
+  const datasetBuildsQuery = useQuery({
+    queryKey: ['dataset-builds'],
+    queryFn: () => getDatasetBuilds({ limit: 20, offset: 0 }),
+  })
+
+  const savedEvalSuitesQuery = useQuery({
+    queryKey: ['saved-eval-suites'],
+    queryFn: () => getSavedEvalSuites({ limit: 20, offset: 0 }),
   })
 
   const traces = useMemo(() => tracesQuery.data?.traces ?? [], [tracesQuery.data?.traces])
@@ -67,6 +84,57 @@ export default function DatasetsPage() {
       }),
   })
 
+  const savedDatasetMutation = useMutation({
+    mutationFn: () =>
+      createDatasetBuild({
+        trace_ids: selectedIds,
+        name: `${datasetFormat} dataset ${new Date().toLocaleDateString()}`,
+        format: datasetFormat,
+        include_failed: includeFailed,
+        min_quality_score: minQualityScore.trim() ? Number(minQualityScore) : undefined,
+        include_raw: false,
+      }),
+    onSuccess: () => datasetBuildsQuery.refetch(),
+  })
+
+  const savedEvalSuiteMutation = useMutation({
+    mutationFn: () =>
+      createSavedEvalSuite({
+        trace_ids: selectedIds,
+        name: evalName.trim() || 'Trace regression suite',
+        assertion_profile: evalProfile,
+      }),
+    onSuccess: (suite) => {
+      setSelectedSuiteId(suite.id)
+      savedEvalSuitesQuery.refetch()
+    },
+  })
+
+  const evalRunMutation = useMutation({
+    mutationFn: () =>
+      createEvalRun(selectedSuiteId, {
+        name: `Candidate run ${new Date().toLocaleString()}`,
+        candidate_trace_ids: selectedIds,
+      }),
+    onSuccess: () => savedEvalSuitesQuery.refetch(),
+  })
+
+  const downloadDatasetMutation = useMutation({
+    mutationFn: ({ buildId, format }: { buildId: string; format: 'json' | 'jsonl' }) =>
+      downloadDatasetBuild(buildId, format),
+    onSuccess: (content, variables) => {
+      const blob = new Blob([content], {
+        type: variables.format === 'jsonl' ? 'application/x-ndjson' : 'application/json',
+      })
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = `dataset-build-${variables.buildId}.${variables.format}`
+      anchor.click()
+      URL.revokeObjectURL(url)
+    },
+  })
+
   const toggleTrace = (traceId: string) => {
     setSelectedTraceIds((current) => {
       const next = new Set(current)
@@ -87,7 +155,13 @@ export default function DatasetsPage() {
     setSelectedTraceIds(new Set())
   }
 
-  const canBuild = selectedIds.length > 0 && !datasetMutation.isPending && !evalMutation.isPending
+  const canBuild =
+    selectedIds.length > 0 &&
+    !datasetMutation.isPending &&
+    !evalMutation.isPending &&
+    !savedDatasetMutation.isPending &&
+    !savedEvalSuiteMutation.isPending &&
+    !evalRunMutation.isPending
 
   return (
     <div className="space-y-6">
@@ -212,6 +286,18 @@ export default function DatasetsPage() {
               {datasetMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileJson className="h-4 w-4" />}
               Generate records
             </button>
+            <button
+              type="button"
+              disabled={!canBuild}
+              onClick={() => savedDatasetMutation.mutate()}
+              className={clsx(
+                'w-full flex items-center justify-center gap-2 rounded px-3 py-2 text-sm font-medium border',
+                canBuild ? 'bg-dark-800 border-dark-700 text-muted-100 hover:bg-dark-700' : 'bg-dark-700 border-dark-700 text-muted-500'
+              )}
+            >
+              {savedDatasetMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Database className="h-4 w-4" />}
+              Save redacted build
+            </button>
           </section>
 
           <section className="bg-dark-900 border border-dark-700 rounded-lg p-4 space-y-3">
@@ -253,11 +339,108 @@ export default function DatasetsPage() {
               {evalMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlaySquare className="h-4 w-4" />}
               Generate eval cases
             </button>
+            <button
+              type="button"
+              disabled={!canBuild}
+              onClick={() => savedEvalSuiteMutation.mutate()}
+              className={clsx(
+                'w-full flex items-center justify-center gap-2 rounded px-3 py-2 text-sm font-medium border',
+                canBuild ? 'bg-dark-800 border-dark-700 text-muted-100 hover:bg-dark-700' : 'bg-dark-700 border-dark-700 text-muted-500'
+              )}
+            >
+              {savedEvalSuiteMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlaySquare className="h-4 w-4" />}
+              Save eval suite
+            </button>
+            <label className="block text-xs text-muted-400">
+              Saved suite for run
+              <select
+                value={selectedSuiteId}
+                onChange={(event) => setSelectedSuiteId(event.target.value)}
+                className="mt-1 w-full bg-dark-800 border border-dark-700 text-muted-200 rounded px-3 py-2 text-sm"
+              >
+                <option value="">Select saved suite...</option>
+                {(savedEvalSuitesQuery.data?.suites ?? []).map((suite) => (
+                  <option key={suite.id} value={suite.id}>
+                    {suite.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              disabled={!canBuild || !selectedSuiteId}
+              onClick={() => evalRunMutation.mutate()}
+              className={clsx(
+                'w-full flex items-center justify-center gap-2 rounded px-3 py-2 text-sm font-medium',
+                canBuild && selectedSuiteId ? 'bg-primary-600 text-white hover:bg-primary-700' : 'bg-dark-700 text-muted-500'
+              )}
+            >
+              {evalRunMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlaySquare className="h-4 w-4" />}
+              Record eval run
+            </button>
           </section>
         </aside>
       </div>
 
-      {(datasetMutation.data || evalMutation.data) && (
+      <section className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <div className="bg-dark-900 border border-dark-700 rounded-lg p-4">
+          <h2 className="text-sm font-medium text-muted-100">Saved Dataset Builds</h2>
+          <div className="mt-3 space-y-2">
+            {(datasetBuildsQuery.data?.builds ?? []).length === 0 ? (
+              <p className="text-xs text-muted-400">No saved builds yet.</p>
+            ) : (
+              (datasetBuildsQuery.data?.builds ?? []).map((build) => (
+                <div key={build.id} className="flex items-center justify-between gap-3 rounded border border-dark-700 bg-dark-800 p-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm text-muted-100">{build.name}</p>
+                    <p className="text-xs text-muted-400">
+                      {build.record_count} records · {build.redaction_mode} · {build.format}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => downloadDatasetMutation.mutate({ buildId: build.id, format: 'jsonl' })}
+                    disabled={downloadDatasetMutation.isPending}
+                    className="shrink-0 rounded border border-dark-700 px-2 py-1 text-xs text-muted-200 hover:bg-dark-700"
+                  >
+                    Download JSONL
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="bg-dark-900 border border-dark-700 rounded-lg p-4">
+          <h2 className="text-sm font-medium text-muted-100">Saved Eval Suites</h2>
+          <div className="mt-3 space-y-2">
+            {(savedEvalSuitesQuery.data?.suites ?? []).length === 0 ? (
+              <p className="text-xs text-muted-400">No saved eval suites yet.</p>
+            ) : (
+              (savedEvalSuitesQuery.data?.suites ?? []).map((suite) => (
+                <button
+                  key={suite.id}
+                  type="button"
+                  onClick={() => setSelectedSuiteId(suite.id)}
+                  className={clsx(
+                    'w-full rounded border p-3 text-left',
+                    selectedSuiteId === suite.id
+                      ? 'border-primary-700 bg-primary-900/20'
+                      : 'border-dark-700 bg-dark-800 hover:bg-dark-700'
+                  )}
+                >
+                  <p className="text-sm text-muted-100">{suite.name}</p>
+                  <p className="text-xs text-muted-400">
+                    {suite.case_count} cases · {suite.run_count} runs · {suite.assertion_profile}
+                  </p>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      </section>
+
+      {(datasetMutation.data || evalMutation.data || savedDatasetMutation.data || savedEvalSuiteMutation.data || evalRunMutation.data) && (
         <section className="grid grid-cols-1 xl:grid-cols-2 gap-4">
           {datasetMutation.data && (
             <div className="bg-dark-900 border border-dark-700 rounded-lg p-4">
@@ -278,6 +461,39 @@ export default function DatasetsPage() {
               </p>
               <pre className="mt-3 max-h-96 overflow-auto rounded bg-dark-950 p-3 text-xs text-muted-200">
                 {previewJson(evalMutation.data.cases)}
+              </pre>
+            </div>
+          )}
+          {savedDatasetMutation.data && (
+            <div className="bg-dark-900 border border-dark-700 rounded-lg p-4">
+              <h2 className="text-sm font-medium text-muted-100">Saved Dataset Build</h2>
+              <p className="mt-1 text-xs text-muted-400">
+                {savedDatasetMutation.data.record_count} records · {savedDatasetMutation.data.redaction_mode}
+              </p>
+              <pre className="mt-3 max-h-96 overflow-auto rounded bg-dark-950 p-3 text-xs text-muted-200">
+                {previewJson(savedDatasetMutation.data.artifact?.records ?? [])}
+              </pre>
+            </div>
+          )}
+          {savedEvalSuiteMutation.data && (
+            <div className="bg-dark-900 border border-dark-700 rounded-lg p-4">
+              <h2 className="text-sm font-medium text-muted-100">Saved Eval Suite</h2>
+              <p className="mt-1 text-xs text-muted-400">
+                {savedEvalSuiteMutation.data.case_count} cases · {savedEvalSuiteMutation.data.assertion_profile}
+              </p>
+              <pre className="mt-3 max-h-96 overflow-auto rounded bg-dark-950 p-3 text-xs text-muted-200">
+                {previewJson(savedEvalSuiteMutation.data.cases ?? [])}
+              </pre>
+            </div>
+          )}
+          {evalRunMutation.data && (
+            <div className="bg-dark-900 border border-dark-700 rounded-lg p-4">
+              <h2 className="text-sm font-medium text-muted-100">Eval Run Result</h2>
+              <p className="mt-1 text-xs text-muted-400">
+                {evalRunMutation.data.pass_count} passed · {evalRunMutation.data.fail_count} failed
+              </p>
+              <pre className="mt-3 max-h-96 overflow-auto rounded bg-dark-950 p-3 text-xs text-muted-200">
+                {previewJson(evalRunMutation.data.results ?? [])}
               </pre>
             </div>
           )}

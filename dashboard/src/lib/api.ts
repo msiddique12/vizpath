@@ -597,6 +597,85 @@ export interface CurationStats {
   average_quality_score: number | null
 }
 
+export type TriageStatus = 'open' | 'investigating' | 'resolved'
+export type TriagePriority = 'low' | 'medium' | 'high' | 'critical'
+
+export interface TriageItem {
+  id: string
+  trace_id: string
+  trace_name: string | null
+  trace_status: string | null
+  status: TriageStatus
+  priority: TriagePriority
+  owner: string | null
+  failure_mode: string | null
+  title: string
+  notes: string | null
+  linked_trace_ids: string[]
+  resolved_at: string | null
+  resolved_by: string | null
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface TriageListResponse {
+  items: TriageItem[]
+  total: number
+  limit: number
+  offset: number
+  generated_at: string
+}
+
+export async function getTriageItems(params?: {
+  status?: TriageStatus
+  priority?: TriagePriority
+  owner?: string
+  limit?: number
+  offset?: number
+}): Promise<TriageListResponse> {
+  const searchParams = new URLSearchParams()
+  if (params?.status) searchParams.set('status', params.status)
+  if (params?.priority) searchParams.set('priority', params.priority)
+  if (params?.owner) searchParams.set('owner', params.owner)
+  if (params?.limit !== undefined) searchParams.set('limit', String(params.limit))
+  if (params?.offset !== undefined) searchParams.set('offset', String(params.offset))
+  return fetchApi(`/triage/items?${searchParams}`)
+}
+
+export async function createTriageItem(data: {
+  trace_id: string
+  status?: TriageStatus
+  priority?: TriagePriority
+  owner?: string | null
+  failure_mode?: string | null
+  title?: string | null
+  notes?: string | null
+  linked_trace_ids?: string[]
+}): Promise<TriageItem> {
+  return fetchApi('/triage/items', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function updateTriageItem(
+  itemId: string,
+  data: {
+    status?: TriageStatus
+    priority?: TriagePriority
+    owner?: string | null
+    failure_mode?: string | null
+    title?: string | null
+    notes?: string | null
+    resolved_by?: string | null
+  }
+): Promise<TriageItem> {
+  return fetchApi(`/triage/items/${encodeURIComponent(itemId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  })
+}
+
 export async function getLabel(traceId: string): Promise<CurationLabel | null> {
   try {
     return await fetchApi(`/curation/labels/${traceId}`)
@@ -702,6 +781,27 @@ export interface DatasetBuildResponse {
   generated_at: string
 }
 
+export interface SavedDatasetBuild {
+  id: string
+  name: string
+  format: DatasetFormat
+  source_trace_ids: string[]
+  options: Record<string, unknown>
+  record_count: number
+  skipped_count: number
+  redaction_mode: 'redacted' | 'raw'
+  created_at: string | null
+  artifact?: DatasetBuildResponse
+}
+
+export interface SavedDatasetBuildListResponse {
+  builds: SavedDatasetBuild[]
+  total: number
+  limit: number
+  offset: number
+  generated_at: string
+}
+
 export type EvalAssertionProfile = 'balanced' | 'strict' | 'latency' | 'cost' | 'tooling'
 
 export interface EvalSuiteResponse {
@@ -710,6 +810,39 @@ export interface EvalSuiteResponse {
   case_count: number
   cases: Array<Record<string, unknown>>
   generated_at: string
+}
+
+export interface SavedEvalSuite {
+  id: string
+  name: string
+  assertion_profile: EvalAssertionProfile
+  source_trace_ids: string[]
+  case_count: number
+  run_count: number
+  created_at: string | null
+  updated_at: string | null
+  cases?: Array<Record<string, unknown>>
+  runs?: SavedEvalRun[]
+}
+
+export interface SavedEvalSuiteListResponse {
+  suites: SavedEvalSuite[]
+  total: number
+  limit: number
+  offset: number
+  generated_at: string
+}
+
+export interface SavedEvalRun {
+  id: string
+  suite_id: string
+  name: string
+  candidate_trace_ids: string[]
+  passed: boolean
+  pass_count: number
+  fail_count: number
+  created_at: string | null
+  results?: Array<Record<string, unknown>>
 }
 
 export interface TraceSearchResult {
@@ -794,12 +927,96 @@ export async function buildDataset(data: {
   })
 }
 
+export async function createDatasetBuild(data: {
+  trace_ids: string[]
+  name: string
+  format: DatasetFormat
+  include_failed?: boolean
+  min_quality_score?: number
+  include_raw?: boolean
+}): Promise<SavedDatasetBuild> {
+  return fetchApi('/datasets/builds', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function getDatasetBuilds(params?: {
+  limit?: number
+  offset?: number
+}): Promise<SavedDatasetBuildListResponse> {
+  const searchParams = new URLSearchParams()
+  if (params?.limit !== undefined) searchParams.set('limit', String(params.limit))
+  if (params?.offset !== undefined) searchParams.set('offset', String(params.offset))
+  return fetchApi(`/datasets/builds?${searchParams}`)
+}
+
+export async function getDatasetBuild(buildId: string): Promise<SavedDatasetBuild> {
+  return fetchApi(`/datasets/builds/${encodeURIComponent(buildId)}`)
+}
+
+export function datasetBuildDownloadUrl(buildId: string, format: 'json' | 'jsonl' = 'jsonl'): string {
+  return `${API_BASE}/datasets/builds/${encodeURIComponent(buildId)}/download?format=${format}`
+}
+
+export async function downloadDatasetBuild(buildId: string, format: 'json' | 'jsonl' = 'jsonl'): Promise<string> {
+  const headers = new Headers({ Accept: format === 'jsonl' ? 'application/x-ndjson' : 'application/json' })
+  const apiKey = getEffectiveApiKey()
+  if (apiKey) {
+    headers.set('X-API-Key', apiKey)
+  }
+
+  const response = await fetch(datasetBuildDownloadUrl(buildId, format), { headers })
+  if (!response.ok) {
+    throw await buildApiError(response)
+  }
+  return response.text()
+}
+
 export async function buildEvalSuite(data: {
   trace_ids: string[]
   name: string
   assertion_profile: EvalAssertionProfile
 }): Promise<EvalSuiteResponse> {
   return fetchApi('/evals/suite', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function createSavedEvalSuite(data: {
+  trace_ids: string[]
+  name: string
+  assertion_profile: EvalAssertionProfile
+}): Promise<SavedEvalSuite> {
+  return fetchApi('/evals/suites', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function getSavedEvalSuites(params?: {
+  limit?: number
+  offset?: number
+}): Promise<SavedEvalSuiteListResponse> {
+  const searchParams = new URLSearchParams()
+  if (params?.limit !== undefined) searchParams.set('limit', String(params.limit))
+  if (params?.offset !== undefined) searchParams.set('offset', String(params.offset))
+  return fetchApi(`/evals/suites?${searchParams}`)
+}
+
+export async function getSavedEvalSuite(suiteId: string): Promise<SavedEvalSuite> {
+  return fetchApi(`/evals/suites/${encodeURIComponent(suiteId)}`)
+}
+
+export async function createEvalRun(
+  suiteId: string,
+  data: {
+    name?: string
+    candidate_trace_ids: string[]
+  }
+): Promise<SavedEvalRun> {
+  return fetchApi(`/evals/suites/${encodeURIComponent(suiteId)}/runs`, {
     method: 'POST',
     body: JSON.stringify(data),
   })
