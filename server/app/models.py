@@ -87,6 +87,11 @@ class Project(Base):
         back_populates="project",
         cascade="all, delete-orphan",
     )
+    dataset_builds = relationship(
+        "DatasetBuild",
+        back_populates="project",
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self) -> str:
         return f"<Project(id={self.id}, name='{self.name}')>"
@@ -347,6 +352,35 @@ class EvalCaseResult(Base):
 
     __table_args__ = (
         Index("ix_eval_results_run_case", "run_id", "case_id"),
+    )
+
+
+class DatasetBuild(Base):
+    """Saved redacted dataset artifact generated from traces."""
+
+    __tablename__ = "dataset_builds"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id"),
+        nullable=False,
+        index=True,
+    )
+    name = Column(String(120), nullable=False)
+    format = Column(String(40), nullable=False, index=True)
+    source_trace_ids = Column(JSON, default=list, nullable=False)
+    options = Column(JSON, default=dict, nullable=False)
+    record_count = Column(Integer, default=0, nullable=False)
+    skipped_count = Column(Integer, default=0, nullable=False)
+    redaction_mode = Column(String(40), default="redacted", nullable=False)
+    artifact = Column(JSON, default=dict, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    project = relationship("Project", back_populates="dataset_builds")
+
+    __table_args__ = (
+        Index("ix_dataset_builds_project_created", "project_id", "created_at"),
     )
 
 

@@ -4,19 +4,21 @@ from __future__ import annotations
 
 import math
 import re
+import json
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.auth import verify_api_key
 from app.database import get_db
-from app.models import CuratedLabel, EvalCase, EvalCaseResult, EvalRun, EvalSuite, Project, Span, Trace
+from app.models import CuratedLabel, DatasetBuild, EvalCase, EvalCaseResult, EvalRun, EvalSuite, Project, Span, Trace
 from app.security import audit_log
 
 router = APIRouter(tags=["Product"])
@@ -31,6 +33,13 @@ class DatasetBuildRequest(BaseModel):
     format: str = Field(default="chat", pattern="^(chat|tool_calls|preference)$")
     include_failed: bool = False
     min_quality_score: float | None = Field(default=None, ge=0, le=100)
+
+
+class SavedDatasetBuildRequest(DatasetBuildRequest):
+    """Persist a dataset build artifact."""
+
+    name: str = Field(default="Trace dataset", min_length=1, max_length=120)
+    include_raw: bool = False
 
 
 class EvalSuiteRequest(BaseModel):
@@ -281,6 +290,107 @@ def _build_eval_case_payload(
         "baseline_metrics": metrics,
         "assertions": assertions,
     }
+
+
+def _artifact_value(value: Any, *, include_raw: bool) -> Any:
+    return value if include_raw else _redact_sensitive_value(value)
+
+
+def _build_dataset_artifact(
+    payload: DatasetBuildRequest,
+    project_id: Any,
+    db: Session,
+    *,
+    include_raw: bool,
+) -> dict[str, Any]:
+    records = []
+    skipped = []
+    for trace_id in payload.trace_ids:
+        trace, spans = _load_trace_bundle(db, project_id, trace_id)
+        label = _label_for_trace(db, trace_id)
+        if not payload.include_failed and trace.status == "error":
+            skipped.append({"trace_id": trace_id, "reason": "failed_trace"})
+            continue
+        if (
+            payload.min_quality_score is not None
+            and (label is None or label.quality_score is None or label.quality_score < payload.min_quality_score)
+        ):
+            skipped.append({"trace_id": trace_id, "reason": "below_quality_threshold"})
+            continue
+
+        item = {
+            "trace_id": trace_id,
+            "trace_name": trace.name,
+            "label": label.label if label else None,
+            "quality_score": label.quality_score if label else None,
+            "metadata": _artifact_value(trace.trace_metadata or {}, include_raw=include_raw),
+        }
+        if payload.format == "chat":
+            item["messages"] = [
+                {
+                    "role": "user",
+                    "content": _serialize(
+                        _artifact_value(_first_meaningful_input(spans), include_raw=include_raw),
+                        4000,
+                    ),
+                },
+                {
+                    "role": "assistant",
+                    "content": _serialize(
+                        _artifact_value(_last_meaningful_output(spans), include_raw=include_raw),
+                        4000,
+                    ),
+                },
+            ]
+        elif payload.format == "tool_calls":
+            item["steps"] = [
+                {
+                    "span_id": span.id,
+                    "name": span.name,
+                    "type": span.span_type,
+                    "input": _artifact_value(span.input, include_raw=include_raw),
+                    "output": _artifact_value(span.output, include_raw=include_raw),
+                    "error": span.error,
+                }
+                for span in spans
+            ]
+        else:
+            item["prompt"] = _serialize(
+                _artifact_value(_first_meaningful_input(spans), include_raw=include_raw),
+                4000,
+            )
+            item["chosen"] = _serialize(
+                _artifact_value(_last_meaningful_output(spans), include_raw=include_raw),
+                4000,
+            )
+            item["rejected"] = ""
+        records.append(item)
+
+    return {
+        "format": payload.format,
+        "record_count": len(records),
+        "skipped_count": len(skipped),
+        "records": records,
+        "skipped": skipped,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _serialize_dataset_build(build: DatasetBuild, *, include_artifact: bool = False) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "id": str(build.id),
+        "name": build.name,
+        "format": build.format,
+        "source_trace_ids": build.source_trace_ids or [],
+        "options": build.options or {},
+        "record_count": build.record_count,
+        "skipped_count": build.skipped_count,
+        "redaction_mode": build.redaction_mode,
+        "created_at": build.created_at.isoformat() if build.created_at else None,
+    }
+    if include_artifact:
+        payload["artifact"] = build.artifact
+    return payload
 
 
 def _serialize_eval_suite(suite: EvalSuite, *, include_cases: bool = False) -> dict[str, Any]:
@@ -572,6 +682,126 @@ async def build_dataset(
         "skipped": skipped,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+@router.post("/datasets/builds", status_code=201)
+async def create_dataset_build(
+    payload: SavedDatasetBuildRequest,
+    request: Request,
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Persist a redacted dataset artifact generated from selected traces."""
+    artifact = _build_dataset_artifact(
+        payload,
+        project.id,
+        db,
+        include_raw=payload.include_raw,
+    )
+    redaction_mode = "raw" if payload.include_raw else "redacted"
+    options = {
+        "include_failed": payload.include_failed,
+        "min_quality_score": payload.min_quality_score,
+        "include_raw": payload.include_raw,
+    }
+    build = DatasetBuild(
+        project_id=project.id,
+        name=payload.name.strip(),
+        format=payload.format,
+        source_trace_ids=payload.trace_ids,
+        options=options,
+        record_count=artifact["record_count"],
+        skipped_count=artifact["skipped_count"],
+        redaction_mode=redaction_mode,
+        artifact=artifact,
+    )
+    db.add(build)
+    db.commit()
+    db.refresh(build)
+    audit_log(
+        "dataset_build_created",
+        request_id=getattr(request.state, "request_id", None),
+        project_id=str(project.id),
+        dataset_build_id=str(build.id),
+        format=build.format,
+        record_count=build.record_count,
+        skipped_count=build.skipped_count,
+        redaction_mode=redaction_mode,
+    )
+    return _serialize_dataset_build(build, include_artifact=True)
+
+
+@router.get("/datasets/builds")
+async def list_dataset_builds(
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    """List saved dataset builds for the current project."""
+    query = db.query(DatasetBuild).filter(DatasetBuild.project_id == project.id)
+    total = query.count()
+    builds = query.order_by(DatasetBuild.created_at.desc()).offset(offset).limit(limit).all()
+    return {
+        "builds": [_serialize_dataset_build(build) for build in builds],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.get("/datasets/builds/{build_id}")
+async def get_dataset_build(
+    build_id: UUID,
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Get a saved dataset build with its artifact."""
+    build = (
+        db.query(DatasetBuild)
+        .filter(DatasetBuild.id == build_id, DatasetBuild.project_id == project.id)
+        .first()
+    )
+    if not build:
+        raise HTTPException(status_code=404, detail="Dataset build not found")
+    return _serialize_dataset_build(build, include_artifact=True)
+
+
+@router.get("/datasets/builds/{build_id}/download")
+async def download_dataset_build(
+    request: Request,
+    build_id: UUID,
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+    format: str = Query(default="json", pattern="^(json|jsonl)$"),
+):
+    """Download a saved dataset build artifact as JSON or JSONL."""
+    build = (
+        db.query(DatasetBuild)
+        .filter(DatasetBuild.id == build_id, DatasetBuild.project_id == project.id)
+        .first()
+    )
+    if not build:
+        raise HTTPException(status_code=404, detail="Dataset build not found")
+
+    audit_log(
+        "dataset_build_downloaded",
+        request_id=getattr(request.state, "request_id", None),
+        project_id=str(project.id),
+        dataset_build_id=str(build.id),
+        download_format=format,
+        redaction_mode=build.redaction_mode,
+    )
+    if format == "jsonl":
+        records = (build.artifact or {}).get("records", [])
+        content = "\n".join(json.dumps(record, sort_keys=True, default=str) for record in records)
+        return PlainTextResponse(
+            content=content,
+            media_type="application/x-ndjson",
+            headers={"Content-Disposition": f'attachment; filename="{build.id}.jsonl"'},
+        )
+    return build.artifact
 
 
 @router.post("/evals/suite")

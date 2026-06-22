@@ -213,6 +213,125 @@ def test_dataset_builder_filters_and_formats_records(client):
     assert tool_response.json()["records"][0]["steps"][0]["name"] == "agent.plan"
 
 
+def test_saved_dataset_build_redacts_by_default_and_downloads_jsonl(client):
+    api_key = _create_project(client, "saved-dataset-project")
+    now = datetime.now(timezone.utc).isoformat()
+    response = client.post(
+        "/api/v1/traces/spans/batch",
+        headers=_headers(api_key),
+        json=[
+            {
+                "span_id": "dataset-redact-span",
+                "trace_id": "dataset-redact-trace",
+                "name": "tool.secret",
+                "span_type": "tool",
+                "status": "success",
+                "start_time": now,
+                "end_time": now,
+                "input": {"query": "pricing", "api_key": "secret-key"},
+                "output": {"result": "ok", "access_token": "secret-token"},
+                "trace_name": "Dataset redaction trace",
+            }
+        ],
+    )
+    assert response.status_code == 201
+
+    build_response = client.post(
+        "/api/v1/datasets/builds",
+        headers=_headers(api_key),
+        json={
+            "trace_ids": ["dataset-redact-trace"],
+            "name": "Redacted build",
+            "format": "tool_calls",
+            "include_raw": False,
+        },
+    )
+    assert build_response.status_code == 201
+    build = build_response.json()
+    assert build["redaction_mode"] == "redacted"
+    assert build["record_count"] == 1
+    step = build["artifact"]["records"][0]["steps"][0]
+    assert step["input"]["api_key"] == "[REDACTED]"
+    assert step["output"]["access_token"] == "[REDACTED]"
+
+    list_response = client.get("/api/v1/datasets/builds", headers=_headers(api_key))
+    assert list_response.status_code == 200
+    assert list_response.json()["total"] == 1
+
+    download_response = client.get(
+        f"/api/v1/datasets/builds/{build['id']}/download?format=jsonl",
+        headers=_headers(api_key),
+    )
+    assert download_response.status_code == 200
+    assert "dataset-redact-trace" in download_response.text
+
+
+def test_saved_dataset_build_include_raw_is_explicit(client):
+    api_key = _create_project(client, "saved-dataset-raw")
+    now = datetime.now(timezone.utc).isoformat()
+    response = client.post(
+        "/api/v1/traces/spans/batch",
+        headers=_headers(api_key),
+        json=[
+            {
+                "span_id": "dataset-raw-span",
+                "trace_id": "dataset-raw-trace",
+                "name": "tool.raw",
+                "span_type": "tool",
+                "status": "success",
+                "start_time": now,
+                "end_time": now,
+                "input": {"api_key": "secret-key"},
+                "output": {"access_token": "secret-token"},
+                "trace_name": "Dataset raw trace",
+            }
+        ],
+    )
+    assert response.status_code == 201
+
+    build_response = client.post(
+        "/api/v1/datasets/builds",
+        headers=_headers(api_key),
+        json={
+            "trace_ids": ["dataset-raw-trace"],
+            "name": "Raw build",
+            "format": "tool_calls",
+            "include_raw": True,
+        },
+    )
+    assert build_response.status_code == 201
+    build = build_response.json()
+    assert build["redaction_mode"] == "raw"
+    assert build["options"]["include_raw"] is True
+    step = build["artifact"]["records"][0]["steps"][0]
+    assert step["input"]["api_key"] == "secret-key"
+    assert step["output"]["access_token"] == "secret-token"
+
+
+def test_saved_dataset_builds_are_project_isolated(client):
+    api_key_a = _create_project(client, "dataset-a")
+    api_key_b = _create_project(client, "dataset-b")
+    _ingest_trace(client, api_key_a, "dataset-a-trace")
+    _ingest_trace(client, api_key_b, "dataset-b-trace")
+
+    build_response = client.post(
+        "/api/v1/datasets/builds",
+        headers=_headers(api_key_a),
+        json={"trace_ids": ["dataset-a-trace"], "name": "A build"},
+    )
+    assert build_response.status_code == 201
+    build_id = build_response.json()["id"]
+
+    foreign_detail = client.get(f"/api/v1/datasets/builds/{build_id}", headers=_headers(api_key_b))
+    assert foreign_detail.status_code == 404
+
+    foreign_download = client.get(
+        f"/api/v1/datasets/builds/{build_id}/download",
+        headers=_headers(api_key_b),
+    )
+    assert foreign_download.status_code == 404
+
+
 def test_eval_suite_generates_assertions_from_trace_metrics(client):
     api_key = _create_project(client)
     _ingest_trace(client, api_key, "eval-source", trace_name="Eval source")
