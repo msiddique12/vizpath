@@ -44,7 +44,7 @@ Scoped key permissions:
 
 - `read` — trace/intelligence read access
 - `ingest` — span ingestion
-- `curate` — curation labels/exports
+- `curate` — curation labels/exports and persistent triage/eval/dataset workflow writes
 - `admin` — key/budget management and destructive operations (implies all scopes)
 
 Unauthenticated fallback is disabled by default. For local-only demo workflows,
@@ -91,6 +91,58 @@ Query and body parameters are documented in generated OpenAPI (`/docs`).
   - Delete label and all labels for trace
 - `GET /api/v1/curation/traces`
 - `GET /api/v1/curation/traces/export`
+
+---
+
+## Persistent Product Workflows
+
+These endpoints are project-scoped. Reads/downloads require `read`; creates and updates require `curate`.
+Legacy project keys keep full access. Existing stateless preview endpoints remain compatible.
+
+### Triage
+
+- `GET /api/v1/triage/items`
+  - List durable failure inbox items for the current project.
+- `POST /api/v1/triage/items`
+  - Create a triage item from a trace. Fields include `trace_id`, `status`, `priority`, `owner`,
+    `failure_mode`, `title`, `notes`, and `linked_trace_ids`.
+- `PATCH /api/v1/triage/items/{id}`
+  - Update status, priority, ownership, notes, or resolver fields.
+- `POST /api/v1/triage/items/{id}/links`
+  - Add linked traces. Linked traces must belong to the same project.
+
+Triage is separate from curation labels. A failure inbox action can update triage without creating a label.
+
+### Eval Suites
+
+- `POST /api/v1/evals/suites`
+  - Persist an eval suite generated from current project traces.
+- `GET /api/v1/evals/suites`
+  - List saved suites.
+- `GET /api/v1/evals/suites/{id}`
+  - Fetch suite cases and recent runs.
+- `POST /api/v1/evals/suites/{id}/runs`
+  - Record a deterministic run against candidate trace IDs. V1 records assertions and results; it does not execute external agents.
+- `GET /api/v1/evals/runs/{id}`
+  - Fetch run summary and case results.
+
+Compatibility: `POST /api/v1/evals/suite` remains the stateless preview generator.
+
+### Dataset Builds
+
+- `POST /api/v1/datasets/builds`
+  - Persist a redacted dataset artifact from selected traces.
+- `GET /api/v1/datasets/builds`
+  - List saved builds.
+- `GET /api/v1/datasets/builds/{id}`
+  - Fetch build metadata and artifact summary.
+- `GET /api/v1/datasets/builds/{id}/download?format=json|jsonl`
+  - Download the saved artifact.
+
+Dataset builds are redacted by default. Raw span input/output is only included when `include_raw=true`
+is explicitly sent, and that choice is recorded in build options/audit metadata.
+
+Compatibility: `POST /api/v1/datasets/build` remains the stateless preview builder.
 
 ---
 
