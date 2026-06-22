@@ -85,6 +85,26 @@ def _infer_required_scope(request: Request) -> str | None:
     if path.startswith("/api/v1/curation"):
         return API_KEY_SCOPE_CURATE
 
+    if path.startswith("/api/v1/triage/items"):
+        if method == "GET":
+            return API_KEY_SCOPE_READ
+        return API_KEY_SCOPE_CURATE
+
+    if path.startswith("/api/v1/datasets/builds"):
+        if method == "GET":
+            return API_KEY_SCOPE_READ
+        return API_KEY_SCOPE_CURATE
+
+    if path.startswith("/api/v1/evals/suites"):
+        if method == "GET":
+            return API_KEY_SCOPE_READ
+        return API_KEY_SCOPE_CURATE
+
+    if path.startswith("/api/v1/evals/runs"):
+        if method == "GET":
+            return API_KEY_SCOPE_READ
+        return API_KEY_SCOPE_CURATE
+
     if path.startswith("/api/v1/traces/spans/batch"):
         return API_KEY_SCOPE_INGEST
 

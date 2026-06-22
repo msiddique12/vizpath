@@ -108,3 +108,68 @@ def test_admin_scope_required_for_key_management(client):
 
     revoked_key_use = client.get("/api/v1/projects/me", headers={"X-API-Key": read_key})
     assert revoked_key_use.status_code == 401
+
+
+def test_persistent_workflows_require_curate_for_writes_and_read_for_reads(client):
+    legacy_key = _create_project(client, "scope-workflow-project")
+    _ingest_single_span(client, legacy_key, "workflow")
+
+    read_key = _create_scoped_key(client, legacy_key, "workflow-reader", ["read"])
+    curate_key = _create_scoped_key(client, legacy_key, "workflow-curator", ["curate"])
+
+    read_triage = client.get("/api/v1/triage/items", headers={"X-API-Key": read_key})
+    assert read_triage.status_code == 200
+
+    denied_triage_write = client.post(
+        "/api/v1/triage/items",
+        headers={"X-API-Key": read_key},
+        json={"trace_id": "trace-scope-workflow", "title": "Needs review"},
+    )
+    assert denied_triage_write.status_code == 403
+    assert "required scope: curate" in denied_triage_write.json()["detail"]
+
+    triage_write = client.post(
+        "/api/v1/triage/items",
+        headers={"X-API-Key": curate_key},
+        json={"trace_id": "trace-scope-workflow", "title": "Needs review"},
+    )
+    assert triage_write.status_code == 201
+
+    dataset_write = client.post(
+        "/api/v1/datasets/builds",
+        headers={"X-API-Key": curate_key},
+        json={"trace_ids": ["trace-scope-workflow"], "name": "Scoped build"},
+    )
+    assert dataset_write.status_code == 201
+    dataset_id = dataset_write.json()["id"]
+
+    dataset_read = client.get(
+        f"/api/v1/datasets/builds/{dataset_id}",
+        headers={"X-API-Key": read_key},
+    )
+    assert dataset_read.status_code == 200
+
+    denied_dataset_write = client.post(
+        "/api/v1/datasets/builds",
+        headers={"X-API-Key": read_key},
+        json={"trace_ids": ["trace-scope-workflow"], "name": "Denied build"},
+    )
+    assert denied_dataset_write.status_code == 403
+
+    suite_write = client.post(
+        "/api/v1/evals/suites",
+        headers={"X-API-Key": curate_key},
+        json={"trace_ids": ["trace-scope-workflow"], "name": "Scoped suite"},
+    )
+    assert suite_write.status_code == 201
+    suite_id = suite_write.json()["id"]
+
+    suite_read = client.get(f"/api/v1/evals/suites/{suite_id}", headers={"X-API-Key": read_key})
+    assert suite_read.status_code == 200
+
+    denied_run_write = client.post(
+        f"/api/v1/evals/suites/{suite_id}/runs",
+        headers={"X-API-Key": read_key},
+        json={"candidate_trace_ids": ["trace-scope-workflow"]},
+    )
+    assert denied_run_write.status_code == 403
