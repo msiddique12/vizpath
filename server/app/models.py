@@ -77,6 +77,11 @@ class Project(Base):
         back_populates="project",
         cascade="all, delete-orphan",
     )
+    triage_items = relationship(
+        "TriageItem",
+        back_populates="project",
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self) -> str:
         return f"<Project(id={self.id}, name='{self.name}')>"
@@ -200,6 +205,46 @@ class CuratedLabel(Base):
 
     def __repr__(self) -> str:
         return f"<CuratedLabel(trace_id={self.trace_id}, label='{self.label}')>"
+
+
+class TriageItem(Base):
+    """Durable workflow item for failed or risky traces."""
+
+    __tablename__ = "triage_items"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id"),
+        nullable=False,
+        index=True,
+    )
+    trace_id = Column(String(64), ForeignKey("traces.id"), nullable=False, index=True)
+    status = Column(String(20), default="open", nullable=False, index=True)
+    priority = Column(String(20), default="medium", nullable=False, index=True)
+    owner = Column(String(120), nullable=True, index=True)
+    failure_mode = Column(String(120), nullable=True, index=True)
+    title = Column(String(255), nullable=False)
+    notes = Column(Text, nullable=True)
+    linked_trace_ids = Column(JSON, default=list, nullable=False)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    resolved_by = Column(String(120), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
+
+    project = relationship("Project", back_populates="triage_items")
+    trace = relationship("Trace")
+
+    __table_args__ = (
+        Index("ix_triage_project_status_created", "project_id", "status", "created_at"),
+        Index("ix_triage_project_trace", "project_id", "trace_id", unique=True),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<TriageItem(project_id={self.project_id}, trace_id={self.trace_id}, "
+            f"status={self.status})>"
+        )
 
 
 class ProjectApiKey(Base):
