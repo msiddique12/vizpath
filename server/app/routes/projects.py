@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.auth import (
@@ -22,7 +22,8 @@ from app.budgeting import (
     get_project_month_usage,
 )
 from app.database import get_db
-from app.models import Project, ProjectApiKey, ProjectBudget
+from app.models import Project, ProjectApiKey, ProjectBudget, ProjectRedactionPolicy
+from app.redaction import default_redaction_policy, normalize_redaction_mode
 from app.security import audit_log
 
 logger = logging.getLogger(__name__)
@@ -139,6 +140,67 @@ class ProjectBudgetStatusResponse(BaseModel):
     hard_stop_enabled: bool
 
 
+class RedactionPolicyResponse(BaseModel):
+    """Response schema for project redaction policy."""
+
+    enabled: bool
+    mode: str
+    rules: dict
+    created_at: str | None
+    updated_at: str | None
+
+
+class RedactionPolicyUpdateRequest(BaseModel):
+    """Request schema for project redaction policy updates."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool | None = None
+    mode: str | None = Field(default=None)
+    rules: dict | None = Field(default=None, max_length=50)
+
+    @field_validator("mode")
+    @classmethod
+    def validate_mode(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return normalize_redaction_mode(value)
+
+
+def _default_policy_rules() -> dict:
+    return dict(default_redaction_policy()["rules"])
+
+
+def _get_or_create_redaction_policy(db: Session, project_id) -> ProjectRedactionPolicy:
+    policy = (
+        db.query(ProjectRedactionPolicy)
+        .filter(ProjectRedactionPolicy.project_id == project_id)
+        .first()
+    )
+    if policy:
+        return policy
+    policy = ProjectRedactionPolicy(
+        project_id=project_id,
+        enabled=True,
+        mode="audit_only",
+        rules=_default_policy_rules(),
+    )
+    db.add(policy)
+    db.commit()
+    db.refresh(policy)
+    return policy
+
+
+def _to_redaction_policy_response(policy: ProjectRedactionPolicy) -> RedactionPolicyResponse:
+    return RedactionPolicyResponse(
+        enabled=bool(policy.enabled),
+        mode=policy.mode,
+        rules=policy.rules or {},
+        created_at=policy.created_at.isoformat() if policy.created_at else None,
+        updated_at=policy.updated_at.isoformat() if policy.updated_at else None,
+    )
+
+
 def _to_budget_response(budget: ProjectBudget | None) -> ProjectBudgetResponse:
     """Serialize a project budget with sensible defaults when unset."""
     if budget is None:
@@ -230,6 +292,48 @@ async def get_current_project(
         name=project.name,
         created_at=project.created_at.isoformat(),
     )
+
+
+@router.get("/me/redaction-policy", response_model=RedactionPolicyResponse)
+async def get_redaction_policy(
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> RedactionPolicyResponse:
+    """Get the current project's centralized redaction policy."""
+    policy = _get_or_create_redaction_policy(db, project.id)
+    return _to_redaction_policy_response(policy)
+
+
+@router.put("/me/redaction-policy", response_model=RedactionPolicyResponse)
+async def update_redaction_policy(
+    payload: RedactionPolicyUpdateRequest,
+    request: Request,
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> RedactionPolicyResponse:
+    """Update the current project's centralized redaction policy."""
+    policy = _get_or_create_redaction_policy(db, project.id)
+
+    if "enabled" in payload.model_fields_set and payload.enabled is not None:
+        policy.enabled = payload.enabled
+    if "mode" in payload.model_fields_set and payload.mode is not None:
+        policy.mode = normalize_redaction_mode(payload.mode)
+    if "rules" in payload.model_fields_set and payload.rules is not None:
+        policy.rules = payload.rules
+    policy.updated_at = datetime.now(timezone.utc)
+
+    db.commit()
+    db.refresh(policy)
+
+    audit_log(
+        "redaction_policy_updated",
+        request_id=getattr(request.state, "request_id", None),
+        project_id=str(project.id),
+        enabled=policy.enabled,
+        mode=policy.mode,
+        disabled_rule_count=len((policy.rules or {}).get("disabled_rule_ids") or []),
+    )
+    return _to_redaction_policy_response(policy)
 
 
 @router.get("/me/keys", response_model=list[ProjectApiKeyResponse])

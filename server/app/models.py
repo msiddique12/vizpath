@@ -77,6 +77,17 @@ class Project(Base):
         back_populates="project",
         cascade="all, delete-orphan",
     )
+    redaction_policy = relationship(
+        "ProjectRedactionPolicy",
+        back_populates="project",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    sensitive_findings = relationship(
+        "SensitiveSpanFinding",
+        back_populates="project",
+        cascade="all, delete-orphan",
+    )
     triage_items = relationship(
         "TriageItem",
         back_populates="project",
@@ -197,6 +208,69 @@ class Span(Base):
 
     def __repr__(self) -> str:
         return f"<Span(id={self.id}, name='{self.name}')>"
+
+
+class ProjectRedactionPolicy(Base):
+    """Per-project sensitive data redaction policy."""
+
+    __tablename__ = "project_redaction_policies"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    mode = Column(String(40), default="audit_only", nullable=False)
+    rules = Column(JSON, default=dict, nullable=False)
+    enabled = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
+
+    project = relationship("Project", back_populates="redaction_policy")
+
+    def __repr__(self) -> str:
+        return f"<ProjectRedactionPolicy(project_id={self.project_id}, mode={self.mode})>"
+
+
+class SensitiveSpanFinding(Base):
+    """Sensitive-data finding detected while scanning span payloads."""
+
+    __tablename__ = "sensitive_span_findings"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id"),
+        nullable=False,
+        index=True,
+    )
+    trace_id = Column(String(64), ForeignKey("traces.id"), nullable=False, index=True)
+    span_id = Column(String(64), ForeignKey("spans.id"), nullable=True, index=True)
+    field_path = Column(String(512), nullable=False)
+    rule_id = Column(String(80), nullable=False, index=True)
+    severity = Column(String(20), nullable=False, index=True)
+    action = Column(String(40), nullable=False)
+    value_fingerprint = Column(String(24), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    project = relationship("Project", back_populates="sensitive_findings")
+    trace = relationship("Trace")
+    span = relationship("Span")
+
+    __table_args__ = (
+        Index("ix_sensitive_findings_project_created", "project_id", "created_at"),
+        Index("ix_sensitive_findings_project_trace", "project_id", "trace_id"),
+        Index("ix_sensitive_findings_project_severity_created", "project_id", "severity", "created_at"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<SensitiveSpanFinding(project_id={self.project_id}, trace_id={self.trace_id}, "
+            f"rule_id={self.rule_id})>"
+        )
 
 
 class CuratedLabel(Base):

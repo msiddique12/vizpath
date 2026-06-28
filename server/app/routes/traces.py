@@ -5,7 +5,7 @@ from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import case, desc, func, nullslast
 from sqlalchemy.orm import Session
@@ -17,8 +17,10 @@ from app.intelligence.guardrail import (
     build_insufficient_baseline_guardrail,
     build_regression_guardrail,
 )
-from app.models import Project, Span, Trace
+from app.models import Project, ProjectRedactionPolicy, SensitiveSpanFinding, Span, Trace
+from app.redaction import RedactionFinding, default_redaction_policy, scan_and_redact
 from app.routes.ws import notify_span_ingested
+from app.security import audit_log
 from app.validation import ID_PATTERN, SPAN_TYPE_PATTERN, STATUS_PATTERN, normalize_text
 
 logger = logging.getLogger(__name__)
@@ -444,6 +446,69 @@ def _enforce_hard_stop_budget(
         )
 
 
+def _redaction_policy_for_project(db: Session, project_id: Any) -> tuple[bool, str, dict[str, Any]]:
+    policy = (
+        db.query(ProjectRedactionPolicy)
+        .filter(ProjectRedactionPolicy.project_id == project_id)
+        .first()
+    )
+    if policy is None:
+        defaults = default_redaction_policy()
+        return bool(defaults["enabled"]), str(defaults["mode"]), dict(defaults["rules"])
+    return bool(policy.enabled), policy.mode, policy.rules or {}
+
+
+def _scan_span_for_sensitive_data(
+    span_data: SpanCreate,
+    *,
+    rules: dict[str, Any],
+) -> tuple[SpanCreate, list[RedactionFinding]]:
+    findings: list[RedactionFinding] = []
+    updates: dict[str, Any] = {}
+    fields = {
+        "attributes": span_data.attributes,
+        "events": span_data.events,
+        "input": span_data.input,
+        "output": span_data.output,
+        "error": span_data.error,
+        "trace_metadata": span_data.trace_metadata,
+    }
+    for field_name, value in fields.items():
+        result = scan_and_redact(
+            value,
+            policy_rules=rules,
+            field_path=f"span.{span_data.span_id}.{field_name}",
+        )
+        updates[field_name] = result.value
+        findings.extend(result.findings)
+    return span_data.model_copy(update=updates), findings
+
+
+def _persist_sensitive_findings(
+    db: Session,
+    project_id: Any,
+    span_data: SpanCreate,
+    findings: list[RedactionFinding],
+) -> None:
+    db.query(SensitiveSpanFinding).filter(
+        SensitiveSpanFinding.project_id == project_id,
+        SensitiveSpanFinding.span_id == span_data.span_id,
+    ).delete(synchronize_session=False)
+    for finding in findings:
+        db.add(
+            SensitiveSpanFinding(
+                project_id=project_id,
+                trace_id=span_data.trace_id,
+                span_id=span_data.span_id,
+                field_path=finding.field_path,
+                rule_id=finding.rule_id,
+                severity=finding.severity,
+                action=finding.action,
+                value_fingerprint=finding.value_fingerprint,
+            )
+        )
+
+
 def _update_trace_regression_guardrail(
     db: Session,
     project_id: Any,
@@ -484,6 +549,7 @@ def _update_trace_regression_guardrail(
 @router.post("/spans/batch", status_code=201)
 async def ingest_spans(
     payload: list[SpanCreate],
+    request: Request,
     project: Project = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
@@ -497,16 +563,54 @@ async def ingest_spans(
         return {"ingested": 0}
 
     _enforce_hard_stop_budget(db, project, payload)
+    redaction_enabled, redaction_mode, redaction_rules = _redaction_policy_for_project(db, project.id)
 
     # Sort spans so parents come before children (prevents FK violations)
     sorted_payload = _topological_sort_spans(payload)
 
     traces_updated = set()
+    findings_by_span_id: dict[str, list[RedactionFinding]] = {}
 
     for span_data in sorted_payload:
+        if redaction_enabled:
+            redacted_span_data, findings = _scan_span_for_sensitive_data(
+                span_data,
+                rules=redaction_rules,
+            )
+            if redaction_mode == "block" and any(
+                finding.severity in {"high", "critical"} for finding in findings
+            ):
+                audit_log(
+                    "redaction_ingest_blocked",
+                    request_id=getattr(request.state, "request_id", None),
+                    project_id=str(project.id),
+                    trace_id=span_data.trace_id,
+                    span_id=span_data.span_id,
+                    finding_count=len(findings),
+                )
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "sensitive_data_blocked",
+                        "message": "Span batch contains sensitive data blocked by project redaction policy.",
+                        "trace_id": span_data.trace_id,
+                        "span_id": span_data.span_id,
+                        "finding_count": len(findings),
+                    },
+                )
+            findings_by_span_id[span_data.span_id] = findings
+            if redaction_mode == "redact_on_write":
+                span_data = redacted_span_data
         trace = get_or_create_trace(db, span_data.trace_id, project.id, span_data)
         traces_updated.add(trace.id)
         _upsert_span(db, project.id, span_data)
+        if redaction_enabled:
+            _persist_sensitive_findings(
+                db,
+                project.id,
+                span_data,
+                findings_by_span_id.get(span_data.span_id, []),
+            )
 
     # Ensure newly added spans are visible to aggregate queries below.
     db.flush()
@@ -565,6 +669,18 @@ async def ingest_spans(
             _update_trace_regression_guardrail(db, project.id, trace, trace_spans)
 
     db.commit()
+
+    total_findings = sum(len(findings) for findings in findings_by_span_id.values())
+    if total_findings:
+        audit_log(
+            "redaction_findings_recorded",
+            request_id=getattr(request.state, "request_id", None),
+            project_id=str(project.id),
+            trace_count=len(traces_updated),
+            span_count=len(findings_by_span_id),
+            finding_count=total_findings,
+            mode=redaction_mode,
+        )
 
     for trace_id in traces_updated:
         await notify_span_ingested(str(trace_id), len(payload), project_id=str(project.id))

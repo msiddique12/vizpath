@@ -134,10 +134,18 @@ def _infer_required_scope(request: Request) -> str | None:
             return API_KEY_SCOPE_READ
         return API_KEY_SCOPE_ADMIN
 
+    if path.startswith("/api/v1/projects/me/redaction-policy"):
+        if method == "GET":
+            return API_KEY_SCOPE_READ
+        return API_KEY_SCOPE_ADMIN
+
     if path.startswith("/api/v1/projects/me"):
         if method == "GET":
             return API_KEY_SCOPE_READ
         return API_KEY_SCOPE_ADMIN
+
+    if path.startswith("/api/v1/redaction"):
+        return API_KEY_SCOPE_READ
 
     if path.startswith("/api/v1/projects"):
         if method == "GET":

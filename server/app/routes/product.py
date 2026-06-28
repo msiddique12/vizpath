@@ -18,7 +18,8 @@ from sqlalchemy.orm import Session
 
 from app.auth import verify_api_key
 from app.database import get_db
-from app.models import CuratedLabel, DatasetBuild, EvalCase, EvalCaseResult, EvalRun, EvalSuite, Project, Span, Trace
+from app.models import CuratedLabel, DatasetBuild, EvalCase, EvalCaseResult, EvalRun, EvalSuite, Project, ProjectRedactionPolicy, Span, Trace
+from app.redaction import default_redaction_policy, scan_and_redact
 from app.security import audit_log
 
 router = APIRouter(tags=["Product"])
@@ -119,34 +120,20 @@ def _serialize(value: Any, limit: int = 1200) -> str:
     return text[:limit]
 
 
-_SENSITIVE_KEYS = {
-    "authorization",
-    "api_key",
-    "apikey",
-    "password",
-    "access_token",
-    "refresh_token",
-    "secret",
-    "private_key",
-    "token",
-}
+def _redaction_rules_for_project(db: Session, project_id: Any) -> dict[str, Any]:
+    policy = (
+        db.query(ProjectRedactionPolicy)
+        .filter(ProjectRedactionPolicy.project_id == project_id)
+        .first()
+    )
+    if policy is None or not policy.enabled:
+        return dict(default_redaction_policy()["rules"])
+    return policy.rules or {}
 
 
-def _redact_sensitive_value(value: Any) -> Any:
+def _redact_sensitive_value(value: Any, *, policy_rules: dict[str, Any] | None = None) -> Any:
     """Redact sensitive fields in persisted eval and dataset artifacts."""
-    if isinstance(value, dict):
-        redacted: dict[str, Any] = {}
-        for key, nested in value.items():
-            if isinstance(key, str) and key.lower() in _SENSITIVE_KEYS:
-                redacted[key] = "[REDACTED]"
-            else:
-                redacted[key] = _redact_sensitive_value(nested)
-        return redacted
-    if isinstance(value, list):
-        return [_redact_sensitive_value(item) for item in value]
-    if isinstance(value, tuple):
-        return [_redact_sensitive_value(item) for item in value]
-    return value
+    return scan_and_redact(value, field_path="artifact", policy_rules=policy_rules).value
 
 
 def _load_trace_bundle(db: Session, project_id: Any, trace_id: str) -> tuple[Trace, list[Span]]:
@@ -204,7 +191,7 @@ def _trace_metrics(trace: Trace, spans: list[Span]) -> dict[str, float]:
     total_tokens = _safe_number(trace.total_tokens)
     total_cost = _safe_number(trace.total_cost)
     return {
-        "duration_ms": duration_ms if duration_ms > 0 else span_duration_total,
+        "duration_ms": max(duration_ms, span_duration_total),
         "error_count": _safe_number(trace.error_count),
         "total_tokens": total_tokens if total_tokens > 0 else span_token_total,
         "total_cost": total_cost if total_cost > 0 else span_cost_total,
@@ -249,6 +236,7 @@ def _build_eval_case_payload(
     trace: Trace,
     spans: list[Span],
     assertion_profile: str,
+    policy_rules: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     metrics = _trace_metrics(trace, spans)
     assertions = [
@@ -285,15 +273,15 @@ def _build_eval_case_payload(
         "id": f"eval-{trace_id}",
         "source_trace_id": trace_id,
         "name": trace.name,
-        "input": _redact_sensitive_value(_first_meaningful_input(spans)),
-        "expected_output": _redact_sensitive_value(_last_meaningful_output(spans)),
+        "input": _redact_sensitive_value(_first_meaningful_input(spans), policy_rules=policy_rules),
+        "expected_output": _redact_sensitive_value(_last_meaningful_output(spans), policy_rules=policy_rules),
         "baseline_metrics": metrics,
         "assertions": assertions,
     }
 
 
-def _artifact_value(value: Any, *, include_raw: bool) -> Any:
-    return value if include_raw else _redact_sensitive_value(value)
+def _artifact_value(value: Any, *, include_raw: bool, policy_rules: dict[str, Any] | None = None) -> Any:
+    return value if include_raw else _redact_sensitive_value(value, policy_rules=policy_rules)
 
 
 def _build_dataset_artifact(
@@ -303,6 +291,7 @@ def _build_dataset_artifact(
     *,
     include_raw: bool,
 ) -> dict[str, Any]:
+    policy_rules = _redaction_rules_for_project(db, project_id)
     records = []
     skipped = []
     for trace_id in payload.trace_ids:
@@ -323,21 +312,21 @@ def _build_dataset_artifact(
             "trace_name": trace.name,
             "label": label.label if label else None,
             "quality_score": label.quality_score if label else None,
-            "metadata": _artifact_value(trace.trace_metadata or {}, include_raw=include_raw),
+            "metadata": _artifact_value(trace.trace_metadata or {}, include_raw=include_raw, policy_rules=policy_rules),
         }
         if payload.format == "chat":
             item["messages"] = [
                 {
                     "role": "user",
                     "content": _serialize(
-                        _artifact_value(_first_meaningful_input(spans), include_raw=include_raw),
+                        _artifact_value(_first_meaningful_input(spans), include_raw=include_raw, policy_rules=policy_rules),
                         4000,
                     ),
                 },
                 {
                     "role": "assistant",
                     "content": _serialize(
-                        _artifact_value(_last_meaningful_output(spans), include_raw=include_raw),
+                        _artifact_value(_last_meaningful_output(spans), include_raw=include_raw, policy_rules=policy_rules),
                         4000,
                     ),
                 },
@@ -348,19 +337,19 @@ def _build_dataset_artifact(
                     "span_id": span.id,
                     "name": span.name,
                     "type": span.span_type,
-                    "input": _artifact_value(span.input, include_raw=include_raw),
-                    "output": _artifact_value(span.output, include_raw=include_raw),
+                    "input": _artifact_value(span.input, include_raw=include_raw, policy_rules=policy_rules),
+                    "output": _artifact_value(span.output, include_raw=include_raw, policy_rules=policy_rules),
                     "error": span.error,
                 }
                 for span in spans
             ]
         else:
             item["prompt"] = _serialize(
-                _artifact_value(_first_meaningful_input(spans), include_raw=include_raw),
+                _artifact_value(_first_meaningful_input(spans), include_raw=include_raw, policy_rules=policy_rules),
                 4000,
             )
             item["chosen"] = _serialize(
-                _artifact_value(_last_meaningful_output(spans), include_raw=include_raw),
+                _artifact_value(_last_meaningful_output(spans), include_raw=include_raw, policy_rules=policy_rules),
                 4000,
             )
             item["rejected"] = ""
@@ -812,9 +801,18 @@ async def build_eval_suite(
 ) -> dict[str, Any]:
     """Generate executable eval case specs from traces."""
     cases = []
+    policy_rules = _redaction_rules_for_project(db, project.id)
     for trace_id in payload.trace_ids:
         trace, spans = _load_trace_bundle(db, project.id, trace_id)
-        cases.append(_build_eval_case_payload(trace_id, trace, spans, payload.assertion_profile))
+        cases.append(
+            _build_eval_case_payload(
+                trace_id,
+                trace,
+                spans,
+                payload.assertion_profile,
+                policy_rules=policy_rules,
+            )
+        )
 
     return {
         "name": payload.name,
@@ -842,9 +840,16 @@ async def create_saved_eval_suite(
     db.add(suite)
     db.flush()
 
+    policy_rules = _redaction_rules_for_project(db, project.id)
     for trace_id in payload.trace_ids:
         trace, spans = _load_trace_bundle(db, project.id, trace_id)
-        case_payload = _build_eval_case_payload(trace_id, trace, spans, payload.assertion_profile)
+        case_payload = _build_eval_case_payload(
+            trace_id,
+            trace,
+            spans,
+            payload.assertion_profile,
+            policy_rules=policy_rules,
+        )
         db.add(
             EvalCase(
                 suite_id=suite.id,
