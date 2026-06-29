@@ -118,6 +118,9 @@ def _infer_required_scope(request: Request) -> str | None:
     if path.startswith("/api/v1/intelligence"):
         return API_KEY_SCOPE_READ
 
+    if path.startswith("/api/v1/search"):
+        return API_KEY_SCOPE_READ
+
     if path.startswith("/api/v1/projects/me/keys"):
         return API_KEY_SCOPE_ADMIN
 

@@ -18,8 +18,9 @@ from sqlalchemy.orm import Session
 
 from app.auth import verify_api_key
 from app.database import get_db
-from app.models import CuratedLabel, DatasetBuild, EvalCase, EvalCaseResult, EvalRun, EvalSuite, Project, ProjectRedactionPolicy, Span, Trace
+from app.models import CuratedLabel, DatasetBuild, EvalCase, EvalCaseResult, EvalRun, EvalSuite, Project, ProjectRedactionPolicy, Span, Trace, TraceSearchDocument
 from app.redaction import default_redaction_policy, scan_and_redact
+from app.search import match_search_terms, span_matches, tokenize_search_query, upsert_trace_search_document
 from app.security import audit_log
 
 router = APIRouter(tags=["Product"])
@@ -73,6 +74,30 @@ class TraceSearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=300)
     limit: int = Field(default=10, ge=1, le=50)
     include_spans: bool = True
+
+
+class TraceSearchV2Request(BaseModel):
+    """Search v2 request with full-text query and operational filters."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    query: str | None = Field(default=None, max_length=300)
+    model: str | None = Field(default=None, max_length=120)
+    tool: str | None = Field(default=None, max_length=120)
+    run_id: str | None = Field(default=None, max_length=120)
+    prompt_version: str | None = Field(default=None, max_length=120)
+    status: str | None = Field(default=None, pattern="^(running|success|error)$")
+    owner: str | None = Field(default=None, max_length=120)
+    min_cost: float | None = Field(default=None, ge=0)
+    max_cost: float | None = Field(default=None, ge=0)
+    min_latency_ms: float | None = Field(default=None, ge=0)
+    max_latency_ms: float | None = Field(default=None, ge=0)
+    has_errors: bool | None = None
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+    include_spans: bool = True
+    limit: int = Field(default=20, ge=1, le=100)
+    offset: int = Field(default=0, ge=0)
 
 
 class GuardrailPolicy(BaseModel):
@@ -1061,6 +1086,198 @@ async def search_traces(
         "query": payload.query,
         "result_count": len(limited_results),
         "results": limited_results,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _facet_matches(value: str | None, candidate: Any) -> bool:
+    if value is None:
+        return True
+    expected = value.strip().lower()
+    if not expected:
+        return True
+    if isinstance(candidate, list):
+        return expected in {str(item).strip().lower() for item in candidate}
+    return str(candidate or "").strip().lower() == expected
+
+
+def _search_document_matches_filters(
+    payload: TraceSearchV2Request,
+    trace: Trace,
+    document: TraceSearchDocument,
+) -> bool:
+    metadata_facets = document.metadata_facets or {}
+    span_facets = document.span_facets or {}
+    if payload.status and trace.status != payload.status:
+        return False
+    if payload.has_errors is True and (trace.error_count or 0) <= 0:
+        return False
+    if payload.has_errors is False and (trace.error_count or 0) > 0:
+        return False
+    if payload.min_cost is not None and (trace.total_cost is None or trace.total_cost < payload.min_cost):
+        return False
+    if payload.max_cost is not None and (trace.total_cost is None or trace.total_cost > payload.max_cost):
+        return False
+    effective_duration_ms = max(
+        _safe_number(trace.duration_ms),
+        _safe_number(span_facets.get("duration_ms")),
+    )
+    if payload.min_latency_ms is not None and effective_duration_ms < payload.min_latency_ms:
+        return False
+    if payload.max_latency_ms is not None and effective_duration_ms > payload.max_latency_ms:
+        return False
+    if payload.start_time is not None and trace.created_at < payload.start_time:
+        return False
+    if payload.end_time is not None and trace.created_at > payload.end_time:
+        return False
+    if payload.model and not (
+        _facet_matches(payload.model, metadata_facets.get("model"))
+        or _facet_matches(payload.model, span_facets.get("models"))
+    ):
+        return False
+    if payload.tool and not _facet_matches(payload.tool, span_facets.get("tools")):
+        return False
+    if not _facet_matches(payload.run_id, metadata_facets.get("run_id")):
+        return False
+    if not _facet_matches(payload.prompt_version, metadata_facets.get("prompt_version")):
+        return False
+    if not _facet_matches(payload.owner, metadata_facets.get("owner")):
+        return False
+    return True
+
+
+def _ensure_recent_search_documents(db: Session, project_id: Any) -> None:
+    """Backfill recent traces so v2 works for traces ingested before the index existed."""
+    existing_ids = {
+        row[0]
+        for row in db.query(TraceSearchDocument.trace_id)
+        .filter(TraceSearchDocument.project_id == project_id)
+        .all()
+    }
+    traces = (
+        db.query(Trace)
+        .filter(Trace.project_id == project_id)
+        .order_by(Trace.created_at.desc())
+        .limit(1000)
+        .all()
+    )
+    policy_rules = _redaction_rules_for_project(db, project_id)
+    for trace in traces:
+        if trace.id in existing_ids:
+            continue
+        spans = db.query(Span).filter(Span.trace_id == trace.id).all()
+        upsert_trace_search_document(db, trace, spans, policy_rules=policy_rules)
+    db.flush()
+
+
+@router.post("/search/traces/v2")
+async def search_traces_v2(
+    payload: TraceSearchV2Request,
+    request: Request,
+    project: Project = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Search redacted trace documents with operational filters."""
+    terms = tokenize_search_query(payload.query)
+    if payload.query and not terms:
+        raise HTTPException(status_code=422, detail="Search query must contain searchable terms.")
+
+    _ensure_recent_search_documents(db, project.id)
+    rows = (
+        db.query(TraceSearchDocument, Trace)
+        .join(Trace, Trace.id == TraceSearchDocument.trace_id)
+        .filter(TraceSearchDocument.project_id == project.id, Trace.project_id == project.id)
+        .order_by(Trace.created_at.desc())
+        .limit(5000)
+        .all()
+    )
+    policy_rules = _redaction_rules_for_project(db, project.id)
+    results = []
+    for document, trace in rows:
+        if not _search_document_matches_filters(payload, trace, document):
+            continue
+        score, matched_terms = match_search_terms(document.document_text or "", terms)
+        if terms and not matched_terms:
+            continue
+
+        matched_spans = []
+        if payload.include_spans and terms:
+            spans = (
+                db.query(Span)
+                .filter(Span.trace_id == trace.id)
+                .order_by(Span.start_time.asc(), Span.created_at.asc())
+                .limit(200)
+                .all()
+            )
+            for span in spans:
+                span_terms = span_matches(span, terms, policy_rules=policy_rules)
+                if span_terms:
+                    matched_spans.append(
+                        {
+                            "span_id": span.id,
+                            "name": span.name,
+                            "span_type": span.span_type,
+                            "matched_terms": span_terms[:8],
+                        }
+                    )
+
+        trace_payload = trace.to_dict()
+        trace_payload["metadata"] = scan_and_redact(
+            trace_payload.get("metadata") or {},
+            policy_rules=policy_rules,
+            field_path="search_result.metadata",
+        ).value
+        results.append(
+            {
+                "trace": trace_payload,
+                "score": score,
+                "matched_terms": matched_terms,
+                "matched_fields": ["document"] if matched_terms else [],
+                "matched_spans": matched_spans[:10],
+                "metadata_facets": document.metadata_facets or {},
+                "span_facets": document.span_facets or {},
+            }
+        )
+
+    results.sort(key=lambda item: (item["score"], item["trace"]["created_at"] or ""), reverse=True)
+    total = len(results)
+    paginated = results[payload.offset : payload.offset + payload.limit]
+    active_filters = [
+        key
+        for key in (
+            "model",
+            "tool",
+            "run_id",
+            "prompt_version",
+            "status",
+            "owner",
+            "min_cost",
+            "max_cost",
+            "min_latency_ms",
+            "max_latency_ms",
+            "has_errors",
+            "start_time",
+            "end_time",
+        )
+        if getattr(payload, key) is not None
+    ]
+    audit_log(
+        "trace_search_v2_executed",
+        request_id=getattr(request.state, "request_id", None),
+        project_id=str(project.id),
+        term_count=len(terms),
+        filter_count=len(active_filters),
+        result_count=len(paginated),
+    )
+    return {
+        "query": payload.query,
+        "terms": terms,
+        "total": total,
+        "result_count": len(paginated),
+        "limit": payload.limit,
+        "offset": payload.offset,
+        "filters": {key: getattr(payload, key) for key in active_filters},
+        "results": paginated,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 

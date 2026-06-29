@@ -508,6 +508,75 @@ def test_trace_search_ranks_matches_and_preserves_project_isolation(client):
     assert data["results"][0]["matched_spans"]
 
 
+def test_trace_search_v2_filters_facets_and_redacts_metadata(client):
+    api_key = _create_project(client, "search-v2-project")
+    other_api_key = _create_project(client, "other-search-v2-project")
+    _ingest_trace(
+        client,
+        api_key,
+        "search-v2-visible",
+        trace_name="Visible pricing trace",
+        metadata={
+            "topic": "pricing",
+            "model": "gpt-4",
+            "run_id": "run-7",
+            "prompt_version": "pv-2026-06",
+            "owner": "oncall-sre",
+            "api_key": "metadata-secret",
+        },
+    )
+    _ingest_trace(
+        client,
+        api_key,
+        "search-v2-filtered",
+        trace_name="Visible pricing trace wrong model",
+        metadata={"topic": "pricing", "model": "gpt-3.5", "run_id": "run-8"},
+    )
+    _ingest_trace(
+        client,
+        other_api_key,
+        "search-v2-hidden",
+        trace_name="Hidden pricing trace",
+        metadata={"topic": "pricing", "model": "gpt-4", "run_id": "run-7"},
+    )
+
+    response = client.post(
+        "/api/v1/search/traces/v2",
+        headers=_headers(api_key),
+        json={
+            "query": "pricing documents",
+            "model": "gpt-4",
+            "tool": "tool.search",
+            "run_id": "run-7",
+            "prompt_version": "pv-2026-06",
+            "owner": "oncall-sre",
+            "status": "success",
+            "max_cost": 0.05,
+            "min_latency_ms": 1000,
+            "include_spans": True,
+            "limit": 10,
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    ids = [item["trace"]["id"] for item in data["results"]]
+    assert ids == ["search-v2-visible"]
+    result = data["results"][0]
+    assert result["matched_spans"]
+    assert result["metadata_facets"]["model"] == "gpt-4"
+    assert result["span_facets"]["tools"] == ["tool.search"]
+    assert result["trace"]["metadata"]["api_key"] == "[REDACTED]"
+    assert "metadata-secret" not in str(result)
+
+    no_match = client.post(
+        "/api/v1/search/traces/v2",
+        headers=_headers(api_key),
+        json={"query": "pricing", "model": "claude-3"},
+    )
+    assert no_match.status_code == 200
+    assert no_match.json()["total"] == 0
+
+
 def test_guardrail_defaults_and_custom_evaluation(client):
     api_key = _create_project(client)
     _ingest_trace(

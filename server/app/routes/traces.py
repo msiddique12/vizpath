@@ -20,6 +20,7 @@ from app.intelligence.guardrail import (
 from app.models import Project, ProjectRedactionPolicy, SensitiveSpanFinding, Span, Trace
 from app.redaction import RedactionFinding, default_redaction_policy, scan_and_redact
 from app.routes.ws import notify_span_ingested
+from app.search import upsert_trace_search_document
 from app.security import audit_log
 from app.validation import ID_PATTERN, SPAN_TYPE_PATTERN, STATUS_PATTERN, normalize_text
 
@@ -667,6 +668,12 @@ async def ingest_spans(
                 trace.status = "success"
 
             _update_trace_regression_guardrail(db, project.id, trace, trace_spans)
+            upsert_trace_search_document(
+                db,
+                trace,
+                trace_spans,
+                policy_rules=redaction_rules,
+            )
 
     db.commit()
 

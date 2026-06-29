@@ -88,6 +88,11 @@ class Project(Base):
         back_populates="project",
         cascade="all, delete-orphan",
     )
+    trace_search_documents = relationship(
+        "TraceSearchDocument",
+        back_populates="project",
+        cascade="all, delete-orphan",
+    )
     triage_items = relationship(
         "TriageItem",
         back_populates="project",
@@ -271,6 +276,37 @@ class SensitiveSpanFinding(Base):
             f"<SensitiveSpanFinding(project_id={self.project_id}, trace_id={self.trace_id}, "
             f"rule_id={self.rule_id})>"
         )
+
+
+class TraceSearchDocument(Base):
+    """Redacted searchable document for one trace."""
+
+    __tablename__ = "trace_search_documents"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id"),
+        nullable=False,
+        index=True,
+    )
+    trace_id = Column(String(64), ForeignKey("traces.id"), nullable=False, index=True)
+    document_text = Column(Text, nullable=False)
+    metadata_facets = Column(JSON, default=dict, nullable=False)
+    span_facets = Column(JSON, default=dict, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
+
+    project = relationship("Project", back_populates="trace_search_documents")
+    trace = relationship("Trace")
+
+    __table_args__ = (
+        Index("ix_search_documents_project_updated", "project_id", "updated_at"),
+        Index("ix_search_documents_project_trace", "project_id", "trace_id", unique=True),
+    )
+
+    def __repr__(self) -> str:
+        return f"<TraceSearchDocument(project_id={self.project_id}, trace_id={self.trace_id})>"
 
 
 class CuratedLabel(Base):

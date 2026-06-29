@@ -77,6 +77,14 @@ def test_ingest_scope_cannot_access_curation(client):
     assert curation_response.status_code == 403
     assert "required scope: curate" in curation_response.json()["detail"]
 
+    search_response = client.post(
+        "/api/v1/search/traces/v2",
+        headers={"X-API-Key": ingest_key},
+        json={"query": "scope"},
+    )
+    assert search_response.status_code == 403
+    assert "required scope: read" in search_response.json()["detail"]
+
 
 def test_admin_scope_required_for_key_management(client):
     """Only admin-scoped keys should be able to manage project keys."""
