@@ -93,6 +93,11 @@ class Project(Base):
         back_populates="project",
         cascade="all, delete-orphan",
     )
+    regression_watch_results = relationship(
+        "RegressionWatchResult",
+        back_populates="project",
+        cascade="all, delete-orphan",
+    )
     triage_items = relationship(
         "TriageItem",
         back_populates="project",
@@ -307,6 +312,48 @@ class TraceSearchDocument(Base):
 
     def __repr__(self) -> str:
         return f"<TraceSearchDocument(project_id={self.project_id}, trace_id={self.trace_id})>"
+
+
+class RegressionWatchResult(Base):
+    """Durable automatic regression comparison result for one trace."""
+
+    __tablename__ = "regression_watch_results"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id"),
+        nullable=False,
+        index=True,
+    )
+    trace_id = Column(String(64), ForeignKey("traces.id"), nullable=False, index=True)
+    baseline_trace_id = Column(String(64), ForeignKey("traces.id"), nullable=True, index=True)
+    group_key = Column(String(80), nullable=False, index=True)
+    group_value = Column(String(255), nullable=False, index=True)
+    status = Column(String(40), nullable=False, index=True)
+    risk_score = Column(Integer, default=0, nullable=False)
+    risk_level = Column(String(20), nullable=False, index=True)
+    signals = Column(JSON, default=list, nullable=False)
+    metrics = Column(JSON, default=dict, nullable=False)
+    top_actions = Column(JSON, default=list, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
+
+    project = relationship("Project", back_populates="regression_watch_results")
+    trace = relationship("Trace", foreign_keys=[trace_id])
+    baseline_trace = relationship("Trace", foreign_keys=[baseline_trace_id])
+
+    __table_args__ = (
+        Index("ix_regression_watch_project_created", "project_id", "created_at"),
+        Index("ix_regression_watch_project_risk_created", "project_id", "risk_level", "created_at"),
+        Index("ix_regression_watch_project_trace", "project_id", "trace_id", unique=True),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<RegressionWatchResult(project_id={self.project_id}, trace_id={self.trace_id}, "
+            f"risk_level={self.risk_level})>"
+        )
 
 
 class CuratedLabel(Base):

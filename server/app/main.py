@@ -21,7 +21,7 @@ from app.config import settings
 from app.database import check_db_connection, engine, init_db
 from app.rate_limit import rate_limit_middleware
 from app.retention import run_trace_retention_sweeper
-from app.routes import alerts, curation, demo, intelligence, product, projects, redaction, traces, triage, ws
+from app.routes import alerts, curation, demo, intelligence, product, projects, redaction, regressions, traces, triage, ws
 from app.security import (
     build_error_response,
     redact_headers,
@@ -131,6 +131,7 @@ app.include_router(intelligence.router, prefix="/api/v1")
 app.include_router(product.router, prefix="/api/v1")
 app.include_router(triage.router, prefix="/api/v1")
 app.include_router(redaction.router, prefix="/api/v1")
+app.include_router(regressions.router, prefix="/api/v1")
 app.include_router(demo.router, prefix="/api/v1")
 app.include_router(ws.router)
 

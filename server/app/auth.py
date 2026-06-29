@@ -150,6 +150,11 @@ def _infer_required_scope(request: Request) -> str | None:
     if path.startswith("/api/v1/redaction"):
         return API_KEY_SCOPE_READ
 
+    if path.startswith("/api/v1/regressions/watch"):
+        if method == "GET":
+            return API_KEY_SCOPE_READ
+        return API_KEY_SCOPE_CURATE
+
     if path.startswith("/api/v1/projects"):
         if method == "GET":
             return API_KEY_SCOPE_READ

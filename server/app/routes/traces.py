@@ -13,12 +13,9 @@ from sqlalchemy.orm import Session
 from app.auth import verify_api_key
 from app.budgeting import get_month_window, get_project_budget, get_project_month_usage
 from app.database import get_db
-from app.intelligence.guardrail import (
-    build_insufficient_baseline_guardrail,
-    build_regression_guardrail,
-)
 from app.models import Project, ProjectRedactionPolicy, SensitiveSpanFinding, Span, Trace
 from app.redaction import RedactionFinding, default_redaction_policy, scan_and_redact
+from app.regression_watch import evaluate_and_persist_regression_watch
 from app.routes.ws import notify_span_ingested
 from app.search import upsert_trace_search_document
 from app.security import audit_log
@@ -517,34 +514,7 @@ def _update_trace_regression_guardrail(
     trace_spans: list[Span],
 ) -> None:
     """Persist deterministic regression guardrail metadata on non-running traces."""
-    if trace.status == "running":
-        return
-
-    baseline_trace = (
-        db.query(Trace)
-        .filter(
-            Trace.project_id == project_id,
-            Trace.id != trace.id,
-            Trace.status.in_(("success", "error")),
-        )
-        .order_by(Trace.created_at.desc())
-        .first()
-    )
-
-    metadata = dict(trace.trace_metadata or {})
-    if baseline_trace is None:
-        metadata["regression_guardrail"] = build_insufficient_baseline_guardrail()
-        trace.trace_metadata = metadata
-        return
-
-    baseline_spans = db.query(Span).filter(Span.trace_id == baseline_trace.id).all()
-    metadata["regression_guardrail"] = build_regression_guardrail(
-        baseline_trace,
-        baseline_spans,
-        trace,
-        trace_spans,
-    )
-    trace.trace_metadata = metadata
+    evaluate_and_persist_regression_watch(db, trace, trace_spans)
 
 
 @router.post("/spans/batch", status_code=201)
