@@ -46,6 +46,7 @@ describe('OperationsPage', () => {
   it('shows scorecards, runs search, and evaluates guardrails', async () => {
     let searchCalled = false
     let guardrailsCalled = false
+    let rerunCalled = false
 
     globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = resolveUrl(input)
@@ -110,17 +111,125 @@ describe('OperationsPage', () => {
         })
       }
 
-      if (url.includes('/api/v1/search/traces') && method === 'POST') {
+      if (url.includes('/api/v1/projects/me/redaction-policy')) {
+        return createJsonResponse({
+          enabled: true,
+          mode: 'audit_only',
+          rules: { disabled_rule_ids: [] },
+          created_at: new Date().toISOString(),
+          updated_at: null,
+        })
+      }
+
+      if (url.includes('/api/v1/redaction/findings')) {
+        return createJsonResponse({
+          findings: [
+            {
+              id: 'finding-1',
+              trace_id: 'trace-ops-1',
+              span_id: 'span-1',
+              field_path: 'span.span-1.input.password',
+              rule_id: 'sensitive_key',
+              severity: 'high',
+              action: 'redact',
+              value_fingerprint: 'abc123',
+              created_at: new Date().toISOString(),
+            },
+          ],
+          total: 1,
+          limit: 8,
+          offset: 0,
+          generated_at: new Date().toISOString(),
+        })
+      }
+
+      if (url.includes('/api/v1/regressions/watch') && method === 'GET') {
+        return createJsonResponse({
+          results: [
+            {
+              id: 'watch-1',
+              trace_id: 'trace-ops-1',
+              trace_name: 'Ops pricing trace',
+              baseline_trace_id: 'trace-base-1',
+              baseline_trace_name: 'Baseline pricing trace',
+              group_key: 'route',
+              group_value: '/pricing',
+              status: 'risk_detected',
+              risk_score: 72,
+              risk_level: 'critical',
+              signals: [
+                {
+                  id: 'cost-regression',
+                  title: 'Cost regression',
+                  severity: 'medium',
+                  kind: 'cost',
+                  detail: 'Candidate trace increases cost by 80%.',
+                  recommendation: 'Downshift expensive model calls.',
+                },
+              ],
+              metrics: { cost_pct: 80 },
+              top_actions: ['Downshift expensive model calls.'],
+              created_at: new Date().toISOString(),
+              updated_at: null,
+            },
+          ],
+          total: 1,
+          limit: 8,
+          offset: 0,
+          generated_at: new Date().toISOString(),
+        })
+      }
+
+      if (url.includes('/api/v1/regressions/watch/trace-ops-1/rerun') && method === 'POST') {
+        rerunCalled = true
+        return createJsonResponse({
+          id: 'watch-1',
+          trace_id: 'trace-ops-1',
+          trace_name: 'Ops pricing trace',
+          baseline_trace_id: 'trace-base-1',
+          baseline_trace_name: 'Baseline pricing trace',
+          group_key: 'route',
+          group_value: '/pricing',
+          status: 'risk_detected',
+          risk_score: 72,
+          risk_level: 'critical',
+          signals: [],
+          metrics: {},
+          top_actions: [],
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+      }
+
+      if (url.includes('/api/v1/redaction/preview') && method === 'POST') {
+        return createJsonResponse({
+          enabled: true,
+          mode: 'audit_only',
+          preview: { trace_id: 'trace-ops-1' },
+          findings: [{ field_path: 'span.input.password', rule_id: 'sensitive_key', severity: 'high', action: 'redact', value_fingerprint: 'abc123' }],
+          generated_at: new Date().toISOString(),
+        })
+      }
+
+      if (url.includes('/api/v1/search/traces/v2') && method === 'POST') {
         searchCalled = true
         return createJsonResponse({
           query: 'pricing',
+          terms: ['pricing'],
+          total: 1,
           result_count: 1,
+          limit: 10,
+          offset: 0,
+          filters: { model: 'gpt-4' },
           results: [
             {
               trace: tracePayload,
               score: 2,
               matched_terms: ['pricing'],
+              matched_fields: ['document'],
               matched_spans: [{ span_id: 'span-1', name: 'tool.search', span_type: 'tool', matched_terms: ['pricing'] }],
+              metadata_facets: { model: 'gpt-4' },
+              span_facets: { tools: ['tool.search'] },
             },
           ],
           generated_at: new Date().toISOString(),
@@ -165,14 +274,30 @@ describe('OperationsPage', () => {
 
     expect(await screen.findByText('75.0%')).toBeInTheDocument()
     expect(screen.getByText('tool.search')).toBeInTheDocument()
+    expect(screen.getByText(/Policy mode: audit_only/)).toBeInTheDocument()
+    expect(screen.getByText('sensitive_key')).toBeInTheDocument()
+    expect(screen.getByText('Regression Watch')).toBeInTheDocument()
+    expect(screen.getByText(/Candidate trace increases cost/)).toBeInTheDocument()
 
     fireEvent.change(screen.getByPlaceholderText('tool timeout pricing'), {
       target: { value: 'pricing' },
+    })
+    fireEvent.change(screen.getByLabelText('Search model filter'), {
+      target: { value: 'gpt-4' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Search' }))
 
     await waitFor(() => expect(searchCalled).toBe(true))
     expect(screen.getAllByText('Ops pricing trace').length).toBeGreaterThan(0)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rerun' }))
+    await waitFor(() => expect(rerunCalled).toBe(true))
+
+    fireEvent.change(screen.getByLabelText('Select trace for operations'), {
+      target: { value: 'trace-ops-1' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Preview selected trace' }))
+    expect(await screen.findByText(/Preview findings: 1/)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Evaluate' }))
     await waitFor(() => expect(guardrailsCalled).toBe(true))

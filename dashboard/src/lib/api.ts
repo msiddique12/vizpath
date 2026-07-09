@@ -864,6 +864,93 @@ export interface TraceSearchResponse {
   generated_at: string
 }
 
+export interface TraceSearchV2Result extends TraceSearchResult {
+  matched_fields: string[]
+  metadata_facets: Record<string, unknown>
+  span_facets: Record<string, unknown>
+}
+
+export interface TraceSearchV2Response {
+  query: string | null
+  terms: string[]
+  total: number
+  result_count: number
+  limit: number
+  offset: number
+  filters: Record<string, unknown>
+  results: TraceSearchV2Result[]
+  generated_at: string
+}
+
+export interface RedactionPolicy {
+  enabled: boolean
+  mode: 'audit_only' | 'redact_on_write' | 'block'
+  rules: Record<string, unknown>
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface RedactionFinding {
+  id?: string
+  trace_id?: string
+  span_id?: string | null
+  field_path: string
+  rule_id: string
+  severity: 'low' | 'medium' | 'high' | 'critical'
+  action: string
+  value_fingerprint: string
+  created_at?: string | null
+}
+
+export interface RedactionFindingsResponse {
+  findings: RedactionFinding[]
+  total: number
+  limit: number
+  offset: number
+  generated_at: string
+}
+
+export interface RedactionPreviewResponse {
+  enabled: boolean
+  mode: string
+  preview: unknown
+  findings: RedactionFinding[]
+  generated_at: string
+}
+
+export interface RegressionWatchResult {
+  id: string
+  trace_id: string
+  trace_name: string | null
+  baseline_trace_id: string | null
+  baseline_trace_name: string | null
+  group_key: string
+  group_value: string
+  status: string
+  risk_score: number
+  risk_level: 'none' | 'low' | 'medium' | 'high' | 'critical'
+  signals: Array<{
+    id: string
+    title: string
+    severity: string
+    kind: string
+    detail: string
+    recommendation: string
+  }>
+  metrics: Record<string, number>
+  top_actions: string[]
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface RegressionWatchListResponse {
+  results: RegressionWatchResult[]
+  total: number
+  limit: number
+  offset: number
+  generated_at: string
+}
+
 export type GuardrailMetric =
   | 'total_cost'
   | 'total_tokens'
@@ -1030,6 +1117,91 @@ export async function searchTraces(data: {
   return fetchApi('/search/traces', {
     method: 'POST',
     body: JSON.stringify(data),
+  })
+}
+
+export async function searchTracesV2(data: {
+  query?: string | null
+  model?: string
+  tool?: string
+  run_id?: string
+  prompt_version?: string
+  status?: 'running' | 'success' | 'error'
+  owner?: string
+  min_cost?: number
+  max_cost?: number
+  min_latency_ms?: number
+  max_latency_ms?: number
+  has_errors?: boolean
+  include_spans?: boolean
+  limit?: number
+  offset?: number
+}): Promise<TraceSearchV2Response> {
+  return fetchApi('/search/traces/v2', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function getRedactionPolicy(): Promise<RedactionPolicy> {
+  return fetchApi('/projects/me/redaction-policy')
+}
+
+export async function updateRedactionPolicy(data: {
+  enabled?: boolean
+  mode?: RedactionPolicy['mode']
+  rules?: Record<string, unknown>
+}): Promise<RedactionPolicy> {
+  return fetchApi('/projects/me/redaction-policy', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function previewRedaction(data: {
+  trace_id?: string
+  span_id?: string
+  payload?: unknown
+}): Promise<RedactionPreviewResponse> {
+  return fetchApi('/redaction/preview', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function getRedactionFindings(params?: {
+  trace_id?: string
+  severity?: RedactionFinding['severity']
+  limit?: number
+  offset?: number
+}): Promise<RedactionFindingsResponse> {
+  const searchParams = new URLSearchParams()
+  if (params?.trace_id) searchParams.set('trace_id', params.trace_id)
+  if (params?.severity) searchParams.set('severity', params.severity)
+  if (params?.limit !== undefined) searchParams.set('limit', String(params.limit))
+  if (params?.offset !== undefined) searchParams.set('offset', String(params.offset))
+  return fetchApi(`/redaction/findings?${searchParams}`)
+}
+
+export async function getRegressionWatchResults(params?: {
+  risk_level?: RegressionWatchResult['risk_level']
+  status?: string
+  group_key?: string
+  limit?: number
+  offset?: number
+}): Promise<RegressionWatchListResponse> {
+  const searchParams = new URLSearchParams()
+  if (params?.risk_level) searchParams.set('risk_level', params.risk_level)
+  if (params?.status) searchParams.set('status', params.status)
+  if (params?.group_key) searchParams.set('group_key', params.group_key)
+  if (params?.limit !== undefined) searchParams.set('limit', String(params.limit))
+  if (params?.offset !== undefined) searchParams.set('offset', String(params.offset))
+  return fetchApi(`/regressions/watch?${searchParams}`)
+}
+
+export async function rerunRegressionWatch(traceId: string): Promise<RegressionWatchResult> {
+  return fetchApi(`/regressions/watch/${encodeURIComponent(traceId)}/rerun`, {
+    method: 'POST',
   })
 }
 
