@@ -42,7 +42,7 @@ Project and key lifecycle endpoints:
 
 Scoped key permissions:
 
-- `read` — trace/intelligence read access
+- `read` — trace, intelligence, search, redaction finding, and regression read access
 - `ingest` — span ingestion
 - `curate` — curation labels/exports and persistent triage/eval/dataset workflow writes
 - `admin` — key/budget management and destructive operations (implies all scopes)
@@ -143,6 +143,47 @@ Dataset builds are redacted by default. Raw span input/output is only included w
 is explicitly sent, and that choice is recorded in build options/audit metadata.
 
 Compatibility: `POST /api/v1/datasets/build` remains the stateless preview builder.
+
+### Sensitive Data Controls
+
+- `GET /api/v1/projects/me/redaction-policy`
+  - Fetch the centralized project redaction policy.
+- `PUT /api/v1/projects/me/redaction-policy`
+  - Update policy `enabled`, `mode`, or `rules`. Requires `admin`.
+- `POST /api/v1/redaction/preview`
+  - Preview redaction for a stored trace/span or explicit JSON payload.
+- `GET /api/v1/redaction/findings`
+  - List sensitive-data findings recorded during ingest.
+
+Policy modes:
+
+- `audit_only` records findings but preserves stored span payloads.
+- `redact_on_write` stores redacted span fields.
+- `block` rejects batches containing high/critical sensitive findings.
+
+Findings include rule IDs, severities, field paths, and non-reversible fingerprints only. Raw matched values are not returned or logged.
+
+### Trace Search v2
+
+- `POST /api/v1/search/traces/v2`
+  - Search redacted trace documents across trace name, metadata, span inputs/outputs/errors, and span attributes.
+
+Supported filters include `model`, `tool`, `run_id`, `prompt_version`, `status`, `owner`,
+`min_cost`, `max_cost`, `min_latency_ms`, `max_latency_ms`, `has_errors`, and time bounds.
+
+Compatibility: `POST /api/v1/search/traces` remains available with its original response shape.
+
+### Regression Watch
+
+- `GET /api/v1/regressions/watch`
+  - List durable automatic regression comparisons.
+- `GET /api/v1/regressions/watch/{trace_id}`
+  - Fetch the watch result for one trace.
+- `POST /api/v1/regressions/watch/{trace_id}/rerun`
+  - Recompute the comparison for one trace. Requires `curate`.
+
+Baseline selection prefers recent traces with the same `route`, `task`, `prompt_version`, or `run_id`,
+then falls back to the latest comparable project trace for compatibility.
 
 ---
 
